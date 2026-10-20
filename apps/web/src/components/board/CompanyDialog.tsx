@@ -33,6 +33,7 @@ import {
   DEFAULT_CEO_INSTRUCTIONS,
   EMPLOYEE_PRESETS,
   SKILL_PRESETS,
+  departmentNamed,
 } from "./board.logic";
 
 function folderNameFor(name: string): string {
@@ -138,6 +139,7 @@ function CompanyForm(props: {
         const preset = EMPLOYEE_PRESETS.find((candidate) => candidate.title === member.title);
         if (preset === undefined) continue;
         const avatar = unusedFaceKey(faces, `${company.id}:${member.title}`);
+        const departmentId = departmentNamed(company.departments, preset.department);
         faces.push({ id: member.title, avatar });
         const result = await props.runCommand({
           type: "agent.upsert",
@@ -146,6 +148,7 @@ function CompanyForm(props: {
             name: preset.name,
             title: preset.title,
             avatar,
+            ...(departmentId === null ? {} : { departmentId }),
             reportsToAgentId: agentIds.get(member.reportsTo) ?? company.ceoAgentId,
             skillIds: preset.skills.flatMap((skill) => skillIds.get(skill) ?? []),
             instructions: preset.instructions,

@@ -8,7 +8,7 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { draftFromAgent, newEmployeeDraft, type AgentDraft } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
-import { agentById } from "./board.logic";
+import { agentById, departmentLabel } from "./board.logic";
 import { faceFor, unusedFaceKey } from "./faces";
 
 /** Each level of the chart gets its own accent, like a printed org chart. */
@@ -78,12 +78,11 @@ export function OrgChartView(props: {
   };
 
   const newReport = (manager: BoardAgent | null) => {
-    const draft = newEmployeeDraft(
-      manager?.id ?? company.ceoAgentId,
-      manager?.modelSelection ?? ceo?.modelSelection ?? null,
-    );
+    const draft = newEmployeeDraft(manager ?? ceo);
     props.onEditAgent({
       ...draft,
+      // The CEO's reports usually lead a department of their own, so they choose one.
+      departmentId: draft.reportsToAgentId === company.ceoAgentId ? null : draft.departmentId,
       avatar: unusedFaceKey(snapshot.agents, `${company.id}:${snapshot.agents.length}`),
     });
   };
@@ -202,6 +201,7 @@ function OrgCard(props: {
   const { agent, accent, actions } = props;
   const { snapshot } = actions;
   const isCeo = snapshot.company?.ceoAgentId === agent.id;
+  const department = departmentLabel(snapshot.company?.departments ?? [], agent.departmentId);
   const face = faceFor(agent);
   const skills = agent.skillIds
     .map((id) => snapshot.skills.find((skill) => skill.id === id)?.name)
@@ -253,6 +253,11 @@ function OrgCard(props: {
             </span>
           ) : null}
           <div className="flex flex-wrap justify-center gap-1 pt-1">
+            {department !== null ? (
+              <Badge variant="secondary" size="sm">
+                {department}
+              </Badge>
+            ) : null}
             {agent.paused ? (
               <Badge variant="warning" size="sm">
                 Paused
@@ -319,6 +324,7 @@ function HireRequest(props: {
   const { hire, snapshot } = props;
   const requester = agentById(snapshot.agents, hire.requestedByAgentId);
   const manager = agentById(snapshot.agents, hire.reportsToAgentId);
+  const department = departmentLabel(snapshot.company?.departments ?? [], hire.departmentId);
   const skills = hire.skillIds
     .map((id) => snapshot.skills.find((skill) => skill.id === id)?.name)
     .filter((name) => name !== undefined);
@@ -330,6 +336,7 @@ function HireRequest(props: {
         <span className="text-sm font-medium">{hire.name}</span>
         <span className="text-xs text-muted-foreground">
           {hire.title}
+          {department !== null ? ` · ${department}` : ""}
           {manager !== null ? ` · reports to ${manager.name}` : ""}
           {requester !== null ? ` · requested by ${requester.name}` : ""}
         </span>

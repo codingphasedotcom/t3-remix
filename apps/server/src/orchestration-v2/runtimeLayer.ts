@@ -301,6 +301,7 @@ const layerBoardProvided = BoardService.layer.pipe(
       layerThreadLaunchProvided,
       layerThreadManagementProvided,
       layerManagedProjectFoldersProvided,
+      layerProjectService,
     ),
   ),
 );

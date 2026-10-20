@@ -1,10 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import { MAX_COMPANY_MEMORY_CHARS } from "@t3tools/contracts";
 import type {
+  BoardAgent,
   BoardCommand,
   BoardCommandResult,
   BoardCompany,
   BoardCompanyId,
+  BoardDepartmentId,
   BoardSnapshot,
   BoardTaskId,
   EnvironmentId,
@@ -18,6 +20,7 @@ import {
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -262,7 +265,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             </MenuTrigger>
             <MenuPopup align="start">
               <MenuItem disabled={!canOperate} onClick={() => setEditingCompany(true)}>
-                Edit name, mission, and memory
+                Edit company
               </MenuItem>
               <MenuItem
                 variant="destructive"
@@ -347,6 +350,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
       />
       <EditCompanyDialog
         company={editingCompany ? company : null}
+        agents={snapshot.agents}
         onClose={() => setEditingCompany(false)}
         runCommand={runCommand}
       />
@@ -401,6 +405,7 @@ function BoardMessage(props: { readonly title: string; readonly description: str
 
 function EditCompanyDialog(props: {
   readonly company: BoardCompany | null;
+  readonly agents: ReadonlyArray<BoardAgent>;
   readonly onClose: () => void;
   readonly runCommand: RunBoardCommand;
 }) {
@@ -418,21 +423,57 @@ function EditCompanyDialog(props: {
   );
 }
 
+interface DepartmentDraft {
+  readonly key: string;
+  readonly id: BoardDepartmentId | null;
+  readonly name: string;
+}
+
 function EditCompanyForm(props: {
   readonly company: BoardCompany;
+  readonly agents: ReadonlyArray<BoardAgent>;
   readonly onClose: () => void;
   readonly runCommand: RunBoardCommand;
 }) {
   const [name, setName] = useState(props.company.name);
   const [mission, setMission] = useState(props.company.mission);
   const [memory, setMemory] = useState(props.company.memory);
+  const [departments, setDepartments] = useState<ReadonlyArray<DepartmentDraft>>(() =>
+    props.company.departments.map((department) => ({ key: department.id, ...department })),
+  );
+  const [nextKey, setNextKey] = useState(0);
   const save = async () => {
     const saved = await props.runCommand({
       type: "company.update",
-      company: { id: props.company.id, name: name.trim(), mission: mission.trim(), memory },
+      company: {
+        id: props.company.id,
+        name: name.trim(),
+        mission: mission.trim(),
+        memory,
+        departments: departments.map((department) =>
+          department.id === null
+            ? { name: department.name.trim() }
+            : { id: department.id, name: department.name.trim() },
+        ),
+      },
     });
     if (saved !== null) props.onClose();
   };
+  const renameDepartment = (key: string, value: string) =>
+    setDepartments(
+      departments.map((department) =>
+        department.key === key ? { ...department, name: value } : department,
+      ),
+    );
+  const addDepartment = () => {
+    setDepartments([...departments, { key: `new-${nextKey}`, id: null, name: "" }]);
+    setNextKey(nextKey + 1);
+  };
+  const canSave =
+    name.trim().length > 0 &&
+    memory.length <= MAX_COMPANY_MEMORY_CHARS &&
+    departments.length > 0 &&
+    departments.every((department) => department.name.trim().length > 0);
   return (
     <>
       <DialogHeader>
@@ -459,6 +500,54 @@ function EditCompanyForm(props: {
           </div>
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-3">
+              <Label>Departments</Label>
+              <Button size="xs" variant="outline" onClick={addDepartment}>
+                <PlusIcon />
+                Add department
+              </Button>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {departments.map((department) => {
+                const members = props.agents.filter(
+                  (agent) => department.id !== null && agent.departmentId === department.id,
+                ).length;
+                return (
+                  <div key={department.key} className="flex items-center gap-2">
+                    <Input
+                      size="sm"
+                      value={department.name}
+                      aria-label="Department name"
+                      placeholder="Department name"
+                      autoFocus={department.id === null}
+                      onChange={(event) => renameDepartment(department.key, event.target.value)}
+                    />
+                    <span className="w-16 shrink-0 text-xs text-muted-foreground">
+                      {members} {members === 1 ? "person" : "people"}
+                    </span>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost-destructive"
+                      aria-label={`Remove ${department.name || "department"}`}
+                      disabled={members > 0 || departments.length === 1}
+                      onClick={() =>
+                        setDepartments(
+                          departments.filter((candidate) => candidate.key !== department.key),
+                        )
+                      }
+                    >
+                      <Trash2Icon />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+            <span className="text-xs text-muted-foreground">
+              Every employee belongs to one department. Move people out of a department before
+              removing it.
+            </span>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
               <Label htmlFor="board-edit-company-memory">Company memory</Label>
               <MemoryCount length={memory.length} limit={MAX_COMPANY_MEMORY_CHARS} />
             </div>
@@ -474,11 +563,7 @@ function EditCompanyForm(props: {
       </DialogPanel>
       <DialogFooter>
         <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-        <Button
-          size="sm"
-          disabled={name.trim().length === 0 || memory.length > MAX_COMPANY_MEMORY_CHARS}
-          onClick={() => void save()}
-        >
+        <Button size="sm" disabled={!canSave} onClick={() => void save()}>
           Save
         </Button>
       </DialogFooter>

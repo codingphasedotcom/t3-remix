@@ -7,7 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 
 import * as BoardService from "../../../board/BoardService.ts";
-import { assignableBy } from "../../../board/boardOrg.ts";
+import { assignableBy, departmentName } from "../../../board/boardOrg.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller } from "../../threadAccess.ts";
 import { BoardToolkit } from "./tools.ts";
@@ -110,11 +110,13 @@ const make = Effect.gen(function* () {
             name: snapshot.company.name,
             mission: snapshot.company.mission,
           },
+          departments: snapshot.company.departments,
           ceoAgentId: snapshot.company.ceoAgentId,
           agents: snapshot.agents.map((agent) => ({
             id: agent.id,
             name: agent.name,
             title: agent.title,
+            department: departmentName(snapshot.company, agent.departmentId) ?? "",
             reportsToAgentId: agent.reportsToAgentId,
             skills: agent.skillIds.map(skillName).filter((name) => name !== undefined),
             paused: agent.paused,
@@ -227,6 +229,7 @@ const make = Effect.gen(function* () {
               companyId,
               name: input.name,
               title: input.title,
+              departmentId: input.departmentId ?? null,
               reportsToAgentId: input.reportsToAgentId ?? null,
               skillIds: input.skillIds ?? [],
               instructions: input.instructions,

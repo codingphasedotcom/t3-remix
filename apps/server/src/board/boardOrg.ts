@@ -1,4 +1,17 @@
-import type { BoardAgent, BoardAgentId, BoardCompany } from "@t3tools/contracts";
+import type { BoardAgent, BoardAgentId, BoardCompany, BoardDepartmentId } from "@t3tools/contracts";
+
+/** The departments a new company starts with; the CEO joins the first. */
+export const DEFAULT_DEPARTMENT_NAMES = [
+  "Executive",
+  "Design",
+  "Marketing",
+  "Engineering",
+  "Customer Support",
+] as const;
+
+export function departmentName(company: BoardCompany, id: BoardDepartmentId | null): string | null {
+  return company.departments.find((department) => department.id === id)?.name ?? null;
+}
 
 /** Everyone who reports to `managerId`, directly or through other managers. */
 function reportsUnder(

@@ -6,8 +6,8 @@ the work to its employees, reviews what they deliver, and hands the finished car
 you. Agents coordinate only through the board, never by messaging each other.
 
 Open **Companies** from the sidebar footer on web and desktop, or switch the sidebar to
-**Companies** to see each company's employees with the threads they worked in. The mobile app
-does not show companies yet.
+**Companies** to see each company's employees with the threads they worked in; **Board** beside
+a company opens its board. The mobile app does not show companies yet.
 
 ## Start a company
 
@@ -21,8 +21,17 @@ menu at the top left.
 
 **Org chart** draws the company top-down, from the CEO through each manager to their reports,
 with a face for every employee (pick another in their editor). Use **Add employee** or the
-add-report button on any person to hire under them. Each employee has a role, a manager, skills, a model, permissions, and standing
-instructions. Pause an employee to keep their cards without starting them.
+add-report button on any person to hire under them. Each employee has a role, a department, a
+manager, skills, a model, permissions, and standing instructions. Pause an employee to keep
+their cards without starting them.
+
+## Departments
+
+Every employee belongs to one department. A new company starts with Executive, Design,
+Marketing, Engineering, and Customer Support; rename, add, or remove them under **Edit company**
+in the company menu. A department can be removed only once nobody is in it. Agents see who is in
+each department, so the CEO can route work to the right team and ask you to hire into a
+department that is still empty.
 
 A manager can assign work only to people beneath them; the CEO can assign anyone. When an
 agent needs a role nobody has, it asks you: the request appears at the top of the org chart,
@@ -38,7 +47,7 @@ project's test command or a preference you stated. Before finishing a card, an a
 anything worth keeping; the CEO and managers also keep a company memory that every agent sees.
 Both are included in each agent's prompt, are capped in size, and are condensed by the agents
 when they fill up. Read or edit an employee's memory in their editor on **Org chart**, and the
-company memory under **Edit name, mission, and memory** in the company menu. Agents can also
+company memory under **Edit company** in the company menu. Agents can also
 search earlier cards to see how similar work was done.
 
 ## Skills
@@ -61,6 +70,11 @@ Agents receive the instructions of every skill they have on each card they work.
 - A card with no reviewer stops in **Review** for you. **Backlog** cards never start on their
   own.
 
+Every agent is told where it works: the folder, the branch, the base it started from, which
+other cards share that folder, and that work from other cards is only there once it is merged.
+Branches are not merged for you, so a card that needs another card's work waits until you
+merge it.
+
 Comments you add while an agent is working reach that agent right away. Open a card to see
 its activity, its runs, and links to each agent's thread.
 
@@ -69,6 +83,6 @@ its activity, its runs, and links to each agent's thread.
 The board's settings menu controls:
 
 - **Auto-run agents**: turn off to start cards only with **Start agent** on a card.
-- **Worktree per card**: each top-level card gets its own branch and worktree from the
-  project's current `HEAD`. Turn off to let agents share the project checkout.
+- **Worktree per card**: each top-level card gets its own worktree on a `board/<card>` branch
+  from the project's current `HEAD`. Turn off to let agents share the project checkout.
 - **Agents at once**: how many cards can run at the same time. Ready cards wait for a slot.

@@ -7,7 +7,7 @@ import type {
   BoardTask,
 } from "@t3tools/contracts";
 
-import { assignableBy, chainOfCommand, directReports } from "./boardOrg.ts";
+import { assignableBy, chainOfCommand, departmentName, directReports } from "./boardOrg.ts";
 
 const STATUS_LABELS: Record<BoardTask["status"], string> = {
   backlog: "Backlog",
@@ -33,6 +33,18 @@ export interface BoardPromptContext {
   readonly comments: ReadonlyArray<BoardComment>;
 }
 
+/** Where the agent's session runs, as its prompt describes it. */
+export interface BoardWorkspace {
+  /** Null for a worktree git has not created yet: its path is chosen at launch. */
+  readonly folder: string | null;
+  readonly branch: string | null;
+  readonly baseRef: string | null;
+  /** The card's own worktree, its parent card's worktree, or the project's checkout. */
+  readonly owner: "card" | "parent" | "project";
+  /** Other open cards working in the same folder right now. */
+  readonly sharedWith: ReadonlyArray<BoardTask>;
+}
+
 const MAX_PROMPT_COMMENTS = 20;
 const MAX_PARENT_DESCRIPTION_CHARS = 600;
 
@@ -43,6 +55,12 @@ function agentName(agents: ReadonlyArray<BoardAgent>, id: BoardAgentId | null): 
 
 function describe(agent: BoardAgent): string {
   return agent.title.length > 0 ? `${agent.name} (${agent.title})` : agent.name;
+}
+
+function describeWithDepartment(context: BoardPromptContext, agent: BoardAgent): string {
+  const department = departmentName(context.company, agent.departmentId);
+  const parts = [agent.title, department].filter((part) => part !== null && part.length > 0);
+  return parts.length > 0 ? `${agent.name} (${parts.join(", ")})` : agent.name;
 }
 
 function truncate(text: string, limit: number): string {
@@ -60,7 +78,10 @@ function identityBlock(context: BoardPromptContext): string {
     : agent.title.length > 0
       ? `a ${agent.title}`
       : "an employee";
-  const lines = [`You are ${agent.name}, ${role} at ${company.name}, an AI-run company.`];
+  const department = departmentName(company, agent.departmentId);
+  const lines = [
+    `You are ${agent.name}, ${role}${department === null ? "" : ` in ${department}`} at ${company.name}, an AI-run company.`,
+  ];
   if (company.mission.trim().length > 0) {
     lines.push("", `Company mission: ${company.mission.trim()}`);
   }
@@ -79,6 +100,15 @@ function orgBlock(context: BoardPromptContext): string {
         ? "You report directly to the board."
         : `You report to ${describe(manager)}.`,
   );
+  lines.push(
+    "",
+    `Departments: ${context.company.departments
+      .map((department) => {
+        const members = agents.filter((member) => member.departmentId === department.id);
+        return `${department.name} (${members.length > 0 ? members.map((member) => member.name).join(", ") : "nobody yet"})`;
+      })
+      .join("; ")}.`,
+  );
   const reports = directReports(agents, agent.id);
   if (reports.length > 0) {
     lines.push("", "Your direct reports:");
@@ -87,7 +117,7 @@ function orgBlock(context: BoardPromptContext): string {
         .map((id) => context.skills.find((skill) => skill.id === id)?.name)
         .filter((name) => name !== undefined);
       lines.push(
-        `- ${describe(report)}: ${report.id}${skillNames.length > 0 ? ` — skills: ${skillNames.join(", ")}` : ""}${report.paused ? " (paused)" : ""}`,
+        `- ${describeWithDepartment(context, report)}: ${report.id}${skillNames.length > 0 ? ` — skills: ${skillNames.join(", ")}` : ""}${report.paused ? " (paused)" : ""}`,
       );
     }
   }
@@ -96,7 +126,9 @@ function orgBlock(context: BoardPromptContext): string {
   );
   if (assignable.length > 0) {
     lines.push("", "Others in your organization you may assign work to:");
-    for (const other of assignable) lines.push(`- ${describe(other)}: ${other.id}`);
+    for (const other of assignable) {
+      lines.push(`- ${describeWithDepartment(context, other)}: ${other.id}`);
+    }
   }
   return lines.join("\n");
 }
@@ -172,14 +204,80 @@ function taskBlock(context: BoardPromptContext): string {
   return lines.join("\n");
 }
 
+const SHARED_FOLDER_RULE =
+  "Touch only what your card needs; never revert, reformat, stash, or reset changes you did not make, and do not switch branches.";
+
+/** Boards default to HEAD, which means "whatever the project has checked out". */
+function baseLabel(baseRef: string | null): string {
+  if (baseRef === null) return "the base branch";
+  return baseRef === "HEAD" ? "the project's checked-out branch (HEAD)" : baseRef;
+}
+
+function workspaceBlock(context: BoardPromptContext, workspace: BoardWorkspace): string {
+  const { branch, baseRef, folder } = workspace;
+  const parent = context.ancestors[0];
+  const lines = ["## Where you work"];
+  if (folder === null) {
+    lines.push(
+      "- Folder: a new git worktree made for this card. It is the directory you start in; run `pwd` to see its full path.",
+    );
+  } else {
+    const whose =
+      workspace.owner === "card"
+        ? "this card's git worktree"
+        : workspace.owner === "parent"
+          ? `the git worktree of your parent card "${parent?.title ?? "parent"}"`
+          : "the project's own checkout, not a worktree";
+    lines.push(`- Folder: ${folder} (${whose}). Run every command there.`);
+  }
+  if (workspace.owner === "project") {
+    lines.push(
+      `- Branch: ${branch ?? "whatever the project has checked out"}. This card has no branch of its own.`,
+      "- Base: none; changes go straight into the project checkout.",
+    );
+  } else {
+    lines.push(
+      `- Branch: ${branch ?? "the worktree's current branch"}${workspace.owner === "parent" ? ", your parent card's branch" : ", made for this card"}.`,
+      `- Base: ${baseLabel(baseRef)}. The branch started from its commit when ${workspace.owner === "parent" ? "your parent card" : "this card"} began.`,
+    );
+  }
+  const others = workspace.sharedWith.map(
+    (other) =>
+      `"${other.title}" (${agentName(context.agents, other.assigneeAgentId)}, ${boardStatusLabel(other.status)})`,
+  );
+  if (workspace.owner === "card") {
+    lines.push(
+      "- Shared: no other card works here. Subtasks of this card work in this same folder and branch, so their changes land here.",
+    );
+  } else if (workspace.owner === "parent") {
+    lines.push(
+      others.length > 0
+        ? `- Shared: yes, with your parent card and its other subtasks: ${others.join(", ")}. They may be editing files at the same time. ${SHARED_FOLDER_RULE}`
+        : `- Shared: yes, with your parent card and any other subtasks it gets; none are open right now. ${SHARED_FOLDER_RULE}`,
+    );
+  } else {
+    lines.push(
+      `- Shared: yes, with every agent working without a worktree and with the people who own the project${others.length > 0 ? `, including ${others.join(", ")}` : ""}. ${SHARED_FOLDER_RULE}`,
+    );
+  }
+  const missing =
+    workspace.owner === "project"
+      ? "work other cards did in their own worktrees, until someone merges it into the branch checked out here."
+      : `work from other cards that has not been merged into ${baseLabel(baseRef)}. Other cards work on their own branches, and their changes reach this folder only after someone merges them.`;
+  lines.push(
+    `- Not here: ${missing} Do not redo that work or go looking for it; if your card depends on it, say so in a comment and move the card to "blocked".`,
+  );
+  return lines.join("\n");
+}
+
 const BOARD_TOOLS = `## Working with the board
 The board is how this company coordinates. Use the t3-code board tools instead of messaging other agents:
 - board_read_task re-reads a card with its comments and subtasks; board_list_tasks shows the board.
-- board_list_agents shows the org chart and the skills each person has.
+- board_list_agents shows the org chart, the departments, and the skills each person has.
 - board_add_comment records progress, decisions, and questions. The board (humans) reads them.
 - board_create_task creates a card. A card in "todo" with an assignee starts that agent right away. You review cards you assign to others unless you name a different reviewer.
 - board_update_task moves cards between columns.
-- board_request_hire asks the board to add someone to your team. A human approves it before they exist.
+- board_request_hire asks the board to add someone to your team, in the department where they belong. A human approves it before they exist.
 - board_search_cards finds earlier cards and their summaries, for "how did we do this before?".
 - board_remember adds a lesson to your memory (scope "self") or, if you manage people, the company's (scope "company"); board_rewrite_memory condenses a memory that is getting full.`;
 
@@ -203,7 +301,7 @@ You are an individual contributor: do this card's work yourself, in this workspa
 You manage work. ${team}. To delegate, split this card into focused subtasks with board_create_task: set parentTaskId to this card, write what done looks like, assign the best-suited person, and use status "todo" so they start. Then comment with your plan and move this card to "blocked". You review each subtask when it is finished: approve it by moving it to "done", or move it back to "todo" with precise changes. Once every subtask is done this card returns to "todo" and you continue here: check that the pieces add up. ${finish} ${REMEMBER_RULE}`;
 }
 
-export function buildWorkPrompt(context: BoardPromptContext): string {
+export function buildWorkPrompt(context: BoardPromptContext, workspace: BoardWorkspace): string {
   const sections = [identityBlock(context), orgBlock(context)];
   if (context.agent.instructions.trim().length > 0) {
     sections.push(`## Your standing instructions\n${context.agent.instructions.trim()}`);
@@ -215,11 +313,15 @@ export function buildWorkPrompt(context: BoardPromptContext): string {
   sections.push(taskBlock(context));
   const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
-  sections.push(rulesBlock(context), BOARD_TOOLS);
+  sections.push(workspaceBlock(context, workspace), rulesBlock(context), BOARD_TOOLS);
   return sections.join("\n\n");
 }
 
-export function buildReworkPrompt(context: BoardPromptContext, since: string | null): string {
+export function buildReworkPrompt(
+  context: BoardPromptContext,
+  since: string | null,
+  workspace: BoardWorkspace,
+): string {
   const comments = commentLines(context, since ?? undefined);
   return [
     `The card "${context.task.title}" (${context.task.id}) is back in "To do" for you.`,
@@ -234,6 +336,7 @@ export function buildReworkPrompt(context: BoardPromptContext, since: string | n
           ),
         ].join("\n")
       : "",
+    workspaceBlock(context, workspace),
     'Continue the work, add a summary comment, then move the card to "review" (or "blocked" if you cannot proceed). Record any new lasting lesson with board_remember first.',
   ]
     .filter((section) => section.length > 0)

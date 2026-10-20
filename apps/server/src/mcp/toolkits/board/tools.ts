@@ -2,6 +2,8 @@ import {
   BoardAgentId,
   BoardComment,
   BoardCompanyId,
+  BoardDepartment,
+  BoardDepartmentId,
   BoardHire,
   BoardRunKind,
   BoardSkillId,
@@ -45,6 +47,7 @@ const OrgMember = Schema.Struct({
   id: BoardAgentId,
   name: Schema.String,
   title: Schema.String,
+  department: Schema.String,
   reportsToAgentId: Schema.NullOr(BoardAgentId),
   skills: Schema.Array(Schema.String),
   paused: Schema.Boolean,
@@ -59,10 +62,11 @@ const SkillSummary = Schema.Struct({
 const BoardListAgentsTool = Tool.make("board_list_agents", {
   ...shared,
   description:
-    "Show the company's org chart: every agent with title, manager, and skills, the skills library, who you are, and who you may assign work to.",
+    "Show the company's org chart: every agent with title, department, manager, and skills, the departments, the skills library, who you are, and who you may assign work to.",
   parameters: Schema.Struct({ companyId: CompanyIdParam }),
   success: Schema.Struct({
     company: Schema.Struct({ id: BoardCompanyId, name: Schema.String, mission: Schema.String }),
+    departments: Schema.Array(BoardDepartment),
     ceoAgentId: Schema.NullOr(BoardAgentId),
     agents: Schema.Array(OrgMember),
     skills: Schema.Array(SkillSummary),
@@ -156,6 +160,9 @@ const BoardRequestHireTool = Tool.make("board_request_hire", {
     companyId: CompanyIdParam,
     name: TrimmedNonEmptyString,
     title: TrimmedNonEmptyString.annotate({ description: "Job title, such as Frontend engineer." }),
+    departmentId: Schema.optional(BoardDepartmentId).annotate({
+      description: "Their department (board_list_agents lists them); defaults to their manager's.",
+    }),
     reportsToAgentId: Schema.optional(BoardAgentId).annotate({
       description: "Their manager; defaults to you.",
     }),

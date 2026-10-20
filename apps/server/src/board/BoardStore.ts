@@ -7,6 +7,8 @@ import {
   BoardCompany,
   BoardCompanyId,
   BoardCompanySummary,
+  BoardDepartment,
+  BoardDepartmentId,
   BoardError,
   BoardHire,
   BoardHireId,
@@ -34,10 +36,22 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { DEFAULT_DEPARTMENT_NAMES } from "./boardOrg.ts";
+
 /** A card plus the fields only the server reads. */
 export interface StoredTask {
   readonly task: BoardTask;
   readonly statusChangedAt: string;
+  /** The branch checked out in the card's worktree, and the ref it started from. */
+  readonly branch: string | null;
+  readonly baseRef: string | null;
+}
+
+/** Where a card's work landed when its agent started. */
+export interface TaskWorkspace {
+  readonly worktreePath: string | null;
+  readonly branch: string | null;
+  readonly baseRef: string | null;
 }
 
 export interface RunningRun {
@@ -71,6 +85,7 @@ export interface NewHire {
   readonly requestedByAgentId: BoardAgentId | null;
   readonly name: string;
   readonly title: string;
+  readonly departmentId: BoardDepartmentId | null;
   readonly reportsToAgentId: BoardAgentId | null;
   readonly skillIds: ReadonlyArray<BoardSkillId>;
   readonly instructions: string;
@@ -116,7 +131,7 @@ export class BoardStore extends Context.Service<
     readonly setTaskThread: (
       id: BoardTaskId,
       threadId: ThreadId,
-      worktreePath: string | null,
+      workspace: TaskWorkspace,
     ) => StoreEffect<void>;
     readonly deleteTask: (task: BoardTask) => StoreEffect<void>;
     readonly countOpenSubtasks: (parentId: BoardTaskId) => StoreEffect<number>;
@@ -178,6 +193,7 @@ interface CompanyRow {
   readonly name: string;
   readonly mission: string;
   readonly memory: string;
+  readonly departments_json: string;
   readonly project_id: string;
   readonly ceo_agent_id: string | null;
   readonly created_at: string;
@@ -200,6 +216,7 @@ interface AgentRow {
   readonly name: string;
   readonly title: string;
   readonly avatar: string;
+  readonly department_id: string;
   readonly reports_to_agent_id: string | null;
   readonly skill_ids_json: string;
   readonly instructions: string;
@@ -217,6 +234,7 @@ interface HireRow {
   readonly requested_by_agent_id: string | null;
   readonly name: string;
   readonly title: string;
+  readonly department_id: string | null;
   readonly reports_to_agent_id: string | null;
   readonly skill_ids_json: string;
   readonly instructions: string;
@@ -238,6 +256,8 @@ interface TaskRow {
   readonly parent_task_id: string | null;
   readonly thread_id: string | null;
   readonly worktree_path: string | null;
+  readonly branch: string | null;
+  readonly base_ref: string | null;
   readonly created_by_agent_id: string | null;
   readonly status_changed_at: string;
   readonly created_at: string;
@@ -278,6 +298,9 @@ interface SettingsRow {
 }
 
 const SkillIdsJson = Schema.fromJsonString(Schema.Array(BoardSkillId));
+const DepartmentsJson = Schema.fromJsonString(Schema.Array(BoardDepartment));
+const decodeDepartments = Schema.decodeUnknownEffect(DepartmentsJson);
+const encodeDepartments = Schema.encodeEffect(DepartmentsJson);
 const ModelSelectionJson = Schema.fromJsonString(ModelSelection);
 const decodeSkillIds = Schema.decodeUnknownEffect(SkillIdsJson);
 const encodeSkillIds = Schema.encodeEffect(SkillIdsJson);
@@ -307,6 +330,8 @@ const TASK_COLUMNS = `
   t.parent_task_id,
   t.thread_id,
   t.worktree_path,
+  t.branch,
+  t.base_ref,
   t.created_by_agent_id,
   t.status_changed_at,
   t.created_at,
@@ -353,6 +378,7 @@ const make = Effect.gen(function* () {
       name TEXT NOT NULL,
       mission TEXT NOT NULL,
       memory TEXT NOT NULL DEFAULT '',
+      departments_json TEXT NOT NULL DEFAULT '[]',
       project_id TEXT NOT NULL,
       ceo_agent_id TEXT,
       created_at TEXT NOT NULL,
@@ -378,6 +404,7 @@ const make = Effect.gen(function* () {
       name TEXT NOT NULL,
       title TEXT NOT NULL,
       avatar TEXT NOT NULL DEFAULT '',
+      department_id TEXT NOT NULL DEFAULT '',
       reports_to_agent_id TEXT,
       skill_ids_json TEXT NOT NULL,
       instructions TEXT NOT NULL,
@@ -400,6 +427,12 @@ const make = Effect.gen(function* () {
   if (!(yield* columns("board_agents")).has("avatar")) {
     yield* sql`ALTER TABLE board_agents ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`;
   }
+  if (!(yield* columns("board_companies")).has("departments_json")) {
+    yield* sql`ALTER TABLE board_companies ADD COLUMN departments_json TEXT NOT NULL DEFAULT '[]'`;
+  }
+  if (!(yield* columns("board_agents")).has("department_id")) {
+    yield* sql`ALTER TABLE board_agents ADD COLUMN department_id TEXT NOT NULL DEFAULT ''`;
+  }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_hires (
       hire_id TEXT PRIMARY KEY,
@@ -407,6 +440,7 @@ const make = Effect.gen(function* () {
       requested_by_agent_id TEXT,
       name TEXT NOT NULL,
       title TEXT NOT NULL,
+      department_id TEXT,
       reports_to_agent_id TEXT,
       skill_ids_json TEXT NOT NULL,
       instructions TEXT NOT NULL,
@@ -417,6 +451,9 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_hires_company ON board_hires(company_id, status)`;
+  if (!(yield* columns("board_hires")).has("department_id")) {
+    yield* sql`ALTER TABLE board_hires ADD COLUMN department_id TEXT`;
+  }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_tasks (
       task_id TEXT PRIMARY KEY,
@@ -431,6 +468,8 @@ const make = Effect.gen(function* () {
       parent_task_id TEXT,
       thread_id TEXT,
       worktree_path TEXT,
+      branch TEXT,
+      base_ref TEXT,
       created_by_agent_id TEXT,
       status_changed_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -438,6 +477,14 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_tasks_company ON board_tasks(company_id, position)`;
+  // Cards record their branch and base since workspaces were described in prompts.
+  const cardColumns = yield* columns("board_tasks");
+  if (!cardColumns.has("branch")) {
+    yield* sql`ALTER TABLE board_tasks ADD COLUMN branch TEXT`;
+  }
+  if (!cardColumns.has("base_ref")) {
+    yield* sql`ALTER TABLE board_tasks ADD COLUMN base_ref TEXT`;
+  }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_comments (
       comment_id TEXT PRIMARY KEY,
@@ -481,18 +528,47 @@ const make = Effect.gen(function* () {
     );
   const now = DateTime.now.pipe(Effect.map((value) => DateTime.formatIso(value)));
 
+  // Companies made before departments get the default set, with the CEO in Executive and
+  // everyone else in Engineering until someone moves them.
+  const undivided = yield* sql<{
+    readonly company_id: string;
+    readonly ceo_agent_id: string | null;
+  }>`SELECT company_id, ceo_agent_id FROM board_companies WHERE departments_json = '[]'`;
+  for (const row of undivided) {
+    const departments = yield* Effect.forEach(DEFAULT_DEPARTMENT_NAMES, (name) =>
+      newId("board-department").pipe(
+        Effect.map((id) => ({ id: BoardDepartmentId.make(id), name })),
+      ),
+    );
+    const executive = departments[0]?.id ?? null;
+    const engineering = departments.find((department) => department.name === "Engineering")?.id;
+    const departmentsJson = yield* encodeDepartments(departments);
+    yield* sql.withTransaction(
+      Effect.all([
+        sql`UPDATE board_companies SET departments_json = ${departmentsJson}
+          WHERE company_id = ${row.company_id}`,
+        sql`UPDATE board_agents
+          SET department_id = CASE WHEN agent_id = ${row.ceo_agent_id} THEN ${executive}
+            ELSE ${engineering ?? executive} END
+          WHERE company_id = ${row.company_id} AND department_id = ''`,
+      ]),
+    );
+  }
+
   // Row decoders run once per row inside reads that already own a span.
-  const toCompany = (row: CompanyRow) =>
-    decodeCompany({
+  const toCompany = Effect.fnUntraced(function* (row: CompanyRow) {
+    return yield* decodeCompany({
       id: row.company_id,
       name: row.name,
       mission: row.mission,
+      departments: yield* decodeDepartments(row.departments_json),
       memory: row.memory,
       projectId: row.project_id,
       ceoAgentId: row.ceo_agent_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
+  });
 
   const toSkill = (row: SkillRow) =>
     decodeSkill({
@@ -512,6 +588,7 @@ const make = Effect.gen(function* () {
       name: row.name,
       title: row.title,
       avatar: row.avatar,
+      departmentId: row.department_id,
       reportsToAgentId: row.reports_to_agent_id,
       skillIds: yield* decodeSkillIds(row.skill_ids_json),
       instructions: row.instructions,
@@ -531,6 +608,7 @@ const make = Effect.gen(function* () {
       requestedByAgentId: row.requested_by_agent_id,
       name: row.name,
       title: row.title,
+      departmentId: row.department_id,
       reportsToAgentId: row.reports_to_agent_id,
       skillIds: yield* decodeSkillIds(row.skill_ids_json),
       instructions: row.instructions,
@@ -560,7 +638,12 @@ const make = Effect.gen(function* () {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
-    return { task, statusChangedAt: row.status_changed_at } satisfies StoredTask;
+    return {
+      task,
+      statusChangedAt: row.status_changed_at,
+      branch: row.branch,
+      baseRef: row.base_ref,
+    } satisfies StoredTask;
   });
 
   const toComment = (row: CommentRow) =>
@@ -636,22 +719,27 @@ const make = Effect.gen(function* () {
     failWith("Could not read the company."),
   );
 
-  const writeCompany = (company: BoardCompany) => sql`
-    INSERT INTO board_companies (
-      company_id, name, mission, memory, project_id, ceo_agent_id, created_at, updated_at
-    )
-    VALUES (
-      ${company.id}, ${company.name}, ${company.mission}, ${company.memory}, ${company.projectId},
-      ${company.ceoAgentId}, ${company.createdAt}, ${company.updatedAt}
-    )
-    ON CONFLICT (company_id) DO UPDATE SET
-      name = excluded.name,
-      mission = excluded.mission,
-      memory = excluded.memory,
-      project_id = excluded.project_id,
-      ceo_agent_id = excluded.ceo_agent_id,
-      updated_at = excluded.updated_at
-  `;
+  const writeCompany = Effect.fnUntraced(function* (company: BoardCompany) {
+    const departments = yield* encodeDepartments(company.departments);
+    yield* sql`
+      INSERT INTO board_companies (
+        company_id, name, mission, memory, departments_json, project_id, ceo_agent_id,
+        created_at, updated_at
+      )
+      VALUES (
+        ${company.id}, ${company.name}, ${company.mission}, ${company.memory}, ${departments},
+        ${company.projectId}, ${company.ceoAgentId}, ${company.createdAt}, ${company.updatedAt}
+      )
+      ON CONFLICT (company_id) DO UPDATE SET
+        name = excluded.name,
+        mission = excluded.mission,
+        memory = excluded.memory,
+        departments_json = excluded.departments_json,
+        project_id = excluded.project_id,
+        ceo_agent_id = excluded.ceo_agent_id,
+        updated_at = excluded.updated_at
+    `;
+  });
 
   const insertCompany: BoardStore["Service"]["insertCompany"] = (company) =>
     writeCompany(company).pipe(Effect.asVoid, failWith("Could not save the company."));
@@ -744,12 +832,14 @@ const make = Effect.gen(function* () {
       const modelSelection = yield* encodeModelSelection(agent.modelSelection);
       yield* sql`
         INSERT INTO board_agents (
-          agent_id, company_id, name, title, avatar, reports_to_agent_id, skill_ids_json,
-          instructions, memory, model_selection_json, runtime_mode, paused, created_at, updated_at
+          agent_id, company_id, name, title, avatar, department_id, reports_to_agent_id,
+          skill_ids_json, instructions, memory, model_selection_json, runtime_mode, paused,
+          created_at, updated_at
         )
         VALUES (
           ${agent.id}, ${agent.companyId}, ${agent.name}, ${agent.title}, ${agent.avatar},
-          ${agent.reportsToAgentId}, ${skillIds}, ${agent.instructions}, ${agent.memory},
+          ${agent.departmentId}, ${agent.reportsToAgentId}, ${skillIds}, ${agent.instructions},
+          ${agent.memory},
           ${modelSelection}, ${agent.runtimeMode}, ${agent.paused ? 1 : 0}, ${agent.createdAt},
           ${agent.updatedAt}
         )
@@ -757,6 +847,7 @@ const make = Effect.gen(function* () {
           name = excluded.name,
           title = excluded.title,
           avatar = excluded.avatar,
+          department_id = excluded.department_id,
           reports_to_agent_id = excluded.reports_to_agent_id,
           skill_ids_json = excluded.skill_ids_json,
           instructions = excluded.instructions,
@@ -834,13 +925,13 @@ const make = Effect.gen(function* () {
       const skillIds = yield* encodeSkillIds(hire.skillIds);
       yield* sql`
         INSERT INTO board_hires (
-          hire_id, company_id, requested_by_agent_id, name, title, reports_to_agent_id,
-          skill_ids_json, instructions, reason, status, created_at, decided_at
+          hire_id, company_id, requested_by_agent_id, name, title, department_id,
+          reports_to_agent_id, skill_ids_json, instructions, reason, status, created_at, decided_at
         )
         VALUES (
           ${id}, ${hire.companyId}, ${hire.requestedByAgentId}, ${hire.name}, ${hire.title},
-          ${hire.reportsToAgentId}, ${skillIds}, ${hire.instructions}, ${hire.reason},
-          'pending', ${at}, NULL
+          ${hire.departmentId}, ${hire.reportsToAgentId}, ${skillIds}, ${hire.instructions},
+          ${hire.reason}, 'pending', ${at}, NULL
         )
       `;
       const created = yield* getHire(id);
@@ -940,11 +1031,12 @@ const make = Effect.gen(function* () {
 
   const setTaskThread: BoardStore["Service"]["setTaskThread"] = Effect.fn(
     "BoardStore.setTaskThread",
-  )(function* (id, threadId, worktreePath) {
+  )(function* (id, threadId, workspace) {
     const at = yield* now;
     yield* sql`
         UPDATE board_tasks
-        SET thread_id = ${threadId}, worktree_path = ${worktreePath}, updated_at = ${at}
+        SET thread_id = ${threadId}, worktree_path = ${workspace.worktreePath},
+          branch = ${workspace.branch}, base_ref = ${workspace.baseRef}, updated_at = ${at}
         WHERE task_id = ${id}
       `;
   }, failWith("Could not link the card to its thread."));

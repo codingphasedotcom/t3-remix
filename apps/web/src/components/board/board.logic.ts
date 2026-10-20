@@ -1,6 +1,8 @@
 import type {
   BoardAgent,
   BoardAgentId,
+  BoardDepartment,
+  BoardDepartmentId,
   BoardTask,
   BoardTaskId,
   BoardTaskStatus,
@@ -169,6 +171,8 @@ export const SKILL_PRESETS: ReadonlyArray<SkillPreset> = [
 export interface EmployeePreset {
   readonly title: string;
   readonly name: string;
+  /** Matched by name against the company's departments, which a person may have renamed. */
+  readonly department: string;
   readonly instructions: string;
   readonly skills: ReadonlyArray<string>;
 }
@@ -176,6 +180,7 @@ export interface EmployeePreset {
 export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
   {
     title: "CTO",
+    department: "Engineering",
     name: "Grace",
     instructions:
       "You own the technical direction. Break engineering work into cards for your engineers, review what they deliver, and keep the codebase consistent. Do small fixes yourself; delegate anything larger.",
@@ -183,6 +188,7 @@ export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
   },
   {
     title: "Software engineer",
+    department: "Engineering",
     name: "Linus",
     instructions:
       "You implement cards end to end: read the relevant code first, make focused changes in the codebase's style, add tests, and run the checks. Commit on the card's branch with a clear message.",
@@ -190,6 +196,7 @@ export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
   },
   {
     title: "Frontend engineer",
+    department: "Engineering",
     name: "Ada",
     instructions:
       "You build and polish the user interface. Match the existing design, cover interactive behavior with tests, and describe how you verified it.",
@@ -197,6 +204,7 @@ export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
   },
   {
     title: "QA engineer",
+    department: "Engineering",
     name: "Margaret",
     instructions:
       "You verify that features work the way a user expects. Reproduce, test edge cases, write regression tests, and report failures with exact steps.",
@@ -204,12 +212,53 @@ export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
   },
   {
     title: "Technical writer",
+    department: "Engineering",
     name: "Mary",
     instructions:
       "You write and maintain docs, READMEs, and release notes for what the team ships.",
     skills: ["Writing"],
   },
+  {
+    title: "Product designer",
+    department: "Design",
+    name: "Dieter",
+    instructions:
+      "You design how the product looks and behaves. Work within the existing design language, specify states and edge cases, and build or refine the UI yourself when the change is small.",
+    skills: ["Frontend"],
+  },
+  {
+    title: "Marketing lead",
+    department: "Marketing",
+    name: "Peggy",
+    instructions:
+      "You explain the product to the people it is for: landing pages, announcements, and launch copy. Ground every claim in what the product actually does.",
+    skills: ["Writing"],
+  },
+  {
+    title: "Support specialist",
+    department: "Customer Support",
+    name: "Sam",
+    instructions:
+      "You help users succeed: write help articles and replies, reproduce reported problems, and turn real bugs into clear cards for engineering.",
+    skills: ["Writing"],
+  },
 ];
+
+/** The company department with this name, ignoring case, if it still exists. */
+export function departmentNamed(
+  departments: ReadonlyArray<BoardDepartment>,
+  name: string,
+): BoardDepartmentId | null {
+  const wanted = name.toLowerCase();
+  return departments.find((department) => department.name.toLowerCase() === wanted)?.id ?? null;
+}
+
+export function departmentLabel(
+  departments: ReadonlyArray<BoardDepartment>,
+  id: BoardDepartmentId | null,
+): string | null {
+  return departments.find((department) => department.id === id)?.name ?? null;
+}
 
 export interface CompanyTemplate {
   readonly id: string;

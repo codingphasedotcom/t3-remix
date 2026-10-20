@@ -1,6 +1,7 @@
 import {
   BoardAgentId,
   BoardCompanyId,
+  BoardDepartmentId,
   BoardError,
   BoardSkillId,
   MAX_AGENT_MEMORY_CHARS,
@@ -17,6 +18,7 @@ import {
   type BoardCompany,
   type BoardCompanyCreateInput,
   type BoardCompanyUpdateInput,
+  type BoardDepartment,
   type BoardHire,
   type BoardHireDecisionInput,
   type BoardRunKind,
@@ -34,9 +36,11 @@ import {
   type OrchestrationV2Run,
   type ProjectId,
 } from "@t3tools/contracts";
+import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -44,9 +48,10 @@ import * as Stream from "effect/Stream";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as BoardStore from "./BoardStore.ts";
-import { assignableBy, createsReportingCycle } from "./boardOrg.ts";
+import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
 import {
   boardStatusLabel,
   buildReviewPrompt,
@@ -54,6 +59,7 @@ import {
   buildUserCommentMessage,
   buildWorkPrompt,
   type BoardPromptContext,
+  type BoardWorkspace,
 } from "./boardPrompts.ts";
 
 /** Who is changing the board. An agent is identified by the thread its MCP credential belongs to. */
@@ -72,6 +78,7 @@ export interface BoardHireRequestInput {
   readonly companyId: BoardCompanyId;
   readonly name: string;
   readonly title: string;
+  readonly departmentId: BoardDepartmentId | null;
   readonly reportsToAgentId: BoardAgentId | null;
   readonly skillIds: ReadonlyArray<BoardSkillId>;
   readonly instructions: string;
@@ -146,6 +153,19 @@ export class BoardService extends Context.Service<
   }
 >()("t3/board/BoardService") {}
 
+/** A readable branch per card; the thread id keeps a retried card off its earlier branch. */
+function cardBranchName(task: BoardTask, threadId: ThreadId): string {
+  const slug = sanitizeBranchFragment(task.title)
+    .replaceAll("/", "-")
+    .slice(0, 40)
+    .replace(/[-_]+$/, "");
+  const token = threadId
+    .toLowerCase()
+    .replace(/[^0-9a-f]/g, "")
+    .slice(-8);
+  return `board/${slug}-${token}`;
+}
+
 function boardError(message: string, cause?: unknown): BoardError {
   return new BoardError({ message, ...(cause === undefined ? {} : { cause }) });
 }
@@ -155,6 +175,7 @@ const make = Effect.gen(function* () {
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const projectFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const projects = yield* ProjectService.ProjectService;
 
   // `null` means the company list changed, which every subscriber shows.
   const changes = yield* PubSub.unbounded<BoardCompanyId | null>();
@@ -338,10 +359,16 @@ const make = Effect.gen(function* () {
     const at = yield* store.now;
     const companyId = BoardCompanyId.make(yield* store.newId("board-company"));
     const ceoId = BoardAgentId.make(yield* store.newId("board-agent"));
+    const departments = yield* Effect.forEach(DEFAULT_DEPARTMENT_NAMES, (name) =>
+      store
+        .newId("board-department")
+        .pipe(Effect.map((id): BoardDepartment => ({ id: BoardDepartmentId.make(id), name }))),
+    );
     const company: BoardCompany = {
       id: companyId,
       name: input.name,
       mission: input.mission,
+      departments,
       memory: "",
       projectId,
       ceoAgentId: ceoId,
@@ -355,6 +382,7 @@ const make = Effect.gen(function* () {
       name: input.ceo.name,
       title: "CEO",
       avatar: input.ceo.avatar ?? "",
+      departmentId: departments[0]!.id,
       reportsToAgentId: null,
       skillIds: [],
       instructions: input.ceo.instructions,
@@ -378,6 +406,9 @@ const make = Effect.gen(function* () {
       ...(input.name === undefined ? {} : { name: input.name }),
       ...(input.mission === undefined ? {} : { mission: input.mission }),
       ...(input.memory === undefined ? {} : { memory: input.memory }),
+      ...(input.departments === undefined
+        ? {}
+        : { departments: yield* nextDepartments(current, input.departments) }),
       updatedAt: yield* store.now,
     };
     if (next.memory.length > MAX_COMPANY_MEMORY_CHARS) {
@@ -388,6 +419,44 @@ const make = Effect.gen(function* () {
     yield* store.updateCompany(next);
     yield* notify(null);
     return next;
+  });
+
+  const nextDepartments = Effect.fn("BoardService.nextDepartments")(function* (
+    company: BoardCompany,
+    requested: NonNullable<BoardCompanyUpdateInput["departments"]>,
+  ) {
+    if (requested.length === 0)
+      return yield* boardError("A company needs at least one department.");
+    const names = new Set<string>();
+    for (const department of requested) {
+      const key = department.name.toLowerCase();
+      if (names.has(key))
+        return yield* boardError(`There are two "${department.name}" departments.`);
+      names.add(key);
+      if (department.id !== undefined && !company.departments.some((d) => d.id === department.id)) {
+        return yield* boardError(`Department ${department.id} is not in this company.`);
+      }
+    }
+    const agents = yield* store.listAgents(company.id);
+    for (const removed of company.departments) {
+      if (requested.some((department) => department.id === removed.id)) continue;
+      const members = agents.filter((agent) => agent.departmentId === removed.id);
+      if (members.length > 0) {
+        return yield* boardError(
+          `Move ${members.map((agent) => agent.name).join(", ")} out of ${removed.name} before removing it.`,
+        );
+      }
+    }
+    return yield* Effect.forEach(requested, (department) =>
+      department.id === undefined
+        ? store.newId("board-department").pipe(
+            Effect.map((id): BoardDepartment => ({
+              id: BoardDepartmentId.make(id),
+              name: department.name,
+            })),
+          )
+        : Effect.succeed<BoardDepartment>({ id: department.id, name: department.name }),
+    );
   });
 
   const deleteCompany = Effect.fn("BoardService.deleteCompany")(function* (id: BoardCompanyId) {
@@ -453,6 +522,18 @@ const make = Effect.gen(function* () {
     if (unknownSkill !== undefined) {
       return yield* boardError(`Skill ${unknownSkill} is not in this company's skill library.`);
     }
+    // A new person joins their manager's department unless told otherwise.
+    const departmentId =
+      input.departmentId ??
+      existing?.departmentId ??
+      agents.find((agent) => agent.id === reportsToAgentId)?.departmentId ??
+      company.departments[0]?.id;
+    if (
+      departmentId === undefined ||
+      !company.departments.some((department) => department.id === departmentId)
+    ) {
+      return yield* boardError("Choose one of the company's departments.");
+    }
     if ((input.memory ?? "").length > MAX_AGENT_MEMORY_CHARS) {
       return yield* boardError(`Agent memory is limited to ${MAX_AGENT_MEMORY_CHARS} characters.`);
     }
@@ -463,6 +544,7 @@ const make = Effect.gen(function* () {
       name: input.name,
       title: isCeo ? "CEO" : input.title,
       avatar: input.avatar ?? existing?.avatar ?? "",
+      departmentId,
       reportsToAgentId,
       skillIds: [...new Set(input.skillIds)],
       instructions: input.instructions,
@@ -512,10 +594,15 @@ const make = Effect.gen(function* () {
       return yield* boardError("Choose a model for the new agent.");
     }
     const skills = yield* store.listSkills(company.id);
+    // A department removed since the request falls back to the manager's.
+    const departmentId = company.departments.find(
+      (department) => department.id === hire.departmentId,
+    )?.id;
     const agent = yield* upsertAgent({
       companyId: company.id,
       name: hire.name,
       title: hire.title,
+      ...(departmentId === undefined ? {} : { departmentId }),
       reportsToAgentId: agents.some((candidate) => candidate.id === hire.reportsToAgentId)
         ? hire.reportsToAgentId
         : company.ceoAgentId,
@@ -537,12 +624,21 @@ const make = Effect.gen(function* () {
       const reportsToAgentId = input.reportsToAgentId ?? actingAs?.id ?? company.ceoAgentId;
       yield* assertAgentsInCompany(agents, [reportsToAgentId]);
       yield* assertMayAssign(company, agents, actingAs, [reportsToAgentId]);
+      if (
+        input.departmentId !== null &&
+        !company.departments.some((department) => department.id === input.departmentId)
+      ) {
+        return yield* boardError(
+          `Choose a department from board_list_agents: ${company.departments.map((department) => department.name).join(", ")}.`,
+        );
+      }
       const skills = yield* store.listSkills(company.id);
       const hire = yield* store.insertHire({
         companyId: company.id,
         requestedByAgentId: actingAs?.id ?? null,
         name: input.name,
         title: input.title,
+        departmentId: input.departmentId,
         reportsToAgentId,
         skillIds: input.skillIds.filter((id) => skills.some((skill) => skill.id === id)),
         instructions: input.instructions,
@@ -588,8 +684,10 @@ const make = Effect.gen(function* () {
       if (actor.kind === "agent") {
         yield* systemComment(id, `Created by ${actorLabel(actingAs, actor)}.`);
       }
+      // Read before notifying: the change can start an agent that moves the card at once.
+      const created = (yield* requireTask(id)).task;
       yield* notify(company.id);
-      return (yield* requireTask(id)).task;
+      return created;
     },
   );
 
@@ -827,20 +925,124 @@ const make = Effect.gen(function* () {
     } satisfies BoardPromptContext;
   });
 
-  const workspaceFor = Effect.fn("BoardService.workspaceFor")(function* (
+  const worktreeAvailable = Effect.fn("BoardService.worktreeAvailable")(function* (
     task: BoardTask,
     settings: BoardSettings,
   ) {
-    if (!settings.useWorktrees) return { type: "root" } as const;
-    const strategy = { type: "worktree", baseRef: settings.baseRef } as const;
+    if (!settings.useWorktrees) return false;
     // A project that is not a git repository, or a base ref that no longer resolves, still
     // gets its agent; it just shares the project checkout.
     return yield* threadLaunch
-      .checkWorktreeBase({ projectId: task.projectId, workspaceStrategy: strategy })
+      .checkWorktreeBase({
+        projectId: task.projectId,
+        workspaceStrategy: { type: "worktree", baseRef: settings.baseRef },
+      })
       .pipe(
-        Effect.as<ThreadLaunchService.ThreadLaunchWorkspaceStrategy>(strategy),
-        Effect.orElseSucceed(() => ({ type: "root" }) as const),
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
       );
+  });
+
+  /**
+   * Where a card's work run happens: how to launch it there, how its prompt describes the
+   * place, and the branch and base the card records once it starts.
+   */
+  const planWorkspace = Effect.fn("BoardService.planWorkspace")(function* (input: {
+    readonly stored: BoardStore.StoredTask;
+    readonly threadId: ThreadId;
+    readonly allTasks: ReadonlyArray<BoardTask>;
+    readonly settings: BoardSettings;
+  }) {
+    const { stored } = input;
+    const task = stored.task;
+    const parent = task.parentTaskId === null ? null : yield* store.getTask(task.parentTaskId);
+    const siblings = input.allTasks.filter(
+      (other) =>
+        task.parentTaskId !== null &&
+        other.parentTaskId === task.parentTaskId &&
+        other.id !== task.id &&
+        other.status !== "done",
+    );
+    const projectFolder = Effect.fn("BoardService.projectFolder")(function* () {
+      const project = yield* projects
+        .getById(task.projectId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      return Option.match(project, { onNone: () => null, onSome: (found) => found.workspaceRoot });
+    });
+    const inProjectCheckout = Effect.fn("BoardService.inProjectCheckout")(function* () {
+      const prompt: BoardWorkspace = {
+        folder: yield* projectFolder(),
+        branch: null,
+        baseRef: null,
+        owner: "project",
+        sharedWith: input.allTasks.filter(
+          (other) =>
+            other.id !== task.id && other.activeRunKind !== null && other.worktreePath === null,
+        ),
+      };
+      return prompt;
+    });
+
+    // Rework continues in the folder the card already has.
+    if (task.threadId !== null) {
+      const owner =
+        task.worktreePath === null
+          ? "project"
+          : parent !== null && parent.task.worktreePath === task.worktreePath
+            ? "parent"
+            : "card";
+      const prompt: BoardWorkspace =
+        owner === "project"
+          ? yield* inProjectCheckout()
+          : {
+              folder: task.worktreePath,
+              branch: stored.branch,
+              baseRef: stored.baseRef,
+              owner,
+              sharedWith: owner === "parent" ? siblings : [],
+            };
+      return { strategy: null, prompt, branch: stored.branch, baseRef: stored.baseRef };
+    }
+    // Subtasks work in their parent card's worktree, so the parent's branch ends up holding
+    // the combined result for whoever finishes the parent.
+    if (parent !== null && parent.task.worktreePath !== null) {
+      return {
+        strategy: { type: "existing_worktree", worktreePath: parent.task.worktreePath } as const,
+        prompt: {
+          folder: parent.task.worktreePath,
+          branch: parent.branch,
+          baseRef: parent.baseRef,
+          owner: "parent",
+          sharedWith: siblings,
+        } satisfies BoardWorkspace,
+        branch: parent.branch,
+        baseRef: parent.baseRef,
+      };
+    }
+    if (yield* worktreeAvailable(task, input.settings)) {
+      // Naming the branch up front lets the prompt state it, and keeps it from being renamed
+      // under the agent.
+      const branch = cardBranchName(task, input.threadId);
+      const baseRef = input.settings.baseRef;
+      return {
+        strategy: { type: "worktree", baseRef, branch } as const,
+        prompt: {
+          folder: null,
+          branch,
+          baseRef,
+          owner: "card",
+          sharedWith: [],
+        } satisfies BoardWorkspace,
+        branch,
+        baseRef,
+      };
+    }
+    return {
+      strategy: { type: "root" } as const,
+      prompt: yield* inProjectCheckout(),
+      branch: null,
+      baseRef: null,
+    };
   });
 
   const startRun = Effect.fn("BoardService.startRun")(function* (input: {
@@ -877,6 +1079,15 @@ const make = Effect.gen(function* () {
 
     const launched = yield* Effect.exit(
       Effect.gen(function* () {
+        const plan =
+          kind === "work"
+            ? yield* planWorkspace({
+                stored,
+                threadId,
+                allTasks: input.allTasks,
+                settings: input.settings,
+              })
+            : null;
         if (reuseThread) {
           const since = yield* store.lastRunEndedAt(task.id, "work");
           yield* threads.sendToThread({
@@ -884,7 +1095,7 @@ const make = Effect.gen(function* () {
             commandId,
             threadId,
             messageId,
-            text: buildReworkPrompt(context, since),
+            text: buildReworkPrompt(context, since, plan!.prompt),
             attachments: [],
             mode: "queue",
             createdBy: "system",
@@ -892,25 +1103,18 @@ const make = Effect.gen(function* () {
           });
           return null;
         }
-        // Subtasks work in their parent card's worktree, so the parent's branch ends up
-        // holding the combined result for whoever finishes the parent.
-        const parentWorktree =
-          input.allTasks.find((candidate) => candidate.id === task.parentTaskId)?.worktreePath ??
-          null;
         const workspaceStrategy: ThreadLaunchService.ThreadLaunchWorkspaceStrategy =
-          task.worktreePath !== null && kind === "review"
+          plan?.strategy ??
+          (task.worktreePath !== null
             ? { type: "existing_worktree", worktreePath: task.worktreePath }
-            : kind === "review"
-              ? { type: "root" }
-              : parentWorktree !== null
-                ? { type: "existing_worktree", worktreePath: parentWorktree }
-                : yield* workspaceFor(task, input.settings);
+            : { type: "root" });
         const prompt =
-          kind === "work"
-            ? buildWorkPrompt(context)
+          plan !== null
+            ? buildWorkPrompt(context, plan.prompt)
             : buildReviewPrompt(context, {
                 worktreePath: task.worktreePath,
-                baseRef: input.settings.useWorktrees ? input.settings.baseRef : null,
+                baseRef:
+                  stored.baseRef ?? (input.settings.useWorktrees ? input.settings.baseRef : null),
               });
         const result = yield* threadLaunch.launch({
           commandId,
@@ -926,7 +1130,11 @@ const make = Effect.gen(function* () {
           createdBy: "system",
           creationSource: "server",
         });
-        return result.projection.thread.worktreePath;
+        return {
+          worktreePath: result.projection.thread.worktreePath,
+          branch: result.projection.thread.branch ?? plan?.branch ?? null,
+          baseRef: plan?.baseRef ?? null,
+        };
       }),
     );
 
@@ -943,7 +1151,7 @@ const make = Effect.gen(function* () {
       );
       return;
     }
-    if (kind === "work" && !reuseThread) {
+    if (kind === "work" && !reuseThread && launched.value !== null) {
       yield* store.setTaskThread(task.id, threadId, launched.value);
       yield* notify(company.id);
     }

@@ -3,6 +3,7 @@ import { MAX_AGENT_MEMORY_CHARS } from "@t3tools/contracts";
 import type {
   BoardAgent,
   BoardAgentId,
+  BoardDepartmentId,
   BoardSkillId,
   BoardSnapshot,
   EnvironmentId,
@@ -42,7 +43,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import type { RunBoardCommand } from "./BoardPage";
-import { EMPLOYEE_PRESETS } from "./board.logic";
+import { EMPLOYEE_PRESETS, departmentNamed } from "./board.logic";
 import { FACES, faceFor } from "./faces";
 
 export interface AgentDraft {
@@ -50,6 +51,7 @@ export interface AgentDraft {
   readonly name: string;
   readonly title: string;
   readonly avatar: string;
+  readonly departmentId: BoardDepartmentId | null;
   readonly reportsToAgentId: BoardAgentId | null;
   readonly skillIds: ReadonlyArray<BoardSkillId>;
   readonly instructions: string;
@@ -65,6 +67,7 @@ export function draftFromAgent(agent: BoardAgent): AgentDraft {
     name: agent.name,
     title: agent.title,
     avatar: faceFor(agent)?.key ?? "",
+    departmentId: agent.departmentId,
     reportsToAgentId: agent.reportsToAgentId,
     skillIds: agent.skillIds,
     instructions: agent.instructions,
@@ -75,20 +78,19 @@ export function draftFromAgent(agent: BoardAgent): AgentDraft {
   };
 }
 
-export function newEmployeeDraft(
-  reportsToAgentId: BoardAgentId | null,
-  modelSelection: ModelSelection | null,
-): AgentDraft {
+/** A new employee under `manager`, in the manager's department and on its model. */
+export function newEmployeeDraft(manager: BoardAgent | null): AgentDraft {
   return {
     id: null,
     name: "",
     title: "",
     avatar: "",
-    reportsToAgentId,
+    departmentId: manager?.departmentId ?? null,
+    reportsToAgentId: manager?.id ?? null,
     skillIds: [],
     instructions: "",
     memory: "",
-    modelSelection,
+    modelSelection: manager?.modelSelection ?? null,
     runtimeMode: "full-access",
     paused: false,
   };
@@ -225,7 +227,14 @@ function AgentForm(props: {
   }
   const managers = snapshot.agents.filter((agent) => agent.id !== draft.id && !below.has(agent.id));
   const manager = managers.find((agent) => agent.id === draft.reportsToAgentId) ?? null;
-  const canSave = company !== null && draft.name.trim().length > 0 && selection !== null && !saving;
+  const departments = company?.departments ?? [];
+  const department = departments.find((candidate) => candidate.id === draft.departmentId) ?? null;
+  const canSave =
+    company !== null &&
+    draft.name.trim().length > 0 &&
+    department !== null &&
+    selection !== null &&
+    !saving;
 
   const applyPreset = (title: string) => {
     const preset = EMPLOYEE_PRESETS.find((candidate) => candidate.title === title);
@@ -234,6 +243,7 @@ function AgentForm(props: {
       ...draft,
       title: preset.title,
       name: draft.name.trim().length > 0 ? draft.name : preset.name,
+      departmentId: departmentNamed(departments, preset.department) ?? draft.departmentId,
       instructions: preset.instructions,
       skillIds: snapshot.skills
         .filter((skill) => preset.skills.includes(skill.name))
@@ -252,6 +262,7 @@ function AgentForm(props: {
         name: draft.name.trim(),
         title: draft.title.trim(),
         avatar: draft.avatar,
+        ...(department === null ? {} : { departmentId: department.id }),
         reportsToAgentId: isCeo ? null : draft.reportsToAgentId,
         skillIds: draft.skillIds,
         instructions: draft.instructions,
@@ -298,7 +309,7 @@ function AgentForm(props: {
               ))}
             </div>
           ) : null}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-agent-name">Name</Label>
               <Input
@@ -317,6 +328,26 @@ function AgentForm(props: {
                 placeholder="Backend engineer"
                 onChange={(event) => setDraft({ ...draft, title: event.target.value })}
               />
+            </div>
+            <div className="flex min-w-0 flex-col gap-2">
+              <Label>Department</Label>
+              <Select
+                value={draft.departmentId ?? ""}
+                onValueChange={(value) =>
+                  setDraft({ ...draft, departmentId: (value as BoardDepartmentId) || null })
+                }
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue>{department?.name ?? "Choose a department"}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {departments.map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.id} label={candidate.name}>
+                      {candidate.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

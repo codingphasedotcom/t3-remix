@@ -10,6 +10,7 @@ import {
   type BoardTaskId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
+  type Project,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -24,6 +25,7 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as BoardService from "./BoardService.ts";
 import * as BoardStore from "./BoardStore.ts";
 
@@ -65,6 +67,9 @@ const makeHarness = Effect.gen(function* () {
         workspaceRoot: `/projects/${input.name}`,
       }),
   });
+  const projects = Layer.mock(ProjectService.ProjectService)({
+    getById: () => Effect.succeed(Option.some({ workspaceRoot: "/repo" } as Project)),
+  });
   const layer = BoardService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -72,6 +77,7 @@ const makeHarness = Effect.gen(function* () {
         threads,
         launcher,
         folders,
+        projects,
       ),
     ),
   );
@@ -165,7 +171,7 @@ it.effect("a manager's delegated card runs, then comes back to that manager for 
       assert.include(prompt, "Acme");
       assert.include(prompt, "Ship the best widgets.");
       assert.include(prompt, "You report to Ada (CEO).");
-      assert.include(prompt, "Engineer (Engineer)");
+      assert.include(prompt, "Engineer (Engineer, Executive)");
 
       // The CTO delegates to its engineer and becomes the subtask's reviewer.
       const asLead = { kind: "agent", threadId: leadThread } as const;
@@ -237,6 +243,227 @@ it.effect("a manager's delegated card runs, then comes back to that manager for 
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("tells every agent which folder, branch, and base it works in", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId, lead, engineer } = yield* createCompany(board);
+      yield* board.runCommand(
+        {
+          type: "settings.update",
+          settings: { companyId: company.id, baseRef: "main", maxConcurrentRuns: 5 },
+        },
+        user,
+      );
+      const launchFor = Effect.fn("test.launchFor")(function* (taskId: BoardTaskId | undefined) {
+        const snapshot = yield* boardWhere(
+          board,
+          company.id,
+          (current) => threadOf(current, taskId) !== null,
+        );
+        const launch = (yield* Ref.get(harness.launches)).find(
+          (candidate) => candidate.threadId === threadOf(snapshot, taskId),
+        );
+        assert.isDefined(launch);
+        return launch!;
+      });
+
+      // A top-level card gets its own worktree on a branch named before launch.
+      const { task: parent } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Build checkout", assigneeAgentId: lead.id },
+        },
+        user,
+      );
+      const leadLaunch = yield* launchFor(parent?.id);
+      const strategy = leadLaunch.workspaceStrategy;
+      assert.equal(strategy.type, "worktree");
+      const branch = strategy.branch ?? "";
+      assert.match(branch, /^board\/build-checkout-[0-9a-f]{8}$/);
+      const leadPrompt = leadLaunch.initialMessage?.text ?? "";
+      assert.include(leadPrompt, "## Where you work");
+      assert.include(leadPrompt, "- Folder: a new git worktree made for this card.");
+      assert.include(leadPrompt, `- Branch: ${branch}, made for this card.`);
+      assert.include(leadPrompt, "- Base: main.");
+      assert.include(leadPrompt, "- Shared: no other card works here.");
+      assert.include(
+        leadPrompt,
+        "- Not here: work from other cards that has not been merged into main.",
+      );
+
+      // A subtask works in its parent's worktree and branch, alongside its siblings.
+      const asLead = { kind: "agent", threadId: leadLaunch.threadId as ThreadId } as const;
+      yield* board.createTask(
+        {
+          companyId: company.id,
+          title: "Receipts",
+          parentTaskId: parent!.id,
+          assigneeAgentId: engineer.id,
+          status: "backlog",
+        },
+        asLead,
+      );
+      const subtask = yield* board.createTask(
+        {
+          companyId: company.id,
+          title: "Payment form",
+          parentTaskId: parent!.id,
+          assigneeAgentId: engineer.id,
+        },
+        asLead,
+      );
+      const subtaskPrompt = (yield* launchFor(subtask.id)).initialMessage?.text ?? "";
+      assert.include(
+        subtaskPrompt,
+        `- Folder: /worktrees/${String(leadLaunch.threadId)} (the git worktree of your parent card "Build checkout").`,
+      );
+      assert.include(subtaskPrompt, `- Branch: ${branch}, your parent card's branch.`);
+      assert.include(subtaskPrompt, "- Base: main.");
+      assert.include(
+        subtaskPrompt,
+        '- Shared: yes, with your parent card and its other subtasks: "Receipts" (Engineer, Backlog).',
+      );
+      assert.include(subtaskPrompt, "merged into main");
+
+      // Without worktrees, agents share the project's own checkout.
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, useWorktrees: false } },
+        user,
+      );
+      const { task: shared } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Fix typo", assigneeAgentId: ceoId },
+        },
+        user,
+      );
+      const sharedLaunch = yield* launchFor(shared?.id);
+      assert.deepEqual(sharedLaunch.workspaceStrategy, { type: "root" });
+      const sharedPrompt = sharedLaunch.initialMessage?.text ?? "";
+      assert.include(sharedPrompt, "- Folder: /repo (the project's own checkout, not a worktree).");
+      assert.include(sharedPrompt, "- Shared: yes, with every agent working without a worktree");
+      assert.include(sharedPrompt, "merges it into the branch checked out here");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("puts every employee in exactly one of the company's departments", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId, lead, engineer } = yield* createCompany(board);
+      assert.deepEqual(
+        company.departments.map((department) => department.name),
+        ["Executive", "Design", "Marketing", "Engineering", "Customer Support"],
+      );
+      const [executive, design, marketing, engineering, support] = company.departments;
+      const departmentOf = (agentId: BoardAgentId) =>
+        board
+          .snapshot(company.id)
+          .pipe(
+            Effect.map(
+              (snapshot) => snapshot.agents.find((agent) => agent.id === agentId)?.departmentId,
+            ),
+          );
+      assert.equal(yield* departmentOf(ceoId), executive!.id);
+
+      // People join their manager's department unless they are placed elsewhere.
+      yield* board.runCommand(
+        { type: "agent.upsert", agent: { ...lead, departmentId: engineering!.id } },
+        user,
+      );
+      assert.equal(yield* departmentOf(lead.id), engineering!.id);
+      const { agent: hire } = yield* board.runCommand(
+        {
+          type: "agent.upsert",
+          agent: {
+            companyId: company.id,
+            name: "Rita",
+            title: "Engineer",
+            reportsToAgentId: lead.id,
+            skillIds: [],
+            instructions: "",
+            modelSelection: model,
+            runtimeMode: "full-access",
+          },
+        },
+        user,
+      );
+      assert.equal(hire?.departmentId, engineering!.id);
+      assert.equal(yield* departmentOf(engineer.id), executive!.id);
+
+      // Departments can be renamed, added, and removed once nobody is in them.
+      const occupied = yield* board
+        .runCommand(
+          {
+            type: "company.update",
+            company: { id: company.id, departments: [executive!, design!, support!] },
+          },
+          user,
+        )
+        .pipe(Effect.flip);
+      assert.include(occupied.message, "Move Lead, Rita out of Engineering");
+      const duplicate = yield* board
+        .runCommand(
+          {
+            type: "company.update",
+            company: {
+              id: company.id,
+              departments: [executive!, engineering!, { name: "engineering" }],
+            },
+          },
+          user,
+        )
+        .pipe(Effect.flip);
+      assert.include(duplicate.message, 'two "engineering" departments');
+      const { company: updated } = yield* board.runCommand(
+        {
+          type: "company.update",
+          company: {
+            id: company.id,
+            departments: [
+              executive!,
+              engineering!,
+              { id: support!.id, name: "Support" },
+              { name: "Sales" },
+            ],
+          },
+        },
+        user,
+      );
+      assert.deepEqual(
+        updated?.departments.map((department) => department.name),
+        ["Executive", "Engineering", "Support", "Sales"],
+      );
+      assert.equal(updated?.departments[2]?.id, support!.id);
+      assert.isFalse(updated?.departments.some((department) => department.id === marketing!.id));
+
+      // Agents see their department and who is in each one.
+      yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Plan the API", assigneeAgentId: lead.id },
+        },
+        user,
+      );
+      yield* boardWhere(board, company.id, (snapshot) =>
+        snapshot.tasks.some((task) => task.threadId !== null),
+      );
+      const [launch] = yield* Ref.get(harness.launches);
+      const prompt = launch?.initialMessage?.text ?? "";
+      assert.include(prompt, "You are Lead, a CTO in Engineering at Acme");
+      assert.include(
+        prompt,
+        "Departments: Executive (Ada, Engineer); Engineering (Lead, Rita); Support (nobody yet); Sales (nobody yet).",
+      );
+      assert.include(prompt, "- Rita (Engineer, Engineering)");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect("keeps the org chart a tree with the CEO at the top", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
@@ -304,11 +531,13 @@ it.effect("adds an agent only once a person approves its hire request", () =>
         company.id,
         (snapshot) => threadOf(snapshot, task?.id) !== null,
       );
+      const design = company.departments.find((department) => department.name === "Design");
       const hire = yield* board.requestHire(
         {
           companyId: company.id,
           name: "Dana",
           title: "Designer",
+          departmentId: design!.id,
           reportsToAgentId: null,
           skillIds: [skill!.id],
           instructions: "Own the visual design.",
@@ -326,6 +555,7 @@ it.effect("adds an agent only once a person approves its hire request", () =>
         user,
       );
       assert.equal(agent?.reportsToAgentId, lead.id);
+      assert.equal(agent?.departmentId, design!.id);
       assert.deepEqual(agent?.skillIds, [skill!.id]);
       assert.deepEqual(agent?.modelSelection, model);
       const after = yield* board.snapshot(company.id);

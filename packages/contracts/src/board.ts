@@ -31,6 +31,9 @@ export type BoardRunId = typeof BoardRunId.Type;
 export const BoardHireId = TrimmedNonEmptyString.pipe(Schema.brand("BoardHireId"));
 export type BoardHireId = typeof BoardHireId.Type;
 
+export const BoardDepartmentId = TrimmedNonEmptyString.pipe(Schema.brand("BoardDepartmentId"));
+export type BoardDepartmentId = typeof BoardDepartmentId.Type;
+
 const BOARD_TASK_STATUSES = [
   "backlog",
   "todo",
@@ -56,10 +59,20 @@ const BoardConcurrentRuns = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: MAX_BOARD_CONCURRENT_RUNS }),
 );
 
+const BoardDepartmentName = TrimmedNonEmptyString.check(Schema.isMaxLength(40));
+
+/** A part of the company, such as Engineering. Every agent belongs to exactly one. */
+export const BoardDepartment = Schema.Struct({
+  id: BoardDepartmentId,
+  name: BoardDepartmentName,
+});
+export type BoardDepartment = typeof BoardDepartment.Type;
+
 export const BoardCompany = Schema.Struct({
   id: BoardCompanyId,
   name: TrimmedNonEmptyString,
   mission: Schema.String,
+  departments: Schema.Array(BoardDepartment),
   memory: Schema.String.annotate({
     description: "Decisions and conventions every agent in the company should know.",
   }),
@@ -90,6 +103,7 @@ export const BoardAgent = Schema.Struct({
   name: TrimmedNonEmptyString,
   title: TrimmedString,
   avatar: BoardAvatar,
+  departmentId: BoardDepartmentId,
   reportsToAgentId: Schema.NullOr(BoardAgentId),
   skillIds: Schema.Array(BoardSkillId),
   instructions: Schema.String,
@@ -114,6 +128,7 @@ export const BoardHire = Schema.Struct({
   requestedByAgentId: Schema.NullOr(BoardAgentId),
   name: TrimmedNonEmptyString,
   title: TrimmedString,
+  departmentId: Schema.NullOr(BoardDepartmentId),
   reportsToAgentId: Schema.NullOr(BoardAgentId),
   skillIds: Schema.Array(BoardSkillId),
   instructions: Schema.String,
@@ -262,6 +277,14 @@ export const BoardCompanyUpdateInput = Schema.Struct({
   name: Schema.optional(TrimmedNonEmptyString),
   mission: Schema.optional(Schema.String),
   memory: Schema.optional(Schema.String),
+  departments: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ id: Schema.optional(BoardDepartmentId), name: BoardDepartmentName }),
+    ),
+  ).annotate({
+    description:
+      "Every department in order; entries without an id are new. A department with people in it cannot be removed.",
+  }),
 });
 export type BoardCompanyUpdateInput = typeof BoardCompanyUpdateInput.Type;
 
@@ -280,6 +303,9 @@ export const BoardAgentUpsertInput = Schema.Struct({
   name: TrimmedNonEmptyString,
   title: TrimmedString,
   avatar: Schema.optional(BoardAvatar),
+  departmentId: Schema.optional(BoardDepartmentId).annotate({
+    description: "Defaults to the manager's department.",
+  }),
   reportsToAgentId: Schema.NullOr(BoardAgentId),
   skillIds: Schema.Array(BoardSkillId),
   instructions: Schema.String,

@@ -159,12 +159,14 @@ function CompanyNode(props: {
           ) : null}
         </button>
         <Button
-          size="icon-xs"
-          variant="ghost-muted"
+          size="xs"
+          variant="outline"
           aria-label={`Open ${props.company.name}'s board`}
+          className="shrink-0"
           onClick={() => openBoard(props.company.id)}
         >
           <KanbanSquareIcon />
+          Board
         </Button>
       </div>
       {open ? (
