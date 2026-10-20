@@ -54,6 +54,7 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as BoardService from "../board/BoardService.ts";
+import * as BoardStore from "../board/BoardStore.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 
 export const layerEventInfrastructure = Layer.mergeAll(
@@ -294,7 +295,14 @@ const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
   ),
 );
 const layerBoardProvided = BoardService.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerThreadLaunchProvided, layerThreadManagementProvided)),
+  Layer.provide(
+    Layer.mergeAll(
+      BoardStore.layer,
+      layerThreadLaunchProvided,
+      layerThreadManagementProvided,
+      layerManagedProjectFoldersProvided,
+    ),
+  ),
 );
 const layerProviderContinuationWorkerProvided = ProviderContinuationService.layer.pipe(
   Layer.provide(

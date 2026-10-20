@@ -2077,7 +2077,7 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
-        [WS_METHODS.boardSubscribe]: (input) => board.subscribe(input.projectId),
+        [WS_METHODS.boardSubscribe]: (input) => board.subscribe(input.companyId),
         [WS_METHODS.boardTaskDetail]: (input) => board.subscribeTaskDetail(input.taskId),
         [WS_METHODS.boardCommand]: (input) => board.runCommand(input, { kind: "user" }),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),

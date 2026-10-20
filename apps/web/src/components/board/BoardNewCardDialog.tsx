@@ -1,4 +1,4 @@
-import type { BoardAgent, BoardAgentId, BoardTaskStatus, ProjectId } from "@t3tools/contracts";
+import type { BoardAgentId, BoardSnapshot, BoardTaskStatus } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { Button } from "../ui/button";
@@ -21,13 +21,26 @@ import type { RunBoardCommand } from "./BoardPage";
 export function BoardNewCardDialog(props: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly projectId: ProjectId;
-  readonly agents: ReadonlyArray<BoardAgent>;
+  readonly snapshot: BoardSnapshot;
   readonly runCommand: RunBoardCommand;
 }) {
+  return props.open ? <NewCardForm {...props} /> : null;
+}
+
+function NewCardForm(props: {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  readonly snapshot: BoardSnapshot;
+  readonly runCommand: RunBoardCommand;
+}) {
+  const company = props.snapshot.company;
+  const agents = props.snapshot.agents;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [assigneeAgentId, setAssigneeAgentId] = useState<BoardAgentId | null>(null);
+  // The board hands work to the CEO, who delegates it down the org chart.
+  const [assigneeAgentId, setAssigneeAgentId] = useState<BoardAgentId | null>(
+    company?.ceoAgentId ?? null,
+  );
   const [reviewerAgentId, setReviewerAgentId] = useState<BoardAgentId | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -39,12 +52,12 @@ export function BoardNewCardDialog(props: {
   };
 
   const create = async (status: BoardTaskStatus) => {
-    if (title.trim().length === 0) return;
+    if (title.trim().length === 0 || company === null) return;
     setSaving(true);
     const created = await props.runCommand({
       type: "task.create",
       task: {
-        projectId: props.projectId,
+        companyId: company.id,
         title: title.trim(),
         description,
         status,
@@ -53,7 +66,7 @@ export function BoardNewCardDialog(props: {
       },
     });
     setSaving(false);
-    if (!created) return;
+    if (created === null) return;
     reset();
     props.onOpenChange(false);
   };
@@ -64,8 +77,8 @@ export function BoardNewCardDialog(props: {
         <DialogHeader>
           <DialogTitle>New card</DialogTitle>
           <DialogDescription>
-            Describe the outcome you want. Put it in To do with an assignee to start that agent now,
-            or keep it in the backlog.
+            Describe the outcome you want. The CEO plans it and delegates the work to the team; you
+            review the result. Keep it in the backlog to start it later.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -94,7 +107,7 @@ export function BoardNewCardDialog(props: {
               <div className="flex flex-col gap-2">
                 <Label>Assignee</Label>
                 <AgentSelect
-                  agents={props.agents}
+                  agents={agents}
                   value={assigneeAgentId}
                   onChange={setAssigneeAgentId}
                 />
@@ -102,8 +115,9 @@ export function BoardNewCardDialog(props: {
               <div className="flex flex-col gap-2">
                 <Label>Reviewer</Label>
                 <AgentSelect
-                  agents={props.agents}
+                  agents={agents}
                   value={reviewerAgentId}
+                  noneLabel="The board (you)"
                   onChange={setReviewerAgentId}
                 />
               </div>

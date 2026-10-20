@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, KanbanSquareIcon, SettingsIcon } from "lucide-react";
+import { ArrowLeftIcon, Building2Icon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -222,8 +222,8 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             />
           ) : null}
           <SidebarUtilityItem
-            icon={<KanbanSquareIcon />}
-            label="Board"
+            icon={<Building2Icon />}
+            label="Companies"
             onClick={handleBoardClick}
           />
           <SidebarUtilityItem

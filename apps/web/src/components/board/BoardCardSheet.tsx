@@ -103,7 +103,7 @@ function BoardCardDetail(props: {
       comment: { taskId: task.id, body },
     });
     setPosting(false);
-    if (posted) setComment("");
+    if (posted !== null) setComment("");
   };
 
   const deleteCard = async () => {
@@ -111,7 +111,9 @@ function BoardCardDetail(props: {
     const confirmed =
       (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
     if (!confirmed) return;
-    if (await props.runCommand({ type: "task.delete", id: task.id })) props.onOpenCard(null);
+    if ((await props.runCommand({ type: "task.delete", id: task.id })) !== null) {
+      props.onOpenCard(null);
+    }
   };
 
   const canStart =
@@ -203,6 +205,7 @@ function BoardCardDetail(props: {
               <Label>Reviewer</Label>
               <AgentSelect
                 agents={snapshot.agents}
+                noneLabel="The board (you)"
                 value={task.reviewerAgentId}
                 disabled={disabled}
                 onChange={(reviewerAgentId) => void update({ reviewerAgentId })}

@@ -1,12 +1,14 @@
 import {
   BoardAgentId,
   BoardComment,
+  BoardCompanyId,
+  BoardHire,
   BoardRunKind,
+  BoardSkillId,
   BoardTask,
   BoardTaskId,
   BoardTaskStatus,
   OrchestratorMcpFailure,
-  ProjectId,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -24,14 +26,9 @@ const shared = {
   ],
 };
 
-const ProjectIdParam = Schema.optional(ProjectId).annotate({
-  description: "Project whose board to use. Defaults to the calling thread's project.",
-});
-
-const BoardAgentSummary = Schema.Struct({
-  id: BoardAgentId,
-  name: Schema.String,
-  role: Schema.String,
+const CompanyIdParam = Schema.optional(BoardCompanyId).annotate({
+  description:
+    "Company whose board to use. Defaults to the company of the card this thread works on.",
 });
 
 const BoardCaller = Schema.NullOr(
@@ -41,15 +38,37 @@ const BoardCaller = Schema.NullOr(
     kind: BoardRunKind,
   }),
 ).annotate({
-  description: "The card and role this thread was started for, or null for an ordinary thread.",
+  description: "Who you are on this board and which card started you; null for an ordinary thread.",
+});
+
+const OrgMember = Schema.Struct({
+  id: BoardAgentId,
+  name: Schema.String,
+  title: Schema.String,
+  reportsToAgentId: Schema.NullOr(BoardAgentId),
+  skills: Schema.Array(Schema.String),
+  paused: Schema.Boolean,
+});
+
+const SkillSummary = Schema.Struct({
+  id: BoardSkillId,
+  name: Schema.String,
+  description: Schema.String,
 });
 
 const BoardListAgentsTool = Tool.make("board_list_agents", {
   ...shared,
   description:
-    "List the agents on the board team with their ids and roles. Use an id to assign or review a card.",
-  // No `parameters`: the default empty params serialize as an object root.
-  success: Schema.Struct({ agents: Schema.Array(BoardAgentSummary), you: BoardCaller }),
+    "Show the company's org chart: every agent with title, manager, and skills, the skills library, who you are, and who you may assign work to.",
+  parameters: Schema.Struct({ companyId: CompanyIdParam }),
+  success: Schema.Struct({
+    company: Schema.Struct({ id: BoardCompanyId, name: Schema.String, mission: Schema.String }),
+    ceoAgentId: Schema.NullOr(BoardAgentId),
+    agents: Schema.Array(OrgMember),
+    skills: Schema.Array(SkillSummary),
+    you: BoardCaller,
+    canAssignTo: Schema.Array(BoardAgentId),
+  }),
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
@@ -57,9 +76,9 @@ const BoardListAgentsTool = Tool.make("board_list_agents", {
 const BoardListTasksTool = Tool.make("board_list_tasks", {
   ...shared,
   description:
-    "List cards on the project's agent board, ordered by column position. Filter by column or assignee.",
+    "List cards on the company's board, ordered by column position. Filter by column or assignee.",
   parameters: Schema.Struct({
-    projectId: ProjectIdParam,
+    companyId: CompanyIdParam,
     status: Schema.optional(BoardTaskStatus),
     assigneeAgentId: Schema.optional(BoardAgentId).annotate({
       description: "Only cards assigned to this agent.",
@@ -88,9 +107,9 @@ const BoardReadTaskTool = Tool.make("board_read_task", {
 const BoardCreateTaskTool = Tool.make("board_create_task", {
   ...shared,
   description:
-    'Create a card. Set parentTaskId to split your card into subtasks. A card created in "todo" with an assignee starts that agent automatically; "backlog" waits for a human.',
+    'Create a card. Set parentTaskId to split your card into subtasks and assign someone in your reporting line. A card in "todo" with an assignee starts that agent right away; you review it unless you name another reviewer. "backlog" waits for a human.',
   parameters: Schema.Struct({
-    projectId: ProjectIdParam,
+    companyId: CompanyIdParam,
     title: TrimmedNonEmptyString,
     description: Schema.optional(Schema.String).annotate({
       description: "What done looks like, with any context the assignee needs.",
@@ -106,7 +125,7 @@ const BoardCreateTaskTool = Tool.make("board_create_task", {
 const BoardUpdateTaskTool = Tool.make("board_update_task", {
   ...shared,
   description:
-    'Move a card or edit it. Move your own card to "review" when done, "blocked" when stuck. Reviewers move cards to "done" to approve or "todo" to request changes.',
+    'Move or edit a card. Move your own card to "review" when done, "blocked" when stuck or waiting on subtasks. Reviewers move cards to "done" to approve or "todo" to request changes.',
   parameters: Schema.Struct({
     taskId: BoardTaskId,
     status: Schema.optional(BoardTaskStatus),
@@ -121,12 +140,34 @@ const BoardUpdateTaskTool = Tool.make("board_update_task", {
 const BoardAddCommentTool = Tool.make("board_add_comment", {
   ...shared,
   description:
-    "Add a comment to a card: progress, decisions, review findings, or questions for humans and teammates. Omit taskId to comment on this thread's card.",
+    "Add a comment to a card: progress, decisions, review findings, or questions for the board and teammates. Omit taskId to comment on this thread's card.",
   parameters: Schema.Struct({
     taskId: Schema.optional(BoardTaskId),
     body: TrimmedNonEmptyString,
   }),
   success: Schema.Struct({ comment: BoardComment }),
+}).annotate(Tool.Destructive, false);
+
+const BoardRequestHireTool = Tool.make("board_request_hire", {
+  ...shared,
+  description:
+    "Ask the board to add an agent to your team when the work needs a role nobody has. A human approves or rejects it in the app; the agent does not exist until then.",
+  parameters: Schema.Struct({
+    companyId: CompanyIdParam,
+    name: TrimmedNonEmptyString,
+    title: TrimmedNonEmptyString.annotate({ description: "Job title, such as Frontend engineer." }),
+    reportsToAgentId: Schema.optional(BoardAgentId).annotate({
+      description: "Their manager; defaults to you.",
+    }),
+    skillIds: Schema.optional(Schema.Array(BoardSkillId)).annotate({
+      description: "Skills from the company library (board_list_agents lists them).",
+    }),
+    instructions: Schema.String.annotate({
+      description: "Standing instructions: what they own and how they should work.",
+    }),
+    reason: TrimmedNonEmptyString.annotate({ description: "Why the team needs this person." }),
+  }),
+  success: Schema.Struct({ hire: BoardHire }),
 }).annotate(Tool.Destructive, false);
 
 export const BoardToolkit = Toolkit.make(
@@ -136,4 +177,5 @@ export const BoardToolkit = Toolkit.make(
   BoardCreateTaskTool,
   BoardUpdateTaskTool,
   BoardAddCommentTool,
+  BoardRequestHireTool,
 );

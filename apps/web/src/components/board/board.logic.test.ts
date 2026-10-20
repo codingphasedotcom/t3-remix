@@ -1,11 +1,19 @@
-import type { BoardTask, BoardTaskId, ProjectId } from "@t3tools/contracts";
+import type {
+  BoardAgent,
+  BoardAgentId,
+  BoardCompanyId,
+  BoardTask,
+  BoardTaskId,
+  ProjectId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { dropPosition, groupTasksByStatus } from "./board.logic";
+import { dropPosition, groupTasksByStatus, orgChartRows } from "./board.logic";
 
 function card(id: string, status: BoardTask["status"], position: number): BoardTask {
   return {
     id: id as BoardTaskId,
+    companyId: "company" as BoardCompanyId,
     projectId: "project" as ProjectId,
     title: id,
     description: "",
@@ -47,5 +55,29 @@ describe("groupTasksByStatus", () => {
     );
     expect(grouped.todo.map((task) => task.id)).toEqual(["b"]);
     expect(grouped.review.map((task) => task.id)).toEqual(["a"]);
+  });
+});
+
+describe("orgChartRows", () => {
+  const agent = (id: string, reportsToAgentId: string | null) =>
+    ({ id, reportsToAgentId }) as unknown as BoardAgent;
+
+  it("lists the CEO first and each manager just above its reports", () => {
+    const agents = [
+      agent("engineer", "cto"),
+      agent("cto", "ceo"),
+      agent("ceo", null),
+      agent("designer", "ceo"),
+      agent("stray", "removed-manager"),
+    ];
+    expect(
+      orgChartRows(agents, "ceo" as BoardAgentId).map((row) => [row.agent.id, row.depth]),
+    ).toEqual([
+      ["ceo", 0],
+      ["cto", 1],
+      ["engineer", 2],
+      ["designer", 1],
+      ["stray", 0],
+    ]);
   });
 });

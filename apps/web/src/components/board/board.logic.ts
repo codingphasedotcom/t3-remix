@@ -98,3 +98,146 @@ export function subtaskProgress(
     total: subtasks.length,
   };
 }
+
+/** The org chart as nested rows: the CEO first, each manager followed by its reports. */
+export function orgChartRows(
+  agents: ReadonlyArray<BoardAgent>,
+  ceoAgentId: BoardAgentId | null,
+): ReadonlyArray<{ readonly agent: BoardAgent; readonly depth: number }> {
+  const rows: Array<{ agent: BoardAgent; depth: number }> = [];
+  const placed = new Set<BoardAgentId>();
+  const visit = (agent: BoardAgent, depth: number) => {
+    if (placed.has(agent.id)) return;
+    placed.add(agent.id);
+    rows.push({ agent, depth });
+    for (const report of agents.filter((candidate) => candidate.reportsToAgentId === agent.id)) {
+      visit(report, depth + 1);
+    }
+  };
+  const ceo = agents.find((agent) => agent.id === ceoAgentId);
+  if (ceo !== undefined) visit(ceo, 0);
+  // Anyone left over (a broken chain) still shows, at the top level.
+  for (const agent of agents) visit(agent, 0);
+  return rows;
+}
+
+export interface SkillPreset {
+  readonly name: string;
+  readonly description: string;
+  readonly instructions: string;
+}
+
+export const SKILL_PRESETS: ReadonlyArray<SkillPreset> = [
+  {
+    name: "Planning and delegation",
+    description: "Turn a goal into small, assignable cards.",
+    instructions:
+      'Read the goal and the codebase before planning. Split work into cards that one person can finish and verify in a single sitting, each with a concrete definition of done. Assign each card to the teammate whose skills fit it best, and say what to hand back. Avoid cards that only say "investigate" unless the answer decides what to build.',
+  },
+  {
+    name: "Code review",
+    description: "Approve only changes you would merge.",
+    instructions:
+      "Read the full diff. Check correctness, edge cases, error handling, tests that would catch a regression, and changes outside the card's scope. Run the tests. When requesting changes, list each one with the file, the problem, and what would fix it.",
+  },
+  {
+    name: "Testing",
+    description: "Prove behavior with automated tests.",
+    instructions:
+      "Write tests for the behavior the card asks for, including the failure and edge cases. Prefer tests that exercise real behavior over mocks of the code under test. Run the whole relevant test suite before reporting done, and paste the result into your comment.",
+  },
+  {
+    name: "Frontend",
+    description: "Build UI that matches the existing app.",
+    instructions:
+      "Follow the app's existing components, styles, and patterns before inventing new ones. Handle loading, empty, and error states. Keep the UI accessible: labels, keyboard use, and focus. Describe how you checked the result in the browser.",
+  },
+  {
+    name: "Backend and APIs",
+    description: "Change servers, data, and APIs safely.",
+    instructions:
+      "Validate inputs at the boundary, keep error messages useful, and never break an existing API without saying so. When you change stored data, think about existing rows. Cover new endpoints with tests.",
+  },
+  {
+    name: "Writing",
+    description: "Clear docs, copy, and release notes.",
+    instructions:
+      "Write for the reader's task: lead with what they need to do, keep sentences short, and cut anything that does not help. Match the project's existing voice and terminology.",
+  },
+];
+
+export interface EmployeePreset {
+  readonly title: string;
+  readonly name: string;
+  readonly instructions: string;
+  readonly skills: ReadonlyArray<string>;
+}
+
+export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
+  {
+    title: "CTO",
+    name: "Grace",
+    instructions:
+      "You own the technical direction. Break engineering work into cards for your engineers, review what they deliver, and keep the codebase consistent. Do small fixes yourself; delegate anything larger.",
+    skills: ["Planning and delegation", "Code review"],
+  },
+  {
+    title: "Software engineer",
+    name: "Linus",
+    instructions:
+      "You implement cards end to end: read the relevant code first, make focused changes in the codebase's style, add tests, and run the checks. Commit on the card's branch with a clear message.",
+    skills: ["Testing", "Backend and APIs"],
+  },
+  {
+    title: "Frontend engineer",
+    name: "Ada",
+    instructions:
+      "You build and polish the user interface. Match the existing design, cover interactive behavior with tests, and describe how you verified it.",
+    skills: ["Frontend", "Testing"],
+  },
+  {
+    title: "QA engineer",
+    name: "Margaret",
+    instructions:
+      "You verify that features work the way a user expects. Reproduce, test edge cases, write regression tests, and report failures with exact steps.",
+    skills: ["Testing", "Code review"],
+  },
+  {
+    title: "Technical writer",
+    name: "Mary",
+    instructions:
+      "You write and maintain docs, READMEs, and release notes for what the team ships.",
+    skills: ["Writing"],
+  },
+];
+
+export interface CompanyTemplate {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  /** Employees by title, each with the title of its manager; "CEO" is the CEO. */
+  readonly team: ReadonlyArray<{ readonly title: string; readonly reportsTo: string }>;
+}
+
+export const COMPANY_TEMPLATES: ReadonlyArray<CompanyTemplate> = [
+  {
+    id: "ceo-only",
+    label: "Just a CEO",
+    description: "Start with a CEO and add employees yourself.",
+    team: [],
+  },
+  {
+    id: "software",
+    label: "Software team",
+    description: "CTO, two engineers, and QA, with starter skills.",
+    team: [
+      { title: "CTO", reportsTo: "CEO" },
+      { title: "Software engineer", reportsTo: "CTO" },
+      { title: "Frontend engineer", reportsTo: "CTO" },
+      { title: "QA engineer", reportsTo: "CTO" },
+    ],
+  },
+];
+
+export const DEFAULT_CEO_INSTRUCTIONS =
+  "You run the company toward its mission. When the board gives you a card, decide what success means, split it into work for your team, and hold the result to a high bar. Do not do large pieces of work yourself when you have people for it. Keep the board informed with short comments.";

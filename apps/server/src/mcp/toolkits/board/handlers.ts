@@ -1,14 +1,15 @@
 import {
   OrchestratorMcpFailure,
+  type BoardCompanyId,
   type BoardError,
   type BoardTaskId,
-  type ProjectId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import * as BoardService from "../../../board/BoardService.ts";
+import { assignableBy } from "../../../board/boardOrg.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { readCaller, resolveProjectId } from "../../threadAccess.ts";
+import { readCaller } from "../../threadAccess.ts";
 import { BoardToolkit } from "./tools.ts";
 
 const boardFailure = (error: BoardError) =>
@@ -17,14 +18,37 @@ const boardFailure = (error: BoardError) =>
 const make = Effect.gen(function* () {
   const board = yield* BoardService.BoardService;
 
-  const callerContext = Effect.fn("mcp.board.callerContext")(function* (projectId?: ProjectId) {
+  /**
+   * The board a tool call means: the one named, else the company of the caller's card, else
+   * the only company working in the caller's project.
+   */
+  const callerContext = Effect.fn("mcp.board.callerContext")(function* (
+    companyId?: BoardCompanyId,
+  ) {
     const context = yield* readCaller();
-    const resolvedProjectId = yield* resolveProjectId(context, projectId);
     const assignment =
       context.caller === undefined
         ? null
         : yield* board.assignmentForThread(context.caller.id).pipe(Effect.mapError(boardFailure));
-    return { context, projectId: resolvedProjectId, assignment };
+    if (companyId !== undefined) return { context, companyId, assignment };
+    if (assignment !== null) return { context, companyId: assignment.companyId, assignment };
+    const candidates =
+      context.caller === undefined
+        ? []
+        : yield* board
+            .companiesForProject(context.caller.projectId)
+            .pipe(Effect.mapError(boardFailure));
+    const [only] = candidates;
+    if (candidates.length === 1 && only !== undefined) {
+      return { context, companyId: only, assignment };
+    }
+    return yield* new OrchestratorMcpFailure({
+      code: "target_required",
+      message:
+        candidates.length === 0
+          ? "Pass companyId: no company works in this project."
+          : `Pass companyId: several companies work in this project (${candidates.join(", ")}).`,
+    });
   });
 
   const actor = Effect.fn("mcp.board.actor")(function* () {
@@ -40,7 +64,11 @@ const make = Effect.gen(function* () {
 
   const ownTaskId = Effect.fn("mcp.board.ownTaskId")(function* (taskId: BoardTaskId | undefined) {
     if (taskId !== undefined) return taskId;
-    const { assignment } = yield* callerContext();
+    const context = yield* readCaller();
+    const assignment =
+      context.caller === undefined
+        ? null
+        : yield* board.assignmentForThread(context.caller.id).pipe(Effect.mapError(boardFailure));
     if (assignment === null) {
       return yield* new OrchestratorMcpFailure({
         code: "target_required",
@@ -55,28 +83,60 @@ const make = Effect.gen(function* () {
       ? null
       : { agentId: assignment.agentId, taskId: assignment.taskId, kind: assignment.kind };
 
+  const companyBoard = Effect.fn("mcp.board.companyBoard")(function* (companyId: BoardCompanyId) {
+    const snapshot = yield* board.snapshot(companyId).pipe(Effect.mapError(boardFailure));
+    if (snapshot.company === null) {
+      return yield* new OrchestratorMcpFailure({
+        code: "invalid_request",
+        message: `Company ${companyId} was not found.`,
+      });
+    }
+    return { ...snapshot, company: snapshot.company };
+  });
+
   return {
-    board_list_agents: McpToolAccess.reads(() =>
+    board_list_agents: McpToolAccess.reads((input) =>
       Effect.gen(function* () {
-        const context = yield* readCaller();
-        const assignment =
-          context.caller === undefined
-            ? null
-            : yield* board
-                .assignmentForThread(context.caller.id)
-                .pipe(Effect.mapError(boardFailure));
-        const agents = yield* board.listAgents().pipe(Effect.mapError(boardFailure));
+        const { companyId, assignment } = yield* callerContext(input.companyId);
+        const snapshot = yield* companyBoard(companyId);
+        const me =
+          assignment === null || assignment.companyId !== companyId
+            ? undefined
+            : snapshot.agents.find((agent) => agent.id === assignment.agentId);
+        const skillName = (id: string) => snapshot.skills.find((skill) => skill.id === id)?.name;
         return {
-          agents: agents.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role })),
+          company: {
+            id: snapshot.company.id,
+            name: snapshot.company.name,
+            mission: snapshot.company.mission,
+          },
+          ceoAgentId: snapshot.company.ceoAgentId,
+          agents: snapshot.agents.map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            title: agent.title,
+            reportsToAgentId: agent.reportsToAgentId,
+            skills: agent.skillIds.map(skillName).filter((name) => name !== undefined),
+            paused: agent.paused,
+          })),
+          skills: snapshot.skills.map((skill) => ({
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+          })),
           you: you(assignment),
+          canAssignTo: (me === undefined
+            ? snapshot.agents
+            : assignableBy(snapshot.company, snapshot.agents, me)
+          ).map((agent) => agent.id),
         };
       }),
     ),
 
     board_list_tasks: McpToolAccess.reads((input) =>
       Effect.gen(function* () {
-        const { projectId, assignment } = yield* callerContext(input.projectId);
-        const snapshot = yield* board.snapshot(projectId).pipe(Effect.mapError(boardFailure));
+        const { companyId, assignment } = yield* callerContext(input.companyId);
+        const snapshot = yield* companyBoard(companyId);
         const tasks = snapshot.tasks.filter(
           (task) =>
             (input.status === undefined || task.status === input.status) &&
@@ -90,9 +150,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const taskId = yield* ownTaskId(input.taskId);
         const detail = yield* board.taskDetail(taskId).pipe(Effect.mapError(boardFailure));
-        const snapshot = yield* board
-          .snapshot(detail.task.projectId)
-          .pipe(Effect.mapError(boardFailure));
+        const snapshot = yield* companyBoard(detail.task.companyId);
         return {
           task: detail.task,
           comments: detail.comments,
@@ -104,11 +162,11 @@ const make = Effect.gen(function* () {
 
     board_create_task: McpToolAccess.writes((input) =>
       Effect.gen(function* () {
-        const { projectId } = yield* callerContext(input.projectId);
+        const { companyId } = yield* callerContext(input.companyId);
         const task = yield* board
           .createTask(
             {
-              projectId,
+              companyId,
               title: input.title,
               ...(input.description === undefined ? {} : { description: input.description }),
               ...(input.parentTaskId === undefined ? {} : { parentTaskId: input.parentTaskId }),
@@ -157,6 +215,27 @@ const make = Effect.gen(function* () {
           .addComment({ taskId, body: input.body }, yield* actor())
           .pipe(Effect.mapError(boardFailure));
         return { comment };
+      }),
+    ),
+
+    board_request_hire: McpToolAccess.writes((input) =>
+      Effect.gen(function* () {
+        const { companyId } = yield* callerContext(input.companyId);
+        const hire = yield* board
+          .requestHire(
+            {
+              companyId,
+              name: input.name,
+              title: input.title,
+              reportsToAgentId: input.reportsToAgentId ?? null,
+              skillIds: input.skillIds ?? [],
+              instructions: input.instructions,
+              reason: input.reason,
+            },
+            yield* actor(),
+          )
+          .pipe(Effect.mapError(boardFailure));
+        return { hire };
       }),
     ),
   } satisfies McpToolAccess.Handlers<typeof BoardToolkit.tools>;

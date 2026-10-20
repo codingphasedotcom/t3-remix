@@ -9,8 +9,11 @@ export function AgentSelect(props: {
   readonly value: BoardAgentId | null;
   readonly onChange: (value: BoardAgentId | null) => void;
   readonly disabled?: boolean;
+  /** What "no agent" means here, such as "The board (you)" for a reviewer. */
+  readonly noneLabel?: string;
 }) {
   const current = props.agents.find((agent) => agent.id === props.value) ?? null;
+  const noneLabel = props.noneLabel ?? "Nobody";
   return (
     <Select
       value={props.value ?? NOBODY}
@@ -23,21 +26,24 @@ export function AgentSelect(props: {
         <SelectValue>
           <span className="truncate">
             {current === null
-              ? "Nobody"
-              : `${current.name}${current.role ? ` · ${current.role}` : ""}`}
+              ? noneLabel
+              : `${current.name}${current.title ? ` · ${current.title}` : ""}`}
           </span>
         </SelectValue>
       </SelectTrigger>
       <SelectPopup>
-        <SelectItem value={NOBODY} label="Nobody">
-          Nobody
+        <SelectItem value={NOBODY} label={noneLabel}>
+          {noneLabel}
         </SelectItem>
         {props.agents.map((agent) => (
           <SelectItem key={agent.id} value={agent.id} label={agent.name}>
             <span className="flex min-w-0 flex-col">
-              <span className="truncate">{agent.name}</span>
-              {agent.role ? (
-                <span className="truncate text-xs text-muted-foreground">{agent.role}</span>
+              <span className="truncate">
+                {agent.name}
+                {agent.paused ? " (paused)" : ""}
+              </span>
+              {agent.title ? (
+                <span className="truncate text-xs text-muted-foreground">{agent.title}</span>
               ) : null}
             </span>
           </SelectItem>
