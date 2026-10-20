@@ -37,6 +37,16 @@ ACP fallback: some ACP agents accept the injected MCP server but fail to expose 
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.`,
   `- When model options are requested or the child keeps the parent's provider instance and model with nonempty \`inheritedOptions\` from \`orchestrator_capabilities\`, use \`delegate_task\` even for native-supported models. Native subagents cannot reliably apply T3 model options. Read the selected model's descriptors from \`orchestrator_capabilities\` and put settings in \`target.options\`, not only in the prompt. Claude commonly uses {"effort":"max","fastMode":true}; Codex uses {"reasoningEffort":"max","serviceTier":"priority"}. Do not translate max to high or ignore unsupported settings: report a capability mismatch. Options inherit only for the same provider instance and model; explicit entries override individual values, and [] or {} clears them. Check the returned providerInstanceId, model, and options against the requested selection.`,
+  `### Agent board
+
+Each project can have a kanban board shared by humans and a team of named agents. Cards move through backlog, todo, in_progress, review, blocked, and done. A card in "todo" with an assignee starts that agent in its own thread; a card in "review" with a reviewer starts the reviewer. Coordinate through the board instead of messaging teammates' threads directly:
+
+- \`board_list_agents\` lists teammates and tells you which card and role (work or review) this thread was started for, if any.
+- \`board_list_tasks\` and \`board_read_task\` read cards, comments, parents, and subtasks. \`board_read_task\` without \`taskId\` reads your own card.
+- \`board_create_task\` adds a card; set \`parentTaskId\` to split your card and assign teammates. Use "backlog" for work a human should approve before it starts.
+- \`board_update_task\` moves cards; \`board_add_comment\` records progress, decisions, and review findings.
+
+When you were started for a card, finish by commenting and moving it: your own work to "review" (or "blocked" when stuck); as a reviewer, to "done" to approve or "todo" with precise requested changes. Never create agents or move another agent's card unless the user or your card asks you to.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `

@@ -355,6 +355,15 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+import {
+  BoardCommand,
+  BoardCommandResult,
+  BoardError,
+  BoardSnapshot,
+  BoardSubscribeInput,
+  BoardTaskDetail,
+  BoardTaskDetailInput,
+} from "./board.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -520,6 +529,10 @@ export const WS_METHODS = {
   secretsAnswerRequest: "secrets.answerRequest",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  boardSubscribe: "board.subscribe",
+  boardTaskDetail: "board.taskDetail",
+  boardCommand: "board.command",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -1830,6 +1843,28 @@ const WsScheduledTasksRotateWebhookTokenRpc = Rpc.make(
   },
 );
 
+const BoardRpcError = Schema.Union([BoardError, EnvironmentAuthorizationError]);
+
+const WsBoardSubscribeRpc = Rpc.make(WS_METHODS.boardSubscribe, {
+  payload: BoardSubscribeInput,
+  success: BoardSnapshot,
+  error: BoardRpcError,
+  stream: true,
+});
+
+const WsBoardTaskDetailRpc = Rpc.make(WS_METHODS.boardTaskDetail, {
+  payload: BoardTaskDetailInput,
+  success: BoardTaskDetail,
+  error: BoardRpcError,
+  stream: true,
+});
+
+const WsBoardCommandRpc = Rpc.make(WS_METHODS.boardCommand, {
+  payload: BoardCommand,
+  success: BoardCommandResult,
+  error: BoardRpcError,
+});
+
 const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   payload: SecretRequestAnswerInput,
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
@@ -1941,6 +1976,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsSecretsAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
+  WsBoardSubscribeRpc,
+  WsBoardTaskDetailRpc,
+  WsBoardCommandRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,

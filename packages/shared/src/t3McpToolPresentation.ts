@@ -64,7 +64,11 @@ export type T3McpToolSummaryAction =
   | "browser"
   | "device"
   | "html-preview"
-  | "html-render";
+  | "html-render"
+  | "board-read"
+  | "board-create"
+  | "board-update"
+  | "board-comment";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -315,6 +319,15 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   ),
   t3_thread_launch: tool(["Launch", "Launching", "Launched", "a project thread"], "thread-create"),
   t3_project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
+  board_list_agents: tool(["List", "Listing", "Listed", "board agents"], "board-read"),
+  board_list_tasks: tool(["List", "Listing", "Listed", "board cards"], "board-read"),
+  board_read_task: tool(["Read", "Reading", "Read", "a board card"], "board-read"),
+  board_create_task: tool(["Create", "Creating", "Created", "a board card"], "board-create"),
+  board_update_task: tool(["Update", "Updating", "Updated", "a board card"], "board-update"),
+  board_add_comment: tool(
+    ["Comment", "Commenting", "Commented", "on a board card"],
+    "board-comment",
+  ),
   t3_project_read: tool(["Read", "Reading", "Read", "a project"], "project-read"),
   t3_project_create: tool(["Register", "Registering", "Registered", "a project"], "project-create"),
   t3_project_update: tool(["Update", "Updating", "Updated", "a project"], "project-update"),
