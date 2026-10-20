@@ -8,7 +8,7 @@ import type {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { dropPosition, groupTasksByStatus, orgChartRows } from "./board.logic";
+import { dropPosition, employeeThreadTitle, groupTasksByStatus, orgChartRows } from "./board.logic";
 
 function card(id: string, status: BoardTask["status"], position: number): BoardTask {
   return {
@@ -79,5 +79,15 @@ describe("orgChartRows", () => {
       ["designer", 1],
       ["stray", 0],
     ]);
+  });
+});
+
+describe("employeeThreadTitle", () => {
+  it("drops the employee's own name, which the sidebar tree already shows", () => {
+    expect(employeeThreadTitle("Linus: Payment form", "Linus")).toBe("Payment form");
+    expect(employeeThreadTitle("Review (Morgan): Payment form", "Morgan")).toBe(
+      "Review: Payment form",
+    );
+    expect(employeeThreadTitle("Renamed by hand", "Linus")).toBe("Renamed by hand");
   });
 });

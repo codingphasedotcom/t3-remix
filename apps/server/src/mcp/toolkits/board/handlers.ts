@@ -238,6 +238,32 @@ const make = Effect.gen(function* () {
         return { hire };
       }),
     ),
+
+    board_remember: McpToolAccess.writes((input) =>
+      Effect.gen(function* () {
+        return yield* board
+          .remember({ scope: input.scope ?? "self", note: input.note }, yield* actor())
+          .pipe(Effect.mapError(boardFailure));
+      }),
+    ),
+
+    board_rewrite_memory: McpToolAccess.writes((input) =>
+      Effect.gen(function* () {
+        return yield* board
+          .rewriteMemory({ scope: input.scope ?? "self", content: input.content }, yield* actor())
+          .pipe(Effect.mapError(boardFailure));
+      }),
+    ),
+
+    board_search_cards: McpToolAccess.reads((input) =>
+      Effect.gen(function* () {
+        const { companyId } = yield* callerContext(input.companyId);
+        const matches = yield* board
+          .searchCards(companyId, input.query)
+          .pipe(Effect.mapError(boardFailure));
+        return { matches };
+      }),
+    ),
   } satisfies McpToolAccess.Handlers<typeof BoardToolkit.tools>;
 });
 

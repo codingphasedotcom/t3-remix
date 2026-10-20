@@ -68,7 +68,8 @@ export type T3McpToolSummaryAction =
   | "board-read"
   | "board-create"
   | "board-update"
-  | "board-comment";
+  | "board-comment"
+  | "board-remember";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -321,6 +322,9 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
   board_list_agents: tool(["Read", "Reading", "Read", "the org chart"], "board-read"),
   board_request_hire: tool(["Request", "Requesting", "Requested", "a hire"], "board-create"),
+  board_remember: tool(["Remember", "Remembering", "Remembered", "a lesson"], "board-remember"),
+  board_rewrite_memory: tool(["Condense", "Condensing", "Condensed", "memory"], "board-remember"),
+  board_search_cards: tool(["Search", "Searching", "Searched", "past cards"], "board-read"),
   board_list_tasks: tool(["List", "Listing", "Listed", "board cards"], "board-read"),
   board_read_task: tool(["Read", "Reading", "Read", "a board card"], "board-read"),
   board_create_task: tool(["Create", "Creating", "Created", "a board card"], "board-create"),

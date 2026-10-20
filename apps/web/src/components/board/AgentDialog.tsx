@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { MAX_AGENT_MEMORY_CHARS } from "@t3tools/contracts";
 import type {
   BoardAgent,
   BoardAgentId,
@@ -42,14 +43,17 @@ import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import type { RunBoardCommand } from "./BoardPage";
 import { EMPLOYEE_PRESETS } from "./board.logic";
+import { FACES, faceFor } from "./faces";
 
 export interface AgentDraft {
   readonly id: BoardAgentId | null;
   readonly name: string;
   readonly title: string;
+  readonly avatar: string;
   readonly reportsToAgentId: BoardAgentId | null;
   readonly skillIds: ReadonlyArray<BoardSkillId>;
   readonly instructions: string;
+  readonly memory: string;
   readonly modelSelection: ModelSelection | null;
   readonly runtimeMode: RuntimeMode;
   readonly paused: boolean;
@@ -60,9 +64,11 @@ export function draftFromAgent(agent: BoardAgent): AgentDraft {
     id: agent.id,
     name: agent.name,
     title: agent.title,
+    avatar: faceFor(agent)?.key ?? "",
     reportsToAgentId: agent.reportsToAgentId,
     skillIds: agent.skillIds,
     instructions: agent.instructions,
+    memory: agent.memory,
     modelSelection: agent.modelSelection,
     runtimeMode: agent.runtimeMode,
     paused: agent.paused,
@@ -77,9 +83,11 @@ export function newEmployeeDraft(
     id: null,
     name: "",
     title: "",
+    avatar: "",
     reportsToAgentId,
     skillIds: [],
     instructions: "",
+    memory: "",
     modelSelection,
     runtimeMode: "full-access",
     paused: false,
@@ -243,9 +251,11 @@ function AgentForm(props: {
         companyId: company.id,
         name: draft.name.trim(),
         title: draft.title.trim(),
+        avatar: draft.avatar,
         reportsToAgentId: isCeo ? null : draft.reportsToAgentId,
         skillIds: draft.skillIds,
         instructions: draft.instructions,
+        memory: draft.memory,
         modelSelection: selection,
         runtimeMode: draft.runtimeMode,
         paused: draft.paused,
@@ -269,6 +279,11 @@ function AgentForm(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
+          <FacePicker
+            value={draft.avatar}
+            name={draft.name}
+            onChange={(avatar) => setDraft({ ...draft, avatar })}
+          />
           {draft.id === null ? (
             <div className="flex flex-wrap gap-2">
               {EMPLOYEE_PRESETS.map((preset) => (
@@ -427,6 +442,19 @@ function AgentForm(props: {
               onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
             />
           </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="board-agent-memory">Memory</Label>
+              <MemoryCount length={draft.memory.length} limit={MAX_AGENT_MEMORY_CHARS} />
+            </div>
+            <Textarea
+              id="board-agent-memory"
+              value={draft.memory}
+              rows={5}
+              placeholder="Lessons this agent writes down between cards appear here. You can edit or clear them."
+              onChange={(event) => setDraft({ ...draft, memory: event.target.value })}
+            />
+          </div>
         </div>
       </DialogPanel>
       <DialogFooter>
@@ -438,5 +466,70 @@ function AgentForm(props: {
         </Button>
       </DialogFooter>
     </>
+  );
+}
+
+export function MemoryCount(props: { readonly length: number; readonly limit: number }) {
+  return (
+    <span
+      className={
+        props.length > props.limit
+          ? "text-xs tabular-nums text-destructive"
+          : "text-xs tabular-nums text-muted-foreground"
+      }
+    >
+      {props.length.toLocaleString()} / {props.limit.toLocaleString()}
+    </span>
+  );
+}
+
+function FacePicker(props: {
+  readonly value: string;
+  readonly name: string;
+  readonly onChange: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = FACES.find((face) => face.key === props.value) ?? FACES[0];
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        <span className="inline-flex size-14 shrink-0 overflow-hidden rounded-full bg-muted ring-2 ring-border">
+          {current !== undefined ? (
+            <img src={current.url} alt="" className="size-full" draggable={false} />
+          ) : null}
+        </span>
+        <div className="flex flex-col gap-1">
+          <Label>Face</Label>
+          <Button size="xs" variant="outline" onClick={() => setOpen(!open)}>
+            {open ? "Done" : "Change face"}
+          </Button>
+        </div>
+      </div>
+      {open ? (
+        <div
+          role="radiogroup"
+          aria-label={`Face for ${props.name || "this agent"}`}
+          className="grid grid-cols-8 gap-2 rounded-lg border border-input bg-muted/25 p-2"
+        >
+          {FACES.map((face) => (
+            <button
+              key={face.key}
+              type="button"
+              role="radio"
+              aria-checked={face.key === current?.key}
+              aria-label={face.key}
+              className={
+                face.key === current?.key
+                  ? "overflow-hidden rounded-full bg-background ring-2 ring-primary"
+                  : "overflow-hidden rounded-full bg-background ring-1 ring-border hover:ring-foreground/40"
+              }
+              onClick={() => props.onChange(face.key)}
+            >
+              <img src={face.url} alt="" className="size-full" draggable={false} />
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }

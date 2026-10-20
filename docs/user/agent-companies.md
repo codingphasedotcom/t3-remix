@@ -5,8 +5,9 @@ library, and its own kanban board. You give the CEO cards; the CEO plans each on
 the work to its employees, reviews what they deliver, and hands the finished card back to
 you. Agents coordinate only through the board, never by messaging each other.
 
-Open **Companies** from the sidebar footer on web and desktop. The mobile app does not show
-companies yet.
+Open **Companies** from the sidebar footer on web and desktop, or switch the sidebar to
+**Companies** to see each company's employees with the threads they worked in. The mobile app
+does not show companies yet.
 
 ## Start a company
 
@@ -18,8 +19,9 @@ menu at the top left.
 
 ## Build the org chart
 
-On **Org chart**, use **Add employee** or the add-report button on any person to hire under
-them. Each employee has a role, a manager, skills, a model, permissions, and standing
+**Org chart** draws the company top-down, from the CEO through each manager to their reports,
+with a face for every employee (pick another in their editor). Use **Add employee** or the
+add-report button on any person to hire under them. Each employee has a role, a manager, skills, a model, permissions, and standing
 instructions. Pause an employee to keep their cards without starting them.
 
 A manager can assign work only to people beneath them; the CEO can assign anyone. When an
@@ -28,6 +30,16 @@ and the agent exists only after you choose **Hire**.
 
 Board agents run unattended. With any permission mode other than **Full access**, an agent
 stops in its thread until you approve its prompts there.
+
+## Memory
+
+Agents start every card fresh, so each employee keeps a memory: short lessons such as the
+project's test command or a preference you stated. Before finishing a card, an agent records
+anything worth keeping; the CEO and managers also keep a company memory that every agent sees.
+Both are included in each agent's prompt, are capped in size, and are condensed by the agents
+when they fill up. Read or edit an employee's memory in their editor on **Org chart**, and the
+company memory under **Edit name, mission, and memory** in the company menu. Agents can also
+search earlier cards to see how similar work was done.
 
 ## Skills
 

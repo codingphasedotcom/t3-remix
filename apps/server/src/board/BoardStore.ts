@@ -1,6 +1,7 @@
 import {
   BoardAgent,
   BoardAgentId,
+  BoardAgentThread,
   BoardComment,
   BoardCommentId,
   BoardCompany,
@@ -119,6 +120,12 @@ export class BoardStore extends Context.Service<
     ) => StoreEffect<void>;
     readonly deleteTask: (task: BoardTask) => StoreEffect<void>;
     readonly countOpenSubtasks: (parentId: BoardTaskId) => StoreEffect<number>;
+    /** Cards whose title, description, or comments mention `query`, newest first. */
+    readonly searchTasks: (
+      companyId: BoardCompanyId,
+      query: string,
+      limit: number,
+    ) => StoreEffect<ReadonlyArray<StoredTask>>;
 
     readonly listComments: (taskId: BoardTaskId) => StoreEffect<ReadonlyArray<BoardComment>>;
     readonly insertComment: (input: {
@@ -140,6 +147,10 @@ export class BoardStore extends Context.Service<
       status: Exclude<BoardRunStatus, "running">,
     ) => StoreEffect<void>;
     readonly runForThread: (threadId: ThreadId) => StoreEffect<RunningRun | null>;
+    /** Each employee's board threads, newest first, with the latest run in each. */
+    readonly listAgentThreads: (
+      companyId: BoardCompanyId,
+    ) => StoreEffect<ReadonlyArray<BoardAgentThread>>;
     readonly listRunningRuns: () => StoreEffect<ReadonlyArray<RunningRun>>;
     readonly countRunningRuns: (companyId: BoardCompanyId) => StoreEffect<number>;
     readonly countRuns: (taskId: BoardTaskId) => StoreEffect<number>;
@@ -160,11 +171,13 @@ export class BoardStore extends Context.Service<
 const DEFAULT_MAX_CONCURRENT_RUNS = 2;
 const DEFAULT_BASE_REF = "HEAD";
 const MAX_COMMENT_CHARS = 8_000;
+const MAX_AGENT_THREADS = 300;
 
 interface CompanyRow {
   readonly company_id: string;
   readonly name: string;
   readonly mission: string;
+  readonly memory: string;
   readonly project_id: string;
   readonly ceo_agent_id: string | null;
   readonly created_at: string;
@@ -186,9 +199,11 @@ interface AgentRow {
   readonly company_id: string;
   readonly name: string;
   readonly title: string;
+  readonly avatar: string;
   readonly reports_to_agent_id: string | null;
   readonly skill_ids_json: string;
   readonly instructions: string;
+  readonly memory: string;
   readonly model_selection_json: string;
   readonly runtime_mode: string;
   readonly paused: number;
@@ -277,6 +292,7 @@ const decodeTask = Schema.decodeUnknownEffect(BoardTask);
 const decodeComment = Schema.decodeUnknownEffect(BoardComment);
 const decodeRun = Schema.decodeUnknownEffect(BoardRun);
 const decodeSettings = Schema.decodeUnknownEffect(BoardSettings);
+const decodeAgentThread = Schema.decodeUnknownEffect(BoardAgentThread);
 
 const TASK_COLUMNS = `
   t.task_id,
@@ -336,6 +352,7 @@ const make = Effect.gen(function* () {
       company_id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       mission TEXT NOT NULL,
+      memory TEXT NOT NULL DEFAULT '',
       project_id TEXT NOT NULL,
       ceo_agent_id TEXT,
       created_at TEXT NOT NULL,
@@ -360,9 +377,11 @@ const make = Effect.gen(function* () {
       company_id TEXT NOT NULL,
       name TEXT NOT NULL,
       title TEXT NOT NULL,
+      avatar TEXT NOT NULL DEFAULT '',
       reports_to_agent_id TEXT,
       skill_ids_json TEXT NOT NULL,
       instructions TEXT NOT NULL,
+      memory TEXT NOT NULL DEFAULT '',
       model_selection_json TEXT NOT NULL,
       runtime_mode TEXT NOT NULL,
       paused INTEGER NOT NULL,
@@ -371,6 +390,16 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_agents_company ON board_agents(company_id)`;
+  // Memory arrived after companies; tables created before it gain the column empty.
+  if (!(yield* columns("board_companies")).has("memory")) {
+    yield* sql`ALTER TABLE board_companies ADD COLUMN memory TEXT NOT NULL DEFAULT ''`;
+  }
+  if (!(yield* columns("board_agents")).has("memory")) {
+    yield* sql`ALTER TABLE board_agents ADD COLUMN memory TEXT NOT NULL DEFAULT ''`;
+  }
+  if (!(yield* columns("board_agents")).has("avatar")) {
+    yield* sql`ALTER TABLE board_agents ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`;
+  }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_hires (
       hire_id TEXT PRIMARY KEY,
@@ -458,6 +487,7 @@ const make = Effect.gen(function* () {
       id: row.company_id,
       name: row.name,
       mission: row.mission,
+      memory: row.memory,
       projectId: row.project_id,
       ceoAgentId: row.ceo_agent_id,
       createdAt: row.created_at,
@@ -481,9 +511,11 @@ const make = Effect.gen(function* () {
       companyId: row.company_id,
       name: row.name,
       title: row.title,
+      avatar: row.avatar,
       reportsToAgentId: row.reports_to_agent_id,
       skillIds: yield* decodeSkillIds(row.skill_ids_json),
       instructions: row.instructions,
+      memory: row.memory,
       modelSelection: yield* decodeModelSelection(row.model_selection_json),
       runtimeMode: row.runtime_mode,
       paused: row.paused === 1,
@@ -606,15 +638,16 @@ const make = Effect.gen(function* () {
 
   const writeCompany = (company: BoardCompany) => sql`
     INSERT INTO board_companies (
-      company_id, name, mission, project_id, ceo_agent_id, created_at, updated_at
+      company_id, name, mission, memory, project_id, ceo_agent_id, created_at, updated_at
     )
     VALUES (
-      ${company.id}, ${company.name}, ${company.mission}, ${company.projectId},
+      ${company.id}, ${company.name}, ${company.mission}, ${company.memory}, ${company.projectId},
       ${company.ceoAgentId}, ${company.createdAt}, ${company.updatedAt}
     )
     ON CONFLICT (company_id) DO UPDATE SET
       name = excluded.name,
       mission = excluded.mission,
+      memory = excluded.memory,
       project_id = excluded.project_id,
       ceo_agent_id = excluded.ceo_agent_id,
       updated_at = excluded.updated_at
@@ -711,20 +744,23 @@ const make = Effect.gen(function* () {
       const modelSelection = yield* encodeModelSelection(agent.modelSelection);
       yield* sql`
         INSERT INTO board_agents (
-          agent_id, company_id, name, title, reports_to_agent_id, skill_ids_json, instructions,
-          model_selection_json, runtime_mode, paused, created_at, updated_at
+          agent_id, company_id, name, title, avatar, reports_to_agent_id, skill_ids_json,
+          instructions, memory, model_selection_json, runtime_mode, paused, created_at, updated_at
         )
         VALUES (
-          ${agent.id}, ${agent.companyId}, ${agent.name}, ${agent.title},
-          ${agent.reportsToAgentId}, ${skillIds}, ${agent.instructions}, ${modelSelection},
-          ${agent.runtimeMode}, ${agent.paused ? 1 : 0}, ${agent.createdAt}, ${agent.updatedAt}
+          ${agent.id}, ${agent.companyId}, ${agent.name}, ${agent.title}, ${agent.avatar},
+          ${agent.reportsToAgentId}, ${skillIds}, ${agent.instructions}, ${agent.memory},
+          ${modelSelection}, ${agent.runtimeMode}, ${agent.paused ? 1 : 0}, ${agent.createdAt},
+          ${agent.updatedAt}
         )
         ON CONFLICT (agent_id) DO UPDATE SET
           name = excluded.name,
           title = excluded.title,
+          avatar = excluded.avatar,
           reports_to_agent_id = excluded.reports_to_agent_id,
           skill_ids_json = excluded.skill_ids_json,
           instructions = excluded.instructions,
+          memory = excluded.memory,
           model_selection_json = excluded.model_selection_json,
           runtime_mode = excluded.runtime_mode,
           paused = excluded.paused,
@@ -938,6 +974,30 @@ const make = Effect.gen(function* () {
       failWith("Could not count subtasks."),
     );
 
+  const searchTasks: BoardStore["Service"]["searchTasks"] = Effect.fn("BoardStore.searchTasks")(
+    function* (companyId, query, limit) {
+      const pattern = `%${query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+      const rows = yield* sql<TaskRow>`
+        SELECT ${sql.literal(TASK_COLUMNS)}
+        FROM board_tasks t
+        WHERE t.company_id = ${companyId}
+          AND (
+            t.title LIKE ${pattern} ESCAPE '\\'
+            OR t.description LIKE ${pattern} ESCAPE '\\'
+            OR EXISTS (
+              SELECT 1 FROM board_comments c
+              WHERE c.task_id = t.task_id AND c.author_kind != 'system'
+                AND c.body LIKE ${pattern} ESCAPE '\\'
+            )
+          )
+        ORDER BY t.updated_at DESC
+        LIMIT ${limit}
+      `;
+      return yield* Effect.forEach(rows, toStoredTask);
+    },
+    failWith("Could not search cards."),
+  );
+
   const listComments: BoardStore["Service"]["listComments"] = Effect.fn("BoardStore.listComments")(
     function* (taskId) {
       const rows = yield* sql<CommentRow>`
@@ -1024,6 +1084,34 @@ const make = Effect.gen(function* () {
     },
     failWith("Could not resolve the thread's card."),
   );
+
+  const listAgentThreads: BoardStore["Service"]["listAgentThreads"] = Effect.fn(
+    "BoardStore.listAgentThreads",
+  )(function* (companyId) {
+    // SQLite fills the bare columns from the row holding MAX(started_at), so each thread
+    // reports its latest run.
+    const rows = yield* sql<RunRow>`
+        SELECT
+          r.thread_id, r.agent_id, r.task_id, r.kind, r.status,
+          MAX(r.started_at) AS started_at, MAX(r.rowid) AS sequence
+        FROM board_runs r
+        JOIN board_tasks t ON t.task_id = r.task_id
+        WHERE t.company_id = ${companyId}
+        GROUP BY r.thread_id, r.agent_id
+        ORDER BY started_at DESC, sequence DESC
+        LIMIT ${MAX_AGENT_THREADS}
+      `;
+    return yield* Effect.forEach(rows, (row) =>
+      decodeAgentThread({
+        threadId: row.thread_id,
+        agentId: row.agent_id,
+        taskId: row.task_id,
+        kind: row.kind,
+        status: row.status,
+        startedAt: row.started_at,
+      }),
+    );
+  }, failWith("Could not list employee threads."));
 
   const listRunningRuns: BoardStore["Service"]["listRunningRuns"] = Effect.fn(
     "BoardStore.listRunningRuns",
@@ -1141,12 +1229,14 @@ const make = Effect.gen(function* () {
     setTaskThread,
     deleteTask,
     countOpenSubtasks,
+    searchTasks,
     listComments,
     insertComment,
     listRuns,
     insertRun,
     endRun,
     runForThread,
+    listAgentThreads,
     listRunningRuns,
     countRunningRuns,
     countRuns,

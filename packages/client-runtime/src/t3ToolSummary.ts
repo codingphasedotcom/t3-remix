@@ -321,6 +321,9 @@ export function summarizeT3ToolCalls(
     case "board-comment":
       label = phrase("Commented", "comment", `on the board ${times}`);
       break;
+    case "board-remember":
+      label = phrase("Saved", "save", quantity(selected.length, "memory", "memories"));
+      break;
     case "project-list":
       label = phrase("Listed", "list", `projects ${times}`);
       break;

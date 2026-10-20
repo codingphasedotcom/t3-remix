@@ -261,8 +261,12 @@ function BoardCardFace(props: {
           </Badge>
         ) : null}
         <span className="ms-auto flex items-center gap-1">
-          {assignee !== null ? <AgentAvatar name={assignee.name} title="Assignee" /> : null}
-          {reviewer !== null ? <AgentAvatar name={reviewer.name} title="Reviewer" muted /> : null}
+          {assignee !== null ? (
+            <AgentAvatar agent={assignee} name={assignee.name} title="Assignee" />
+          ) : null}
+          {reviewer !== null ? (
+            <AgentAvatar agent={reviewer} name={reviewer.name} title="Reviewer" />
+          ) : null}
         </span>
       </div>
     </div>

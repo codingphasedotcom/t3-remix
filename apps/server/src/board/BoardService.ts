@@ -3,6 +3,8 @@ import {
   BoardCompanyId,
   BoardError,
   BoardSkillId,
+  MAX_AGENT_MEMORY_CHARS,
+  MAX_COMPANY_MEMORY_CHARS,
   CommandId,
   MessageId,
   ThreadId,
@@ -76,6 +78,14 @@ export interface BoardHireRequestInput {
   readonly reason: string;
 }
 
+export type BoardMemoryScope = "self" | "company";
+
+export interface BoardCardMatch {
+  readonly task: BoardTask;
+  /** The last summary or review comment an agent left, which is usually the useful part. */
+  readonly summary: string | null;
+}
+
 export class BoardService extends Context.Service<
   BoardService,
   {
@@ -110,6 +120,20 @@ export class BoardService extends Context.Service<
       input: BoardHireRequestInput,
       actor: BoardActor,
     ) => Effect.Effect<BoardHire, BoardError>;
+    /** Appends a dated note to the calling agent's memory or, for managers, the company's. */
+    readonly remember: (
+      input: { readonly scope: BoardMemoryScope; readonly note: string },
+      actor: BoardActor,
+    ) => Effect.Effect<{ readonly memory: string; readonly remaining: number }, BoardError>;
+    /** Replaces a memory with a condensed version written by the agent. */
+    readonly rewriteMemory: (
+      input: { readonly scope: BoardMemoryScope; readonly content: string },
+      actor: BoardActor,
+    ) => Effect.Effect<{ readonly memory: string; readonly remaining: number }, BoardError>;
+    readonly searchCards: (
+      companyId: BoardCompanyId,
+      query: string,
+    ) => Effect.Effect<ReadonlyArray<BoardCardMatch>, BoardError>;
     /** Applies one client mutation; the RPC transport sends every board write through here. */
     readonly runCommand: (
       command: BoardCommand,
@@ -220,6 +244,7 @@ const make = Effect.gen(function* () {
           skills: [],
           hires: [],
           tasks: [],
+          threads: [],
         } satisfies BoardSnapshot;
       }
       return {
@@ -230,6 +255,7 @@ const make = Effect.gen(function* () {
         skills: yield* store.listSkills(company.id),
         hires: yield* store.listHires(company.id),
         tasks: (yield* store.listTasks(company.id)).map((stored) => stored.task),
+        threads: yield* store.listAgentThreads(company.id),
       } satisfies BoardSnapshot;
     },
   );
@@ -316,6 +342,7 @@ const make = Effect.gen(function* () {
       id: companyId,
       name: input.name,
       mission: input.mission,
+      memory: "",
       projectId,
       ceoAgentId: ceoId,
       createdAt: at,
@@ -327,9 +354,11 @@ const make = Effect.gen(function* () {
       companyId,
       name: input.ceo.name,
       title: "CEO",
+      avatar: input.ceo.avatar ?? "",
       reportsToAgentId: null,
       skillIds: [],
       instructions: input.ceo.instructions,
+      memory: "",
       modelSelection: input.ceo.modelSelection,
       runtimeMode: input.ceo.runtimeMode,
       paused: false,
@@ -348,8 +377,14 @@ const make = Effect.gen(function* () {
       ...current,
       ...(input.name === undefined ? {} : { name: input.name }),
       ...(input.mission === undefined ? {} : { mission: input.mission }),
+      ...(input.memory === undefined ? {} : { memory: input.memory }),
       updatedAt: yield* store.now,
     };
+    if (next.memory.length > MAX_COMPANY_MEMORY_CHARS) {
+      return yield* boardError(
+        `Company memory is limited to ${MAX_COMPANY_MEMORY_CHARS} characters.`,
+      );
+    }
     yield* store.updateCompany(next);
     yield* notify(null);
     return next;
@@ -418,15 +453,20 @@ const make = Effect.gen(function* () {
     if (unknownSkill !== undefined) {
       return yield* boardError(`Skill ${unknownSkill} is not in this company's skill library.`);
     }
+    if ((input.memory ?? "").length > MAX_AGENT_MEMORY_CHARS) {
+      return yield* boardError(`Agent memory is limited to ${MAX_AGENT_MEMORY_CHARS} characters.`);
+    }
     const at = yield* store.now;
     const agent: BoardAgent = {
       id,
       companyId: company.id,
       name: input.name,
       title: isCeo ? "CEO" : input.title,
+      avatar: input.avatar ?? existing?.avatar ?? "",
       reportsToAgentId,
       skillIds: [...new Set(input.skillIds)],
       instructions: input.instructions,
+      memory: input.memory ?? existing?.memory ?? "",
       modelSelection: input.modelSelection,
       runtimeMode: input.runtimeMode,
       paused: input.paused ?? existing?.paused ?? false,
@@ -550,6 +590,89 @@ const make = Effect.gen(function* () {
       }
       yield* notify(company.id);
       return (yield* requireTask(id)).task;
+    },
+  );
+
+  /** The company agent making a memory change; people edit memory in the app instead. */
+  const memoryWriter = Effect.fn("BoardService.memoryWriter")(function* (
+    scope: BoardMemoryScope,
+    actor: BoardActor,
+  ) {
+    if (actor.kind !== "agent") return yield* boardError("Only agents write memory this way.");
+    const running = yield* store.runForThread(actor.threadId);
+    if (running === null) {
+      return yield* boardError("Only company agents working a card have a memory.");
+    }
+    const agent = yield* store.getAgent(running.run.agentId);
+    const company = yield* store.getCompany(running.companyId);
+    if (agent === null || company === null) return yield* boardError("Your company was removed.");
+    if (scope === "company") {
+      const agents = yield* store.listAgents(company.id);
+      const manages =
+        company.ceoAgentId === agent.id ||
+        agents.some((candidate) => candidate.reportsToAgentId === agent.id);
+      if (!manages) {
+        return yield* boardError(
+          "Only the CEO and managers write company memory. Keep it in your own memory, or comment on your card so your manager can record it.",
+        );
+      }
+    }
+    return { agent, company };
+  });
+
+  const saveMemory = Effect.fn("BoardService.saveMemory")(function* (
+    scope: BoardMemoryScope,
+    agent: BoardAgent,
+    company: BoardCompany,
+    memory: string,
+  ) {
+    const limit = scope === "company" ? MAX_COMPANY_MEMORY_CHARS : MAX_AGENT_MEMORY_CHARS;
+    if (memory.length > limit) {
+      return yield* boardError(
+        `That would make the ${scope === "company" ? "company" : "your"} memory ${memory.length} characters; the limit is ${limit}. Condense it with board_rewrite_memory first, keeping only lessons that still matter.`,
+      );
+    }
+    const at = yield* store.now;
+    if (scope === "company") {
+      yield* store.updateCompany({ ...company, memory, updatedAt: at });
+    } else {
+      yield* store.upsertAgent({ ...agent, memory, updatedAt: at });
+    }
+    yield* notify(company.id);
+    return { memory, remaining: limit - memory.length };
+  });
+
+  const remember: BoardService["Service"]["remember"] = Effect.fn("BoardService.remember")(
+    function* (input, actor) {
+      const { agent, company } = yield* memoryWriter(input.scope, actor);
+      const current = input.scope === "company" ? company.memory : agent.memory;
+      const day = (yield* store.now).slice(0, 10);
+      const note = input.note.trim().replaceAll("\n", " ");
+      const author = input.scope === "company" ? ` (${agent.name})` : "";
+      const next = `${current.trimEnd()}${current.trim().length > 0 ? "\n" : ""}- ${day}${author}: ${note}`;
+      return yield* saveMemory(input.scope, agent, company, next);
+    },
+  );
+
+  const rewriteMemory: BoardService["Service"]["rewriteMemory"] = Effect.fn(
+    "BoardService.rewriteMemory",
+  )(function* (input, actor) {
+    const { agent, company } = yield* memoryWriter(input.scope, actor);
+    return yield* saveMemory(input.scope, agent, company, input.content.trim());
+  });
+
+  const searchCards: BoardService["Service"]["searchCards"] = Effect.fn("BoardService.searchCards")(
+    function* (companyId, query) {
+      yield* requireCompany(companyId);
+      const matches = yield* store.searchTasks(companyId, query.trim(), 20);
+      return yield* Effect.forEach(matches, (stored) =>
+        store.listComments(stored.task.id).pipe(
+          Effect.map((comments) => ({
+            task: stored.task,
+            summary: comments.findLast((comment) => comment.authorKind === "agent")?.body ?? null,
+          })),
+        ),
+      );
     },
   );
 
@@ -1036,6 +1159,9 @@ const make = Effect.gen(function* () {
     updateTask,
     addComment,
     requestHire,
+    remember,
+    rewriteMemory,
+    searchCards,
     runCommand,
     assignmentForThread,
   });

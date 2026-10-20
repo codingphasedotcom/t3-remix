@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { MAX_COMPANY_MEMORY_CHARS } from "@t3tools/contracts";
 import type {
   BoardCommand,
   BoardCommandResult,
@@ -47,7 +48,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarInset } from "../ui/sidebar";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import { AgentDialog, type AgentDraft } from "./AgentDialog";
+import { AgentDialog, MemoryCount, type AgentDraft } from "./AgentDialog";
 import { BoardCardSheet } from "./BoardCardSheet";
 import { BoardColumns } from "./BoardColumns";
 import { BoardNewCardDialog } from "./BoardNewCardDialog";
@@ -261,7 +262,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             </MenuTrigger>
             <MenuPopup align="start">
               <MenuItem disabled={!canOperate} onClick={() => setEditingCompany(true)}>
-                Edit name and mission
+                Edit name, mission, and memory
               </MenuItem>
               <MenuItem
                 variant="destructive"
@@ -424,10 +425,11 @@ function EditCompanyForm(props: {
 }) {
   const [name, setName] = useState(props.company.name);
   const [mission, setMission] = useState(props.company.mission);
+  const [memory, setMemory] = useState(props.company.memory);
   const save = async () => {
     const saved = await props.runCommand({
       type: "company.update",
-      company: { id: props.company.id, name: name.trim(), mission: mission.trim() },
+      company: { id: props.company.id, name: name.trim(), mission: mission.trim(), memory },
     });
     if (saved !== null) props.onClose();
   };
@@ -455,11 +457,28 @@ function EditCompanyForm(props: {
               onChange={(event) => setMission(event.target.value)}
             />
           </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="board-edit-company-memory">Company memory</Label>
+              <MemoryCount length={memory.length} limit={MAX_COMPANY_MEMORY_CHARS} />
+            </div>
+            <Textarea
+              id="board-edit-company-memory"
+              value={memory}
+              rows={6}
+              placeholder="Decisions and conventions every agent should know. Managers add to it as they learn."
+              onChange={(event) => setMemory(event.target.value)}
+            />
+          </div>
         </div>
       </DialogPanel>
       <DialogFooter>
         <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-        <Button size="sm" disabled={name.trim().length === 0} onClick={() => void save()}>
+        <Button
+          size="sm"
+          disabled={name.trim().length === 0 || memory.length > MAX_COMPANY_MEMORY_CHARS}
+          onClick={() => void save()}
+        >
           Save
         </Button>
       </DialogFooter>

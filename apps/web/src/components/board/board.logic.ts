@@ -241,3 +241,14 @@ export const COMPANY_TEMPLATES: ReadonlyArray<CompanyTemplate> = [
 
 export const DEFAULT_CEO_INSTRUCTIONS =
   "You run the company toward its mission. When the board gives you a card, decide what success means, split it into work for your team, and hold the result to a high bar. Do not do large pieces of work yourself when you have people for it. Keep the board informed with short comments.";
+
+/**
+ * The board titles threads "Name: card" and "Review (Name): card"; under the employee's own
+ * name the prefix only repeats what the tree already shows.
+ */
+export function employeeThreadTitle(title: string, agentName: string): string {
+  const reviewPrefix = `Review (${agentName}): `;
+  if (title.startsWith(reviewPrefix)) return `Review: ${title.slice(reviewPrefix.length)}`;
+  const workPrefix = `${agentName}: `;
+  return title.startsWith(workPrefix) ? title.slice(workPrefix.length) : title;
+}

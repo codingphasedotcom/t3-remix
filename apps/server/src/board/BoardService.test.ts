@@ -216,6 +216,15 @@ it.effect("a manager's delegated card runs, then comes back to that manager for 
         snapshot.tasks.some((task) => task.id === subtask.id && task.activeRunKind === "review"),
       );
       assert.equal(reviewing.tasks.find((task) => task.id === subtask.id)?.status, "review");
+      // Each employee's threads are listed for the sidebar, newest first.
+      assert.deepEqual(
+        reviewing.threads.map((thread) => [thread.agentId, thread.kind]),
+        [
+          [lead.id, "review"],
+          [engineer.id, "work"],
+          [lead.id, "work"],
+        ],
+      );
       const detail = yield* board.taskDetail(subtask.id);
       assert.deepEqual(
         detail.runs.map((run) => [run.kind, run.agentId, run.status]),
@@ -391,6 +400,80 @@ it.effect("creates a project folder for a company that asks for a new workspace"
       );
       assert.equal(company?.projectId, ProjectId.make("project-globex"));
       assert.equal(company?.name, "Globex");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("lessons an agent remembers reach its next card's prompt", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId, engineer } = yield* createCompany(board);
+      // Three cards run at once below; the default allows two.
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 5 } },
+        user,
+      );
+      const startCard = Effect.fn("test.startCard")(function* (
+        title: string,
+        assigneeAgentId: BoardAgentId,
+      ) {
+        const { task } = yield* board.runCommand(
+          { type: "task.create", task: { companyId: company.id, title, assigneeAgentId } },
+          user,
+        );
+        const started = yield* boardWhere(
+          board,
+          company.id,
+          (snapshot) => threadOf(snapshot, task?.id) !== null,
+        );
+        return { task: task!, threadId: threadOf(started, task?.id)! };
+      });
+
+      const first = yield* startCard("Fix the build", engineer.id);
+      const asEngineer = { kind: "agent", threadId: first.threadId } as const;
+      const saved = yield* board.remember(
+        { scope: "self", note: "Run tests with pnpm test, not npm." },
+        asEngineer,
+      );
+      assert.include(saved.memory, "Run tests with pnpm test, not npm.");
+
+      // Individual contributors keep lessons to themselves; managers write company memory.
+      const denied = yield* board
+        .remember({ scope: "company", note: "Use tabs." }, asEngineer)
+        .pipe(Effect.flip);
+      assert.include(denied.message, "Only the CEO and managers");
+      const ceoCard = yield* startCard("Set direction", ceoId);
+      yield* board.remember(
+        { scope: "company", note: "We support Node 20 and newer." },
+        { kind: "agent", threadId: ceoCard.threadId },
+      );
+
+      // A memory past its limit has to be condensed instead of growing.
+      const tooLong = yield* board
+        .rewriteMemory({ scope: "self", content: "x".repeat(9_000) }, asEngineer)
+        .pipe(Effect.flip);
+      assert.include(tooLong.message, "the limit is 8000");
+
+      const second = yield* startCard("Add a flag", engineer.id);
+      const launch = (yield* Ref.get(harness.launches)).find(
+        (candidate) => candidate.threadId === second.threadId,
+      );
+      const prompt = launch?.initialMessage?.text ?? "";
+      assert.include(prompt, "## What you remember");
+      assert.include(prompt, "Run tests with pnpm test, not npm.");
+      assert.include(prompt, "(Ada): We support Node 20 and newer.");
+
+      yield* board.addComment(
+        { taskId: first.task.id, body: "Fixed by pinning esbuild." },
+        asEngineer,
+      );
+      const matches = yield* board.searchCards(company.id, "esbuild");
+      assert.deepEqual(
+        matches.map((match) => [match.task.title, match.summary]),
+        [["Fix the build", "Fixed by pinning esbuild."]],
+      );
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

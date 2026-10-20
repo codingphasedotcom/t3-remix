@@ -48,6 +48,10 @@ export type BoardTaskStatus = typeof BoardTaskStatus.Type;
 
 const MAX_BOARD_CONCURRENT_RUNS = 10;
 
+/** Memory rides along in every prompt, so it stays a short, curated list. */
+export const MAX_AGENT_MEMORY_CHARS = 8_000;
+export const MAX_COMPANY_MEMORY_CHARS = 16_000;
+
 const BoardConcurrentRuns = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: MAX_BOARD_CONCURRENT_RUNS }),
 );
@@ -56,6 +60,9 @@ export const BoardCompany = Schema.Struct({
   id: BoardCompanyId,
   name: TrimmedNonEmptyString,
   mission: Schema.String,
+  memory: Schema.String.annotate({
+    description: "Decisions and conventions every agent in the company should know.",
+  }),
   projectId: ProjectId,
   ceoAgentId: Schema.NullOr(BoardAgentId),
   createdAt: IsoDateTime,
@@ -74,14 +81,21 @@ export const BoardSkill = Schema.Struct({
 });
 export type BoardSkill = typeof BoardSkill.Type;
 
+/** A face from the app's bundled set, by key; empty lets the client pick one from the id. */
+const BoardAvatar = Schema.String.check(Schema.isMaxLength(64));
+
 export const BoardAgent = Schema.Struct({
   id: BoardAgentId,
   companyId: BoardCompanyId,
   name: TrimmedNonEmptyString,
   title: TrimmedString,
+  avatar: BoardAvatar,
   reportsToAgentId: Schema.NullOr(BoardAgentId),
   skillIds: Schema.Array(BoardSkillId),
   instructions: Schema.String,
+  memory: Schema.String.annotate({
+    description: "Lessons this agent keeps between cards.",
+  }),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   paused: Schema.Boolean,
@@ -161,6 +175,17 @@ export const BoardRun = Schema.Struct({
 });
 export type BoardRun = typeof BoardRun.Type;
 
+/** A thread the board started for an employee, with the latest run it held there. */
+export const BoardAgentThread = Schema.Struct({
+  threadId: ThreadId,
+  agentId: BoardAgentId,
+  taskId: BoardTaskId,
+  kind: BoardRunKind,
+  status: BoardRunStatus,
+  startedAt: IsoDateTime,
+});
+export type BoardAgentThread = typeof BoardAgentThread.Type;
+
 export const BoardSettings = Schema.Struct({
   companyId: BoardCompanyId,
   autoDispatch: Schema.Boolean,
@@ -191,6 +216,7 @@ export const BoardSnapshot = Schema.Struct({
   skills: Schema.Array(BoardSkill),
   hires: Schema.Array(BoardHire),
   tasks: Schema.Array(BoardTask),
+  threads: Schema.Array(BoardAgentThread),
 });
 export type BoardSnapshot = typeof BoardSnapshot.Type;
 
@@ -223,6 +249,7 @@ export const BoardCompanyCreateInput = Schema.Struct({
   workspace: BoardCompanyWorkspace,
   ceo: Schema.Struct({
     name: TrimmedNonEmptyString,
+    avatar: Schema.optional(BoardAvatar),
     instructions: Schema.String,
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
@@ -234,6 +261,7 @@ export const BoardCompanyUpdateInput = Schema.Struct({
   id: BoardCompanyId,
   name: Schema.optional(TrimmedNonEmptyString),
   mission: Schema.optional(Schema.String),
+  memory: Schema.optional(Schema.String),
 });
 export type BoardCompanyUpdateInput = typeof BoardCompanyUpdateInput.Type;
 
@@ -251,9 +279,11 @@ export const BoardAgentUpsertInput = Schema.Struct({
   companyId: BoardCompanyId,
   name: TrimmedNonEmptyString,
   title: TrimmedString,
+  avatar: Schema.optional(BoardAvatar),
   reportsToAgentId: Schema.NullOr(BoardAgentId),
   skillIds: Schema.Array(BoardSkillId),
   instructions: Schema.String,
+  memory: Schema.optional(Schema.String),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   paused: Schema.optional(Schema.Boolean),

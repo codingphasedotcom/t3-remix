@@ -116,6 +116,19 @@ function skillsBlock(context: BoardPromptContext): string | null {
   ].join("\n\n");
 }
 
+function memoryBlock(context: BoardPromptContext): string | null {
+  const company = context.company.memory.trim();
+  const own = context.agent.memory.trim();
+  if (company.length === 0 && own.length === 0) return null;
+  const lines = [
+    "## What you remember",
+    "Lessons kept from earlier cards. Trust them unless the code says otherwise.",
+  ];
+  if (company.length > 0) lines.push("", "Company memory:", company);
+  if (own.length > 0) lines.push("", "Your memory:", own);
+  return lines.join("\n");
+}
+
 function commentLines(context: BoardPromptContext, since?: string): ReadonlyArray<string> {
   return context.comments
     .filter((comment) => since === undefined || comment.createdAt > since)
@@ -166,7 +179,12 @@ The board is how this company coordinates. Use the t3-code board tools instead o
 - board_add_comment records progress, decisions, and questions. The board (humans) reads them.
 - board_create_task creates a card. A card in "todo" with an assignee starts that agent right away. You review cards you assign to others unless you name a different reviewer.
 - board_update_task moves cards between columns.
-- board_request_hire asks the board to add someone to your team. A human approves it before they exist.`;
+- board_request_hire asks the board to add someone to your team. A human approves it before they exist.
+- board_search_cards finds earlier cards and their summaries, for "how did we do this before?".
+- board_remember adds a lesson to your memory (scope "self") or, if you manage people, the company's (scope "company"); board_rewrite_memory condenses a memory that is getting full.`;
+
+const REMEMBER_RULE =
+  'Before you finish, record up to three lessons that will help on future cards with board_remember: conventions, commands, gotchas, and the board\'s preferences. Skip anything only true for this card. Managers record team-wide decisions with scope "company".';
 
 function rulesBlock(context: BoardPromptContext): string {
   const reports = directReports(context.agents, context.agent.id);
@@ -175,14 +193,14 @@ function rulesBlock(context: BoardPromptContext): string {
     'When the card is complete, add a short summary comment (what was done and how you verified it), then move it to "review". If you cannot proceed, comment why and move it to "blocked".';
   if (!manages) {
     return `## How you work
-You are an individual contributor: do this card's work yourself, in this workspace. ${finish}`;
+You are an individual contributor: do this card's work yourself, in this workspace. ${finish} ${REMEMBER_RULE}`;
   }
   const team =
     reports.length > 0
       ? "Prefer delegating over doing the work yourself"
       : "You have no reports yet, so do the work yourself, and request hires with board_request_hire when the work needs people you do not have";
   return `## How you work
-You manage work. ${team}. To delegate, split this card into focused subtasks with board_create_task: set parentTaskId to this card, write what done looks like, assign the best-suited person, and use status "todo" so they start. Then comment with your plan and move this card to "blocked". You review each subtask when it is finished: approve it by moving it to "done", or move it back to "todo" with precise changes. Once every subtask is done this card returns to "todo" and you continue here: check that the pieces add up. ${finish}`;
+You manage work. ${team}. To delegate, split this card into focused subtasks with board_create_task: set parentTaskId to this card, write what done looks like, assign the best-suited person, and use status "todo" so they start. Then comment with your plan and move this card to "blocked". You review each subtask when it is finished: approve it by moving it to "done", or move it back to "todo" with precise changes. Once every subtask is done this card returns to "todo" and you continue here: check that the pieces add up. ${finish} ${REMEMBER_RULE}`;
 }
 
 export function buildWorkPrompt(context: BoardPromptContext): string {
@@ -192,6 +210,8 @@ export function buildWorkPrompt(context: BoardPromptContext): string {
   }
   const skills = skillsBlock(context);
   if (skills !== null) sections.push(skills);
+  const memory = memoryBlock(context);
+  if (memory !== null) sections.push(memory);
   sections.push(taskBlock(context));
   const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
@@ -214,7 +234,7 @@ export function buildReworkPrompt(context: BoardPromptContext, since: string | n
           ),
         ].join("\n")
       : "",
-    'Continue the work, add a summary comment, then move the card to "review" (or "blocked" if you cannot proceed).',
+    'Continue the work, add a summary comment, then move the card to "review" (or "blocked" if you cannot proceed). Record any new lasting lesson with board_remember first.',
   ]
     .filter((section) => section.length > 0)
     .join("\n\n");
@@ -231,6 +251,8 @@ export function buildReviewPrompt(
   }
   const skills = skillsBlock(context);
   if (skills !== null) sections.push(skills);
+  const memory = memoryBlock(context);
+  if (memory !== null) sections.push(memory);
   sections.push(taskBlock(context));
   const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
@@ -243,6 +265,7 @@ export function buildReviewPrompt(
       "Judge the result against the card's description and the company's mission. Do not redo the work yourself unless a fix is trivial.",
       '- Approve: comment your verdict, then move the card to "done" with board_update_task.',
       `- Request changes: comment each required change precisely, then move the card to "todo". ${assignee} resumes automatically.`,
+      "If the review taught you something worth keeping (a recurring mistake, a standard you enforce), record it with board_remember.",
     ].join("\n"),
     BOARD_TOOLS,
   );

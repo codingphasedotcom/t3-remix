@@ -170,6 +170,54 @@ const BoardRequestHireTool = Tool.make("board_request_hire", {
   success: Schema.Struct({ hire: BoardHire }),
 }).annotate(Tool.Destructive, false);
 
+const MemoryScope = Schema.Literals(["self", "company"]).annotate({
+  description: '"self" for your own memory; "company" (managers only) for team-wide decisions.',
+});
+
+const MemoryResult = Schema.Struct({
+  memory: Schema.String,
+  remaining: Schema.Int.annotate({ description: "Characters left before the memory is full." }),
+});
+
+const BoardRememberTool = Tool.make("board_remember", {
+  ...shared,
+  description:
+    "Save a lasting lesson to memory so future cards start with it: a convention, a command, a gotcha, or the board's preference. Not a log of this card.",
+  parameters: Schema.Struct({
+    scope: Schema.optional(MemoryScope),
+    note: TrimmedNonEmptyString.annotate({ description: "One short, self-contained lesson." }),
+  }),
+  success: MemoryResult,
+}).annotate(Tool.Destructive, false);
+
+const BoardRewriteMemoryTool = Tool.make("board_rewrite_memory", {
+  ...shared,
+  description:
+    "Replace a memory with a condensed version when it is getting full: merge duplicates, drop lessons that no longer hold, keep it a short list.",
+  parameters: Schema.Struct({
+    scope: Schema.optional(MemoryScope),
+    content: Schema.String.annotate({ description: "The complete new memory." }),
+  }),
+  success: MemoryResult,
+}).annotate(Tool.Destructive, true);
+
+const BoardSearchCardsTool = Tool.make("board_search_cards", {
+  ...shared,
+  description:
+    "Search the company's cards (titles, descriptions, comments) to see how earlier work was done. Returns each card with the last summary an agent left; read its thread with t3_thread_read for detail.",
+  parameters: Schema.Struct({
+    companyId: CompanyIdParam,
+    query: TrimmedNonEmptyString,
+  }),
+  success: Schema.Struct({
+    matches: Schema.Array(
+      Schema.Struct({ task: BoardTask, summary: Schema.NullOr(Schema.String) }),
+    ),
+  }),
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+
 export const BoardToolkit = Toolkit.make(
   BoardListAgentsTool,
   BoardListTasksTool,
@@ -178,4 +226,7 @@ export const BoardToolkit = Toolkit.make(
   BoardUpdateTaskTool,
   BoardAddCommentTool,
   BoardRequestHireTool,
+  BoardRememberTool,
+  BoardRewriteMemoryTool,
+  BoardSearchCardsTool,
 );

@@ -27,6 +27,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Textarea } from "../ui/textarea";
 import { ModelField, PermissionsField, useModelChoices } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
+import { FACES, unusedFaceKey } from "./faces";
 import {
   COMPANY_TEMPLATES,
   DEFAULT_CEO_INSTRUCTIONS,
@@ -103,6 +104,7 @@ function CompanyForm(props: {
             : { type: "existing", projectId: project.id },
         ceo: {
           name: ceoName.trim(),
+          avatar: FACES[0]?.key ?? "",
           instructions: DEFAULT_CEO_INSTRUCTIONS,
           modelSelection: selection,
           runtimeMode,
@@ -127,16 +129,23 @@ function CompanyForm(props: {
       }
       setProgress("Hiring the team…");
       const agentIds = new Map<string, BoardAgentId>();
+      // Template hires each get a different face from the CEO and from each other.
+      const faces: Array<{ readonly id: string; readonly avatar: string }> = [
+        { id: "ceo", avatar: FACES[0]?.key ?? "" },
+      ];
       if (company.ceoAgentId !== null) agentIds.set("CEO", company.ceoAgentId);
       for (const member of team) {
         const preset = EMPLOYEE_PRESETS.find((candidate) => candidate.title === member.title);
         if (preset === undefined) continue;
+        const avatar = unusedFaceKey(faces, `${company.id}:${member.title}`);
+        faces.push({ id: member.title, avatar });
         const result = await props.runCommand({
           type: "agent.upsert",
           agent: {
             companyId: company.id,
             name: preset.name,
             title: preset.title,
+            avatar,
             reportsToAgentId: agentIds.get(member.reportsTo) ?? company.ceoAgentId,
             skillIds: preset.skills.flatMap((skill) => skillIds.get(skill) ?? []),
             instructions: preset.instructions,
