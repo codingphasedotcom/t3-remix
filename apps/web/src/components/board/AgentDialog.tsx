@@ -495,7 +495,7 @@ function FacePicker(props: {
       <div className="flex items-center gap-3">
         <span className="inline-flex size-14 shrink-0 overflow-hidden rounded-full bg-muted ring-2 ring-border">
           {current !== undefined ? (
-            <img src={current.url} alt="" className="size-full" draggable={false} />
+            <img src={current.url} alt="" className="size-full object-cover" draggable={false} />
           ) : null}
         </span>
         <div className="flex flex-col gap-1">
@@ -525,7 +525,7 @@ function FacePicker(props: {
               }
               onClick={() => props.onChange(face.key)}
             >
-              <img src={face.url} alt="" className="size-full" draggable={false} />
+              <img src={face.url} alt="" className="size-full object-cover" draggable={false} />
             </button>
           ))}
         </div>

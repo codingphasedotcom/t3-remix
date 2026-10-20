@@ -4,7 +4,13 @@ interface FaceOwner {
   readonly avatar: string;
 }
 
-const FACE_URLS = import.meta.glob<string>("./faces/*.svg", {
+const ILLUSTRATED_FACE_URLS = import.meta.glob<string>("./faces/*.svg", {
+  eager: true,
+  query: "?url",
+  import: "default",
+});
+
+const CUSTOM_FACE_URLS = import.meta.glob<string>("./faces-custom/*.{jpg,jpeg,png,webp,svg}", {
   eager: true,
   query: "?url",
   import: "default",
@@ -15,9 +21,21 @@ export interface Face {
   readonly url: string;
 }
 
-export const FACES: ReadonlyArray<Face> = Object.entries(FACE_URLS)
-  .map(([path, url]) => ({ key: path.slice("./faces/".length, -".svg".length), url }))
-  .toSorted((left, right) => left.key.localeCompare(right.key));
+function facesIn(urls: Record<string, string>, keyPrefix: string): ReadonlyArray<Face> {
+  return Object.entries(urls)
+    .map(([path, url]) => {
+      const file = path.slice(path.lastIndexOf("/") + 1, path.lastIndexOf("."));
+      // Keys are stored on agents, which allow 64 characters.
+      return { key: `${keyPrefix}${file}`.slice(0, 64), url };
+    })
+    .toSorted((left, right) => left.key.localeCompare(right.key));
+}
+
+const CUSTOM_FACES = facesIn(CUSTOM_FACE_URLS, "custom-");
+
+/** Faces dropped into faces-custom replace the bundled illustrations entirely. */
+export const FACES: ReadonlyArray<Face> =
+  CUSTOM_FACES.length > 0 ? CUSTOM_FACES : facesIn(ILLUSTRATED_FACE_URLS, "");
 
 function hashString(value: string): number {
   let hash = 0;

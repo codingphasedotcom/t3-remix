@@ -29,7 +29,7 @@ export function AgentAvatar(props: {
             )}
           >
             {face !== null ? (
-              <img src={face.url} alt="" className="size-full" draggable={false} />
+              <img src={face.url} alt="" className="size-full object-cover" draggable={false} />
             ) : (
               agentInitials(props.name)
             )}

@@ -230,7 +230,7 @@ function OrgCard(props: {
           <img
             src={face.url}
             alt={`${agent.name}'s face`}
-            className="size-full"
+            className="size-full object-cover"
             draggable={false}
           />
         ) : null}
