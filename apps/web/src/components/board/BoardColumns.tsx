@@ -245,7 +245,11 @@ function BoardCardFace(props: {
         {task.activeRunKind !== null ? (
           <Badge variant="info" size="sm">
             <CircleDotIcon />
-            {task.activeRunKind === "review" ? "Reviewing" : "Working"}
+            {task.activeRunKind === "review"
+              ? "Reviewing"
+              : task.activeRunKind === "reply"
+                ? "Replying"
+                : "Working"}
           </Badge>
         ) : null}
         {progress.total > 0 ? (

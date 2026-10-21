@@ -57,6 +57,7 @@ import { buildDashboard } from "./boardDashboard.ts";
 import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
 import {
   boardStatusLabel,
+  buildReplyPrompt,
   buildReviewPrompt,
   buildReworkPrompt,
   buildUserCommentMessage,
@@ -888,17 +889,18 @@ const make = Effect.gen(function* () {
         authorAgentId: actingAs?.id ?? null,
         body: input.body,
       });
-      // A human talking to a working agent should reach it now, not on its next run.
-      if (
-        actor.kind === "user" &&
-        current.task.activeRunKind !== null &&
-        current.task.threadId !== null
-      ) {
+      // A person talking to a working agent reaches it now, in whichever thread is running;
+      // with nobody working, the dispatch pass this change triggers starts a reply.
+      const running =
+        actor.kind === "user" && current.task.activeRunKind !== null
+          ? (yield* store.listRunningRuns()).find(({ run }) => run.taskId === input.taskId)
+          : undefined;
+      if (running !== undefined) {
         yield* threads
           .sendToThread({
             projectId: current.task.projectId,
             commandId: CommandId.make(`board:comment:${comment.id}`),
-            threadId: current.task.threadId,
+            threadId: running.run.threadId,
             messageId: MessageId.make(`board-comment:${comment.id}`),
             text: buildUserCommentMessage(current.task, input.body),
             attachments: [],
@@ -954,6 +956,23 @@ const make = Effect.gen(function* () {
       ancestors.push(parent);
       parentId = parent.parentTaskId;
     }
+    const comments = yield* store.listComments(task.id);
+    const boardComments = (yield* Effect.forEach([task, ...ancestors], (owner) =>
+      (owner.id === task.id ? Effect.succeed(comments) : store.listComments(owner.id)).pipe(
+        Effect.map((list) =>
+          list
+            .filter((comment) => comment.authorKind === "user")
+            .map((comment) => ({
+              taskId: owner.id,
+              taskTitle: owner.title,
+              body: comment.body,
+              createdAt: comment.createdAt,
+            })),
+        ),
+      ),
+    ))
+      .flat()
+      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
     return {
       company,
       agent,
@@ -962,7 +981,8 @@ const make = Effect.gen(function* () {
       task,
       ancestors,
       subtasks: allTasks.filter((candidate) => candidate.parentTaskId === task.id),
-      comments: yield* store.listComments(task.id),
+      comments,
+      boardComments,
     } satisfies BoardPromptContext;
   });
 
@@ -1103,19 +1123,26 @@ const make = Effect.gen(function* () {
     const commandId = CommandId.make(`board:${key}`);
     const messageId = MessageId.make(`board-message:${key}`);
 
-    // Rework continues the assignee's own thread so it keeps its context.
-    const reuseThread = kind === "work" && task.threadId !== null;
+    // Rework, and the assignee's replies, continue its own thread so it keeps its context.
+    const reuseThread =
+      task.threadId !== null &&
+      (kind === "work" || (kind === "reply" && agent.id === task.assigneeAgentId));
     const threadId = reuseThread
       ? (task.threadId as ThreadId)
       : ThreadId.make(yield* store.newId("board-thread"));
+    // Everything a person said after the last run ended is new to the replying agent.
+    const replySince = kind === "reply" ? yield* store.lastRunEndedAt(task.id) : null;
     const runId = yield* store.insertRun({ taskId: task.id, agentId: agent.id, threadId, kind });
     if (kind === "work") yield* store.updateTask(task.id, { status: "in_progress" });
-    yield* systemComment(
-      task.id,
-      kind === "work"
-        ? `${agent.name} started working${reuseThread ? " (continuing in the same thread)" : ""}.`
-        : `${agent.name} started reviewing.`,
-    );
+    // A reply announces itself with the reply; a system line would only add noise.
+    if (kind !== "reply") {
+      yield* systemComment(
+        task.id,
+        kind === "work"
+          ? `${agent.name} started working${reuseThread ? " (continuing in the same thread)" : ""}.`
+          : `${agent.name} started reviewing.`,
+      );
+    }
     yield* notify(company.id);
 
     const launched = yield* Effect.exit(
@@ -1136,7 +1163,10 @@ const make = Effect.gen(function* () {
             commandId,
             threadId,
             messageId,
-            text: buildReworkPrompt(context, since, plan!.prompt),
+            text:
+              kind === "reply"
+                ? buildReplyPrompt(context, replySince, { freshThread: false })
+                : buildReworkPrompt(context, since, plan!.prompt),
             attachments: [],
             mode: "queue",
             createdBy: "system",
@@ -1152,11 +1182,13 @@ const make = Effect.gen(function* () {
         const prompt =
           plan !== null
             ? buildWorkPrompt(context, plan.prompt)
-            : buildReviewPrompt(context, {
-                worktreePath: task.worktreePath,
-                baseRef:
-                  stored.baseRef ?? (input.settings.useWorktrees ? input.settings.baseRef : null),
-              });
+            : kind === "reply"
+              ? buildReplyPrompt(context, replySince, { freshThread: true })
+              : buildReviewPrompt(context, {
+                  worktreePath: task.worktreePath,
+                  baseRef:
+                    stored.baseRef ?? (input.settings.useWorktrees ? input.settings.baseRef : null),
+                });
         const result = yield* threadLaunch.launch({
           commandId,
           threadId,
@@ -1185,6 +1217,13 @@ const make = Effect.gen(function* () {
         cause: launched.cause,
       });
       yield* store.endRun(runId, "failed");
+      if (kind === "reply") {
+        yield* systemComment(
+          task.id,
+          `${agent.name} could not be started to reply. Check the agent's provider and model.`,
+        );
+        return;
+      }
       yield* store.updateTask(task.id, { status: "blocked" });
       yield* systemComment(
         task.id,
@@ -1200,29 +1239,46 @@ const make = Effect.gen(function* () {
 
   /** Picks the agent that should run next on a card, or null when the card should wait. */
   const nextRunFor = Effect.fn("BoardService.nextRunFor")(function* (
+    company: BoardCompany,
     stored: BoardStore.StoredTask,
     agents: ReadonlyArray<BoardAgent>,
-    manual: boolean,
+    options: {
+      readonly manual: boolean;
+      /** Work and reviews wait for a free slot; replies do not. */
+      readonly slotFree: boolean;
+      readonly awaitingReply: boolean;
+    },
   ) {
+    const { manual } = options;
     const task = stored.task;
     if (task.activeRunKind !== null) return null;
     const ready = (id: BoardAgentId | null) => {
       const agent = agents.find((candidate) => candidate.id === id);
       return agent === undefined || (agent.paused && !manual) ? null : agent;
     };
-    if (task.status === "todo") {
+    // Work and review prompts carry the board's comments, so they answer them too.
+    if (task.status === "todo" && options.slotFree) {
       const agent = ready(task.assigneeAgentId);
-      return agent === null ? null : { kind: "work" as const, agent };
+      if (agent !== null) return { kind: "work" as const, agent };
     }
-    if (task.status === "review") {
+    if (task.status === "review" && options.slotFree) {
       // One review per visit to the Review column: a reviewer that ends without deciding
       // hands the card to a human instead of being restarted forever.
       const lastReview = yield* store.lastRunStartedAt(task.id, "review");
-      if (lastReview !== null && lastReview >= stored.statusChangedAt && !manual) return null;
       const agent = ready(task.reviewerAgentId);
-      return agent === null ? null : { kind: "review" as const, agent };
+      if (
+        agent !== null &&
+        (lastReview === null || lastReview < stored.statusChangedAt || manual)
+      ) {
+        return { kind: "review" as const, agent };
+      }
     }
-    return null;
+    if (!options.awaitingReply) return null;
+    // The task's owner answers; a task nobody owns goes to the CEO.
+    const responder =
+      ready(task.assigneeAgentId) ??
+      (task.assigneeAgentId === null ? ready(company.ceoAgentId) : null);
+    return responder === null ? null : { kind: "reply" as const, agent: responder };
   });
 
   const dispatchCompany = Effect.fn("BoardService.dispatchCompany")(function* (
@@ -1236,14 +1292,20 @@ const make = Effect.gen(function* () {
     const agents = yield* store.listAgents(companyId);
     const tasks = yield* store.listTasks(companyId);
     const allTasks = tasks.map((stored) => stored.task);
+    const awaitingReply = yield* store.listTasksAwaitingReply(companyId);
     let slots = settings.maxConcurrentRuns - (yield* store.countRunningRuns(companyId));
     for (const stored of tasks) {
       if (options.onlyTaskId !== undefined && stored.task.id !== options.onlyTaskId) continue;
-      if (slots <= 0 && options.onlyTaskId === undefined) break;
-      const next = yield* nextRunFor(stored, agents, options.onlyTaskId !== undefined);
+      const manual = options.onlyTaskId !== undefined;
+      const next = yield* nextRunFor(company, stored, agents, {
+        manual,
+        slotFree: slots > 0 || manual,
+        // A person is waiting on these, so they do not queue for a free slot.
+        awaitingReply: awaitingReply.has(stored.task.id),
+      });
       if (next === null) continue;
       yield* startRun({ company, stored, ...next, agents, allTasks, settings });
-      slots -= 1;
+      if (next.kind !== "reply") slots -= 1;
     }
   });
 

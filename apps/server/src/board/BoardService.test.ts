@@ -38,8 +38,15 @@ const isBoardError = Schema.is(BoardError);
 const makeHarness = Effect.gen(function* () {
   const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchService.ThreadLaunchInput>>([]);
   const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+  const sent = yield* Ref.make<ReadonlyArray<ThreadManagementService.ThreadManagementSendInput>>(
+    [],
+  );
   const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
     streamDomainEvents: Stream.fromQueue(events),
+    sendToThread: (input) =>
+      Ref.update(sent, (all) => [...all, input]).pipe(
+        Effect.as({} as ThreadManagementService.ThreadManagementSendResult),
+      ),
     // A settled thread has no queued follow-up.
     getThreadShell: () =>
       Effect.succeed({
@@ -82,7 +89,7 @@ const makeHarness = Effect.gen(function* () {
       ),
     ),
   );
-  return { launches, events, layer };
+  return { launches, events, sent, layer };
 });
 
 /** Creates a company whose CEO, CTO, and engineer form a three-level chain. */
@@ -461,6 +468,103 @@ it.effect("puts every employee in exactly one of the company's departments", () 
         "Departments: Executive (Ada, Engineer); Engineering (Lead, Rita); Support (nobody yet); Sales (nobody yet).",
       );
       assert.include(prompt, "- Rita (Engineer, Engineering)");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("answers a person's comment right away and keeps it in later prompts", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead, engineer } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 5 } },
+        user,
+      );
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: {
+            companyId: company.id,
+            title: "Fix the funnel",
+            assigneeAgentId: lead.id,
+            status: "backlog",
+          },
+        },
+        user,
+      );
+      const taskNow = (snapshot: BoardSnapshot) =>
+        snapshot.tasks.find((candidate) => candidate.id === task?.id);
+      const finishRun = (threadId: ThreadId, id: string) =>
+        Queue.offer(harness.events, {
+          type: "run.updated",
+          threadId,
+          payload: { id, status: "completed" },
+        } as unknown as OrchestrationV2DomainEvent);
+
+      // Nobody is working the task, so its owner is started just to answer.
+      yield* board.addComment({ taskId: task!.id, body: "Only merge once it is verified." }, user);
+      yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => taskNow(snapshot)?.activeRunKind === "reply",
+      );
+      const [reply] = yield* Ref.get(harness.launches);
+      const replyPrompt = reply?.initialMessage?.text ?? "";
+      assert.include(replyPrompt, "## Reply now");
+      assert.include(replyPrompt, "- On this task (new): Only merge once it is verified.");
+      yield* finishRun(reply!.threadId as ThreadId, "run-reply");
+      const answered = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => taskNow(snapshot)?.activeRunKind === null,
+      );
+      // Replying leaves the task where it was, and the answered comment starts nothing more.
+      assert.equal(taskNow(answered)?.status, "backlog");
+      assert.lengthOf(yield* Ref.get(harness.launches), 1);
+
+      // The instruction stays in the work prompt, and reaches subtasks below the task.
+      yield* board.runCommand(
+        { type: "task.update", task: { id: task!.id, status: "todo" } },
+        user,
+      );
+      const working = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => taskNow(snapshot)?.threadId !== null,
+      );
+      const workThread = taskNow(working)!.threadId as ThreadId;
+      const workPrompt =
+        (yield* Ref.get(harness.launches)).find((launch) => launch.threadId === workThread)
+          ?.initialMessage?.text ?? "";
+      assert.include(workPrompt, "## What the board told you");
+      assert.include(workPrompt, "- On this task: Only merge once it is verified.");
+      const subtask = yield* board.createTask(
+        {
+          companyId: company.id,
+          title: "Fix the signup button",
+          parentTaskId: task!.id,
+          assigneeAgentId: engineer.id,
+        },
+        { kind: "agent", threadId: workThread },
+      );
+      yield* boardWhere(board, company.id, (snapshot) =>
+        snapshot.tasks.some(
+          (candidate) => candidate.id === subtask.id && candidate.threadId !== null,
+        ),
+      );
+      const subtaskPrompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
+      assert.include(subtaskPrompt, '- On "Fix the funnel": Only merge once it is verified.');
+
+      // A comment on a task someone is working reaches that thread at once.
+      const launchesBefore = (yield* Ref.get(harness.launches)).length;
+      yield* board.addComment({ taskId: task!.id, body: "Use the staging site." }, user);
+      const [forwarded] = yield* Ref.get(harness.sent);
+      assert.equal(forwarded?.threadId, workThread);
+      assert.include(forwarded?.text ?? "", "Use the staging site.");
+      assert.include(forwarded?.text ?? "", "Reply on the board with board_add_comment");
+      assert.lengthOf(yield* Ref.get(harness.launches), launchesBefore);
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

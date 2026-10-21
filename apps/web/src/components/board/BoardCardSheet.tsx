@@ -140,7 +140,11 @@ function BoardCardDetail(props: {
         <div className="flex flex-wrap items-center gap-2">
           {task.activeRunKind !== null ? (
             <Badge variant="info">
-              {task.activeRunKind === "review" ? "Reviewer working" : "Agent working"}
+              {task.activeRunKind === "review"
+                ? "Reviewer working"
+                : task.activeRunKind === "reply"
+                  ? "Agent replying"
+                  : "Agent working"}
             </Badge>
           ) : null}
           {canStart ? (
@@ -371,7 +375,7 @@ function RunRow(props: {
   return (
     <div className="flex items-center gap-2 text-sm">
       <span className="min-w-0 flex-1 truncate">
-        {agent?.name ?? "Removed agent"} · {props.run.kind === "review" ? "review" : "work"} ·{" "}
+        {agent?.name ?? "Removed agent"} · {props.run.kind} ·{" "}
         <span className="text-muted-foreground">{time}</span>
       </span>
       <Badge

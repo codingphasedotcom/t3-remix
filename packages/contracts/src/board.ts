@@ -139,7 +139,8 @@ export const BoardHire = Schema.Struct({
 });
 export type BoardHire = typeof BoardHire.Type;
 
-export const BoardRunKind = Schema.Literals(["work", "review"]);
+/** "reply" answers a person's comment on a task without working the task itself. */
+export const BoardRunKind = Schema.Literals(["work", "review", "reply"]);
 export type BoardRunKind = typeof BoardRunKind.Type;
 
 export const BoardRunStatus = Schema.Literals(["running", "completed", "failed", "cancelled"]);

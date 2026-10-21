@@ -80,7 +80,12 @@ Type `@` and a job, such as `@CTO` or `@QA`, to mention an employee. In a new ta
 description, the first person you mention becomes the assignee unless you already picked one. In
 a chat in the company's project, the agent sees exactly who you mean and can hand them a task.
 
-Comments you add while an agent is working reach that agent right away. Open a task to see
+Comment on a task and its owner answers on the board right away. An agent already working on
+the task gets your comment in its thread; otherwise the assignee (or the CEO, for a task with
+no assignee) is started just to reply, and moves the task to **To do** if you asked for work.
+Replies start even when the board is at its **Agents at once** limit, but not while
+**Auto-run agents** is off or the employee is paused. Your comments on a task also reach every
+subtask below it and stay in the agents' instructions on every later run. Open a task to see
 its activity, its runs, and links to each agent's thread.
 
 ## Dashboard

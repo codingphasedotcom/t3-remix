@@ -190,10 +190,15 @@ export class BoardStore extends Context.Service<
     ) => StoreEffect<ReadonlyArray<ThreadTokenDay>>;
     readonly countRunningRuns: (companyId: BoardCompanyId) => StoreEffect<number>;
     readonly countRuns: (taskId: BoardTaskId) => StoreEffect<number>;
+    /** When the latest run of `kind` (any kind when omitted) ended; null while it runs. */
     readonly lastRunEndedAt: (
       taskId: BoardTaskId,
-      kind: BoardRunKind,
+      kind?: BoardRunKind,
     ) => StoreEffect<string | null>;
+    /** Tasks with a person's comment posted after every run on the task had ended. */
+    readonly listTasksAwaitingReply: (
+      companyId: BoardCompanyId,
+    ) => StoreEffect<ReadonlySet<BoardTaskId>>;
     readonly lastRunStartedAt: (
       taskId: BoardTaskId,
       kind: BoardRunKind,
@@ -727,7 +732,7 @@ const make = Effect.gen(function* () {
       readonly avatar: string;
     }>`
         SELECT agent_id, company_id, name, title, avatar FROM board_agents
-        ORDER BY created_at, agent_id
+        ORDER BY created_at, rowid
       `;
     return yield* Effect.forEach(rows, (row) =>
       decodeCompanySummary({
@@ -1338,11 +1343,26 @@ const make = Effect.gen(function* () {
   const lastRunEndedAt: BoardStore["Service"]["lastRunEndedAt"] = (taskId, kind) =>
     sql<{ readonly ended_at: string | null }>`
       SELECT ended_at FROM board_runs
-      WHERE task_id = ${taskId} AND kind = ${kind}
+      WHERE task_id = ${taskId} AND (${kind ?? null} IS NULL OR kind = ${kind ?? null})
       ORDER BY started_at DESC, rowid DESC LIMIT 1
     `.pipe(
       Effect.map((rows) => rows[0]?.ended_at ?? null),
       failWith("Could not read the last run."),
+    );
+
+  // A run still going counts as ending in the future: whoever it is sees the comment live.
+  const listTasksAwaitingReply: BoardStore["Service"]["listTasksAwaitingReply"] = (companyId) =>
+    sql<{ readonly task_id: string }>`
+      SELECT DISTINCT c.task_id FROM board_comments c
+      JOIN board_tasks t ON t.task_id = c.task_id
+      WHERE t.company_id = ${companyId} AND c.author_kind = 'user'
+        AND c.created_at > COALESCE(
+          (SELECT MAX(COALESCE(r.ended_at, '9999')) FROM board_runs r WHERE r.task_id = c.task_id),
+          ''
+        )
+    `.pipe(
+      Effect.map((rows) => new Set(rows.map((row) => BoardTaskId.make(row.task_id)))),
+      failWith("Could not read the board's comments."),
     );
 
   const lastRunStartedAt: BoardStore["Service"]["lastRunStartedAt"] = (taskId, kind) =>
@@ -1436,6 +1456,7 @@ const make = Effect.gen(function* () {
     countRunningRuns,
     countRuns,
     lastRunEndedAt,
+    listTasksAwaitingReply,
     lastRunStartedAt,
     getSettings,
     upsertSettings,

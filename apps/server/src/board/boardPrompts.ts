@@ -31,6 +31,15 @@ export interface BoardPromptContext {
   readonly ancestors: ReadonlyArray<BoardTask>;
   readonly subtasks: ReadonlyArray<BoardTask>;
   readonly comments: ReadonlyArray<BoardComment>;
+  /** People's comments on this task and the tasks above it, oldest first. */
+  readonly boardComments: ReadonlyArray<BoardInstruction>;
+}
+
+export interface BoardInstruction {
+  readonly taskId: BoardTask["id"];
+  readonly taskTitle: string;
+  readonly body: string;
+  readonly createdAt: string;
 }
 
 /** Where the agent's session runs, as its prompt describes it. */
@@ -161,8 +170,10 @@ function memoryBlock(context: BoardPromptContext): string | null {
   return lines.join("\n");
 }
 
+/** Agents' and the system's comments; people's comments have their own block. */
 function commentLines(context: BoardPromptContext, since?: string): ReadonlyArray<string> {
   return context.comments
+    .filter((comment) => comment.authorKind !== "user")
     .filter((comment) => since === undefined || comment.createdAt > since)
     .slice(-MAX_PROMPT_COMMENTS)
     .map((comment) => {
@@ -174,6 +185,26 @@ function commentLines(context: BoardPromptContext, since?: string): ReadonlyArra
             : agentName(context.agents, comment.authorAgentId);
       return `- [${author}] ${comment.body}`;
     });
+}
+
+const MAX_BOARD_COMMENT_CHARS = 2_000;
+
+/**
+ * What people said on this task and every task above it. Subtasks see their parents'
+ * instructions, and later runs see earlier ones, so a direction is given once.
+ */
+function boardCommentsBlock(context: BoardPromptContext, newSince?: string): string | null {
+  if (context.boardComments.length === 0) return null;
+  const lines = [
+    "## What the board told you",
+    "The people who own this company left these comments on this task and the tasks above it. They outrank everything else in this prompt: follow them exactly, and when one conflicts with your plan, ask on the board instead of guessing.",
+  ];
+  for (const comment of context.boardComments.slice(-MAX_PROMPT_COMMENTS)) {
+    const where = comment.taskId === context.task.id ? "On this task" : `On "${comment.taskTitle}"`;
+    const fresh = newSince !== undefined && comment.createdAt > newSince ? " (new)" : "";
+    lines.push(`- ${where}${fresh}: ${truncate(comment.body.trim(), MAX_BOARD_COMMENT_CHARS)}`);
+  }
+  return lines.join("\n");
 }
 
 function taskBlock(context: BoardPromptContext): string {
@@ -311,6 +342,8 @@ export function buildWorkPrompt(context: BoardPromptContext, workspace: BoardWor
   const memory = memoryBlock(context);
   if (memory !== null) sections.push(memory);
   sections.push(taskBlock(context));
+  const board = boardCommentsBlock(context);
+  if (board !== null) sections.push(board);
   const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
   sections.push(workspaceBlock(context, workspace), rulesBlock(context), BOARD_TOOLS);
@@ -327,7 +360,8 @@ export function buildReworkPrompt(
     `The task "${context.task.title}" (${context.task.id}) is back in "To do" for you.`,
     comments.length > 0
       ? ["New comments since your last run:", ...comments].join("\n")
-      : "There are no new comments; re-read the task with board_read_task to see what changed.",
+      : "There are no new comments from agents; re-read the task with board_read_task to see what changed.",
+    boardCommentsBlock(context, since ?? undefined) ?? "",
     context.subtasks.length > 0
       ? [
           "Subtasks:",
@@ -357,6 +391,8 @@ export function buildReviewPrompt(
   const memory = memoryBlock(context);
   if (memory !== null) sections.push(memory);
   sections.push(taskBlock(context));
+  const board = boardCommentsBlock(context);
+  if (board !== null) sections.push(board);
   const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
   sections.push(
@@ -375,6 +411,44 @@ export function buildReviewPrompt(
   return sections.join("\n\n");
 }
 
+const REPLY_RULES = `## Reply now
+The board just commented (marked new above) and is waiting for your answer. Right away, reply on the board with board_add_comment: answer the question, or say exactly how you will act on the instruction. Check the facts first if you need to (the code, git, the task's comments), and keep the reply short.
+Do not do the task's work in this reply. If the comment asks for work on this task, reply, then move the task to "todo" with board_update_task: you will be started on it next, with the comment in view. Otherwise leave the task where it is.`;
+
+/**
+ * Starts an agent that answers a person's comment on a task nobody is working. A fresh thread
+ * gets the whole picture; the agent's own thread already has it.
+ */
+export function buildReplyPrompt(
+  context: BoardPromptContext,
+  newSince: string | null,
+  options: { readonly freshThread: boolean },
+): string {
+  // With no earlier run on the task, everything the board said is new.
+  const board = boardCommentsBlock(context, newSince ?? "");
+  if (!options.freshThread) {
+    return [
+      `The board (a human) commented on the task "${context.task.title}" (${context.task.id}), which is in "${boardStatusLabel(context.task.status)}".`,
+      board ?? "",
+      REPLY_RULES,
+    ]
+      .filter((section) => section.length > 0)
+      .join("\n\n");
+  }
+  const sections = [identityBlock(context), orgBlock(context)];
+  if (context.agent.instructions.trim().length > 0) {
+    sections.push(`## Your standing instructions\n${context.agent.instructions.trim()}`);
+  }
+  const memory = memoryBlock(context);
+  if (memory !== null) sections.push(memory);
+  sections.push(taskBlock(context));
+  if (board !== null) sections.push(board);
+  const comments = commentLines(context);
+  if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
+  sections.push(REPLY_RULES, BOARD_TOOLS);
+  return sections.join("\n\n");
+}
+
 export function buildUserCommentMessage(task: BoardTask, body: string): string {
-  return `The board (a human) commented on your task "${task.title}" (${task.id}):\n\n${body}`;
+  return `The board (a human) commented on your task "${task.title}" (${task.id}):\n\n${body}\n\nReply on the board with board_add_comment right away: answer it, or say how you will act on it. Then follow it.`;
 }
