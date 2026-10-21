@@ -16,6 +16,7 @@ import {
   Building2Icon,
   EllipsisIcon,
   KanbanSquareIcon,
+  LayoutDashboardIcon,
   NetworkIcon,
   PlusIcon,
   SettingsIcon,
@@ -56,11 +57,12 @@ import { BoardCardSheet } from "./BoardCardSheet";
 import { BoardColumns } from "./BoardColumns";
 import { BoardNewCardDialog } from "./BoardNewCardDialog";
 import { CompanyDialog } from "./CompanyDialog";
+import { DashboardView } from "./DashboardView";
 import { OrgChartView } from "./OrgChartView";
 import { SkillsView } from "./SkillsView";
 import { agentById } from "./board.logic";
 
-export type BoardTab = "board" | "org" | "skills";
+export type BoardTab = "board" | "dashboard" | "org" | "skills";
 
 export interface BoardPageProps {
   readonly environmentId?: EnvironmentId | undefined;
@@ -287,6 +289,14 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             </Button>
             <Button
               size="sm"
+              variant={tab === "dashboard" ? "secondary" : "ghost"}
+              onClick={() => go({ company: company.id, tab: "dashboard" })}
+            >
+              <LayoutDashboardIcon />
+              Dashboard
+            </Button>
+            <Button
+              size="sm"
               variant={tab === "org" ? "secondary" : "ghost"}
               onClick={() => go({ company: company.id, tab: "org" })}
             >
@@ -329,6 +339,13 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             onOpenCard={(cardId) => go({ company: company.id, card: cardId })}
           />
         </>
+      ) : tab === "dashboard" ? (
+        <DashboardView
+          environmentId={environmentId}
+          snapshot={snapshot}
+          onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
+          onOpenOrgChart={() => go({ company: company.id, tab: "org" })}
+        />
       ) : tab === "org" ? (
         <OrgChartView
           snapshot={snapshot}
@@ -367,7 +384,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         canOperate={canOperate}
         runCommand={runCommand}
         onOpenCard={(cardId) =>
-          go({ company: company.id, ...(cardId === null ? {} : { card: cardId }) })
+          go({ company: company.id, tab, ...(cardId === null ? {} : { card: cardId }) })
         }
       />
     </>

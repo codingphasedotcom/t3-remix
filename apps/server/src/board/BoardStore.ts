@@ -20,13 +20,13 @@ import {
   BoardTask,
   BoardTaskId,
   ModelSelection,
+  ThreadId,
   type BoardCommentAuthorKind,
   type BoardHireStatus,
   type BoardRunKind,
   type BoardRunStatus,
   type BoardTaskStatus,
   type ProjectId,
-  type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -57,6 +57,21 @@ export interface TaskWorkspace {
 export interface RunningRun {
   readonly run: BoardRun;
   readonly companyId: BoardCompanyId;
+}
+
+/** A run with the model its thread used; null when the thread is gone or never recorded one. */
+export interface RunFact {
+  readonly run: BoardRun;
+  readonly modelSelection: ModelSelection | null;
+}
+
+/** Tokens one board thread spent on one day. */
+export interface ThreadTokenDay {
+  readonly threadId: ThreadId;
+  readonly day: string | null;
+  readonly input: number;
+  readonly cachedInput: number;
+  readonly output: number;
 }
 
 export interface NewTask {
@@ -167,6 +182,12 @@ export class BoardStore extends Context.Service<
       companyId: BoardCompanyId,
     ) => StoreEffect<ReadonlyArray<BoardAgentThread>>;
     readonly listRunningRuns: () => StoreEffect<ReadonlyArray<RunningRun>>;
+    readonly listRunFacts: (companyId: BoardCompanyId) => StoreEffect<ReadonlyArray<RunFact>>;
+    /** Tokens per board thread and day, where days start at the viewer's midnight. */
+    readonly listThreadTokenDays: (
+      companyId: BoardCompanyId,
+      utcOffsetMinutes: number,
+    ) => StoreEffect<ReadonlyArray<ThreadTokenDay>>;
     readonly countRunningRuns: (companyId: BoardCompanyId) => StoreEffect<number>;
     readonly countRuns: (taskId: BoardTaskId) => StoreEffect<number>;
     readonly lastRunEndedAt: (
@@ -1234,6 +1255,68 @@ const make = Effect.gen(function* () {
     return yield* Effect.forEach(rows, toRunningRun);
   }, failWith("Could not list running agents."));
 
+  // Board runs do not record a model or tokens; the orchestration projection holds both, on the
+  // run's thread and on each provider turn in it.
+  const listRunFacts: BoardStore["Service"]["listRunFacts"] = Effect.fn("BoardStore.listRunFacts")(
+    function* (companyId) {
+      const rows = yield* sql<RunRow & { readonly model_selection_json: string | null }>`
+        SELECT r.*, json_extract(th.payload_json, '$.modelSelection') AS model_selection_json
+        FROM board_runs r
+        JOIN board_tasks t ON t.task_id = r.task_id
+        LEFT JOIN orchestration_v2_projection_threads th ON th.thread_id = r.thread_id
+        WHERE t.company_id = ${companyId}
+      `;
+      return yield* Effect.forEach(rows, (row) =>
+        Effect.all({
+          run: toRun(row),
+          modelSelection:
+            row.model_selection_json === null
+              ? Effect.succeed(null)
+              : decodeModelSelection(row.model_selection_json).pipe(
+                  Effect.orElseSucceed(() => null),
+                ),
+        }),
+      );
+    },
+    failWith("Could not read run history."),
+  );
+
+  const listThreadTokenDays: BoardStore["Service"]["listThreadTokenDays"] = Effect.fn(
+    "BoardStore.listThreadTokenDays",
+  )(function* (companyId, utcOffsetMinutes) {
+    const rows = yield* sql<{
+      readonly thread_id: string;
+      readonly day: string | null;
+      readonly input_tokens: number;
+      readonly cached_input_tokens: number;
+      readonly output_tokens: number;
+    }>`
+        SELECT
+          p.thread_id,
+          date(COALESCE(p.started_at, p.completed_at), ${`${utcOffsetMinutes} minutes`}) AS day,
+          COALESCE(SUM(json_extract(p.payload_json, '$.turnTokenUsage.inputTokens')), 0)
+            AS input_tokens,
+          COALESCE(SUM(json_extract(p.payload_json, '$.turnTokenUsage.cachedInputTokens')), 0)
+            AS cached_input_tokens,
+          COALESCE(SUM(json_extract(p.payload_json, '$.turnTokenUsage.outputTokens')), 0)
+            AS output_tokens
+        FROM orchestration_v2_projection_provider_turns p
+        WHERE p.thread_id IN (
+          SELECT r.thread_id FROM board_runs r
+          JOIN board_tasks t ON t.task_id = r.task_id
+          WHERE t.company_id = ${companyId}
+        )
+        GROUP BY p.thread_id, day
+      `;
+    return rows.map((row) => ({
+      threadId: ThreadId.make(row.thread_id),
+      day: row.day,
+      input: row.input_tokens,
+      cachedInput: row.cached_input_tokens,
+      output: row.output_tokens,
+    }));
+  }, failWith("Could not read token usage."));
+
   const countRunningRuns: BoardStore["Service"]["countRunningRuns"] = (companyId) =>
     sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count FROM board_runs r
@@ -1348,6 +1431,8 @@ const make = Effect.gen(function* () {
     runForThread,
     listAgentThreads,
     listRunningRuns,
+    listRunFacts,
+    listThreadTokenDays,
     countRunningRuns,
     countRuns,
     lastRunEndedAt,

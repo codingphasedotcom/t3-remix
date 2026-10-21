@@ -12,7 +12,7 @@ interface BoardSearch {
   readonly tab?: BoardTab;
 }
 
-const BOARD_TABS: ReadonlyArray<BoardTab> = ["board", "org", "skills"];
+const BOARD_TABS: ReadonlyArray<BoardTab> = ["board", "dashboard", "org", "skills"];
 
 const searchString = (value: unknown) =>
   typeof value === "string" && value.length > 0 && value.length <= 200 ? value : undefined;

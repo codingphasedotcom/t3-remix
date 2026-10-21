@@ -7,7 +7,8 @@ you. Agents coordinate only through the board, never by messaging each other.
 
 Open **Companies** from the sidebar footer on web and desktop, or switch the sidebar to
 **Companies** to see each company's employees with the threads they worked in; **Board** beside
-a company opens its board. The mobile app does not show companies yet.
+a company opens its board, and the button next to it opens its dashboard. The mobile app does not
+show companies yet.
 
 ## Start a company
 
@@ -81,6 +82,17 @@ a chat in the company's project, the agent sees exactly who you mean and can han
 
 Comments you add while an agent is working reach that agent right away. Open a card to see
 its activity, its runs, and links to each agent's thread.
+
+## Dashboard
+
+**Dashboard** shows how the company is doing: open and finished cards, who is working now, how
+often runs succeed, how long cards take from creation to done, and the tokens spent. Below that
+are daily activity for the last 14 days, a **Needs attention** list (blocked or unassigned cards,
+hire requests, failed runs), a breakdown by model and by department, and a row for every
+employee.
+
+Tokens are counted from each employee's board threads and credited to the model that thread ran.
+A running agent's tokens appear when its run ends. Days start at midnight in your time zone.
 
 ## Board settings
 

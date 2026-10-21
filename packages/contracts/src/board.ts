@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import {
   IsoDateTime,
+  NonNegativeInt,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -232,6 +233,58 @@ export const BoardCompanySummary = Schema.Struct({
 });
 export type BoardCompanySummary = typeof BoardCompanySummary.Type;
 
+/** Tokens spent in board threads; input includes the cached input. */
+export const BoardTokenTotals = Schema.Struct({
+  input: NonNegativeInt,
+  cachedInput: NonNegativeInt,
+  output: NonNegativeInt,
+});
+export type BoardTokenTotals = typeof BoardTokenTotals.Type;
+
+/** How a set of board runs ended, how long they took, and the tokens their threads spent. */
+export const BoardRunStats = Schema.Struct({
+  runs: NonNegativeInt,
+  reviews: NonNegativeInt,
+  completed: NonNegativeInt,
+  failed: NonNegativeInt,
+  cancelled: NonNegativeInt,
+  running: NonNegativeInt,
+  finishedRunMs: Schema.Number.annotate({ description: "Summed wall-clock time of ended runs." }),
+  tokens: BoardTokenTotals,
+  lastRunAt: Schema.NullOr(IsoDateTime),
+});
+export type BoardRunStats = typeof BoardRunStats.Type;
+
+export const BoardDashboardDay = Schema.Struct({
+  day: Schema.String.annotate({ description: "YYYY-MM-DD in the viewer's UTC offset." }),
+  runs: NonNegativeInt,
+  cardsFinished: NonNegativeInt,
+  tokens: NonNegativeInt,
+});
+export type BoardDashboardDay = typeof BoardDashboardDay.Type;
+
+/**
+ * Run history and token spend for one company. Cards, people, and departments are already in
+ * the board snapshot, so the dashboard carries only what the snapshot cannot.
+ */
+export const BoardDashboard = Schema.Struct({
+  companyId: BoardCompanyId,
+  totals: BoardRunStats,
+  agents: Schema.Array(Schema.Struct({ agentId: BoardAgentId, stats: BoardRunStats })),
+  models: Schema.Array(
+    Schema.Struct({
+      modelSelection: ModelSelection,
+      agentIds: Schema.Array(BoardAgentId),
+      stats: BoardRunStats,
+    }),
+  ).annotate({ description: "Grouped by the model each run's thread used, busiest first." }),
+  days: Schema.Array(BoardDashboardDay).annotate({ description: "Oldest first, one per day." }),
+  medianCycleMs: Schema.NullOr(Schema.Number).annotate({
+    description: "Median time from a card's creation to done.",
+  }),
+});
+export type BoardDashboard = typeof BoardDashboard.Type;
+
 /** Every company's summary, plus the full board of the one being viewed. */
 export const BoardSnapshot = Schema.Struct({
   companies: Schema.Array(BoardCompanySummary),
@@ -242,6 +295,9 @@ export const BoardSnapshot = Schema.Struct({
   hires: Schema.Array(BoardHire),
   tasks: Schema.Array(BoardTask),
   threads: Schema.Array(BoardAgentThread),
+  dashboard: Schema.optional(BoardDashboard).annotate({
+    description: "Present only for a subscription that asked for it.",
+  }),
 });
 export type BoardSnapshot = typeof BoardSnapshot.Type;
 
@@ -252,8 +308,20 @@ export const BoardTaskDetail = Schema.Struct({
 });
 export type BoardTaskDetail = typeof BoardTaskDetail.Type;
 
+/**
+ * The dashboard rides on the board subscription rather than its own RPC: the WebSocket RPC group
+ * is at the size where another method collapses its inferred types.
+ */
 export const BoardSubscribeInput = Schema.Struct({
   companyId: Schema.NullOr(BoardCompanyId),
+  dashboard: Schema.optional(
+    Schema.Struct({
+      utcOffsetMinutes: Schema.Int.check(Schema.isBetween({ minimum: -840, maximum: 840 })),
+    }),
+  ).annotate({
+    description:
+      "Also send the company's dashboard, with days starting at midnight in the viewer's UTC offset.",
+  }),
 });
 export type BoardSubscribeInput = typeof BoardSubscribeInput.Type;
 

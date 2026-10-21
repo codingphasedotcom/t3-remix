@@ -19,6 +19,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
@@ -610,6 +611,107 @@ it.effect("returns a split card to its owner once every subtask is done", () =>
       const resumed = yield* board.taskDetail(parent.id);
       assert.equal(resumed.task.status, "todo");
       assert.include(resumed.comments.at(-1)?.body ?? "", "Every subtask is done");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("the dashboard credits runs and tokens to each employee and the model it ran", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const sql = yield* SqlClient.SqlClient;
+      const { company, lead, engineer } = yield* createCompany(board);
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Fix login", assigneeAgentId: engineer.id },
+        },
+        user,
+      );
+      const started = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, task?.id) !== null,
+      );
+      const threadId = threadOf(started, task?.id)!;
+      const [run] = (yield* board.taskDetail(task!.id)).runs;
+
+      // The thread ran a different model than the engineer's default, and spent two turns.
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+          created_at, updated_at, payload_json
+        )
+        VALUES (
+          ${threadId}, ${projectId}, 'Fix login', 'claude', 'full-access', 'default',
+          ${run!.startedAt}, ${run!.startedAt},
+          ${JSON.stringify({ modelSelection: { instanceId: "claude", model: "opus" } })}
+        )
+      `;
+      for (const [ordinal, input, output] of [
+        [1, 1_000, 200],
+        [2, 500, 100],
+      ] as const) {
+        yield* sql`
+          INSERT INTO orchestration_v2_projection_provider_turns (
+            provider_turn_id, thread_id, provider_thread_id, node_id, ordinal, status,
+            started_at, completed_at, payload_json
+          )
+          VALUES (
+            ${`turn-${ordinal}`}, ${threadId}, 'provider-thread', 'node', ${ordinal}, 'completed',
+            ${run!.startedAt}, ${run!.startedAt},
+            ${JSON.stringify({
+              turnTokenUsage: {
+                usageStatus: "complete",
+                inputTokens: input,
+                cachedInputTokens: input / 2,
+                outputTokens: output,
+              },
+            })}
+          )
+        `;
+      }
+
+      yield* Queue.offer(harness.events, {
+        type: "run.updated",
+        threadId,
+        payload: { id: "run-engineer", status: "completed" },
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* boardWhere(board, company.id, (snapshot) =>
+        snapshot.threads.some(
+          (thread) => thread.threadId === threadId && thread.status !== "running",
+        ),
+      );
+      yield* board.updateTask({ id: task!.id, status: "done" }, user);
+
+      const dashboard = yield* board.dashboard({ companyId: company.id, utcOffsetMinutes: 0 });
+      const statsOf = (agentId: BoardAgentId) =>
+        dashboard.agents.find((entry) => entry.agentId === agentId)?.stats;
+      assert.deepInclude(statsOf(engineer.id), {
+        runs: 1,
+        completed: 1,
+        running: 0,
+        tokens: { input: 1_500, cachedInput: 750, output: 300 },
+      });
+      assert.equal(statsOf(lead.id)?.runs, 0);
+      assert.deepEqual(
+        dashboard.models.map((entry) => [
+          entry.modelSelection.model,
+          entry.agentIds,
+          entry.stats.runs,
+        ]),
+        [["opus", [engineer.id], 1]],
+      );
+      assert.equal(dashboard.totals.tokens.output, 300);
+      assert.equal(dashboard.days.length, 14);
+      const sum = (pick: (day: (typeof dashboard.days)[number]) => number) =>
+        dashboard.days.reduce((total, day) => total + pick(day), 0);
+      assert.deepEqual(
+        [sum((day) => day.runs), sum((day) => day.cardsFinished), sum((day) => day.tokens)],
+        [1, 1, 1_800],
+      );
+      assert.isNotNull(dashboard.medianCycleMs);
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

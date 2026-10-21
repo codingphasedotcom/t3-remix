@@ -9,7 +9,12 @@ import type {
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
-import { Building2Icon, ChevronRightIcon, KanbanSquareIcon } from "lucide-react";
+import {
+  Building2Icon,
+  ChevronRightIcon,
+  KanbanSquareIcon,
+  LayoutDashboardIcon,
+} from "lucide-react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useThreadRouteRef } from "../../hooks/useThreadRouteTarget";
@@ -27,6 +32,7 @@ import { employeeThreadTitle, orgChartRows } from "../board/board.logic";
 import { Button } from "../ui/button";
 import { SidebarGroup, SidebarMenuSubButton, useSidebar } from "../ui/sidebar";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export const SIDEBAR_VIEW_STORAGE_KEY = "t3code:sidebar:view";
 export const SidebarViewSchema = Schema.Literals(["threads", "companies"]);
@@ -131,9 +137,9 @@ function CompanyNode(props: {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const open = !props.collapsed.isCollapsed(props.company.id);
-  const openBoard = (companyId: BoardCompanyId) => {
+  const openBoard = (companyId: BoardCompanyId, tab?: "dashboard") => {
     if (isMobile) setOpenMobile(false);
-    void navigate({ to: "/board", search: { company: companyId } });
+    void navigate({ to: "/board", search: { company: companyId, ...(tab ? { tab } : {}) } });
   };
   return (
     <div role="treeitem" aria-expanded={open} aria-selected={false}>
@@ -168,6 +174,22 @@ function CompanyNode(props: {
           <KanbanSquareIcon />
           Board
         </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="outline"
+                aria-label={`Open ${props.company.name}'s dashboard`}
+                className="shrink-0"
+                onClick={() => openBoard(props.company.id, "dashboard")}
+              />
+            }
+          >
+            <LayoutDashboardIcon />
+          </TooltipTrigger>
+          <TooltipPopup>Dashboard</TooltipPopup>
+        </Tooltip>
       </div>
       {open ? (
         <CompanyEmployees

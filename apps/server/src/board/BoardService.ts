@@ -18,6 +18,7 @@ import {
   type BoardCompany,
   type BoardCompanyCreateInput,
   type BoardCompanyUpdateInput,
+  type BoardDashboard,
   type BoardDepartment,
   type BoardHire,
   type BoardHireDecisionInput,
@@ -27,6 +28,7 @@ import {
   type BoardSkill,
   type BoardSkillUpsertInput,
   type BoardSnapshot,
+  type BoardSubscribeInput,
   type BoardTask,
   type BoardTaskCreateInput,
   type BoardTaskDetail,
@@ -51,6 +53,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as BoardStore from "./BoardStore.ts";
+import { buildDashboard } from "./boardDashboard.ts";
 import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
 import {
   boardStatusLabel,
@@ -99,13 +102,20 @@ export class BoardService extends Context.Service<
     readonly snapshot: (
       companyId: BoardCompanyId | null,
     ) => Effect.Effect<BoardSnapshot, BoardError>;
+    /** The board as it changes; with `dashboard`, each snapshot carries the company's dashboard. */
     readonly subscribe: (
       companyId: BoardCompanyId | null,
+      dashboard?: BoardSubscribeInput["dashboard"],
     ) => Stream.Stream<BoardSnapshot, BoardError>;
     readonly taskDetail: (taskId: BoardTaskId) => Effect.Effect<BoardTaskDetail, BoardError>;
     readonly subscribeTaskDetail: (
       taskId: BoardTaskId,
     ) => Stream.Stream<BoardTaskDetail, BoardError>;
+    /** Run history, model mix, and token spend for one company. */
+    readonly dashboard: (input: {
+      readonly companyId: BoardCompanyId;
+      readonly utcOffsetMinutes: number;
+    }) => Effect.Effect<BoardDashboard, BoardError>;
     /** Companies whose agents work in `projectId`, for agents outside any company's card. */
     readonly companiesForProject: (
       projectId: ProjectId,
@@ -281,16 +291,47 @@ const make = Effect.gen(function* () {
     },
   );
 
-  const subscribe: BoardService["Service"]["subscribe"] = (companyId) =>
+  const dashboard: BoardService["Service"]["dashboard"] = Effect.fn("BoardService.dashboard")(
+    function* (input) {
+      const company = yield* requireCompany(input.companyId);
+      return buildDashboard({
+        companyId: company.id,
+        agents: yield* store.listAgents(company.id),
+        tasks: yield* store.listTasks(company.id),
+        runs: yield* store.listRunFacts(company.id),
+        tokenDays: yield* store.listThreadTokenDays(company.id, input.utcOffsetMinutes),
+        now: yield* store.now,
+        utcOffsetMinutes: input.utcOffsetMinutes,
+      });
+    },
+  );
+
+  // A running agent's tokens land on the dashboard with the board change that ends its run.
+  const view = Effect.fn("BoardService.view")(function* (
+    companyId: BoardCompanyId | null,
+    options: BoardSubscribeInput["dashboard"],
+  ) {
+    const board = yield* snapshot(companyId);
+    if (options === undefined || board.company === null) return board;
+    return {
+      ...board,
+      dashboard: yield* dashboard({
+        companyId: board.company.id,
+        utcOffsetMinutes: options.utcOffsetMinutes,
+      }),
+    } satisfies BoardSnapshot;
+  });
+
+  const subscribe: BoardService["Service"]["subscribe"] = (companyId, options) =>
     Stream.unwrap(
       Effect.gen(function* () {
         // Subscribe before the first snapshot so a change in between is not lost.
         const subscription = yield* PubSub.subscribe(changes);
         return Stream.concat(
-          Stream.fromEffect(snapshot(companyId)),
+          Stream.fromEffect(view(companyId, options)),
           Stream.fromSubscription(subscription).pipe(
             Stream.filter((changed) => changed === null || changed === companyId),
-            Stream.mapEffect(() => snapshot(companyId)),
+            Stream.mapEffect(() => view(companyId, options)),
           ),
         );
       }),
@@ -1362,6 +1403,7 @@ const make = Effect.gen(function* () {
     subscribe,
     taskDetail,
     subscribeTaskDetail,
+    dashboard,
     companiesForProject,
     createTask,
     updateTask,
