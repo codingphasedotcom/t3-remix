@@ -32,6 +32,7 @@ import {
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
+  COBALT_THEME,
   OCEAN_THEME,
   updateCustomTheme,
   updateThemeColorFamily,
@@ -514,7 +515,14 @@ describe("theme files", () => {
   });
 
   it("includes the dual-mode maintainer themes", () => {
-    for (const theme of [T3_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of [
+      T3_CHAT_THEME,
+      GROVE_THEME,
+      OCEAN_THEME,
+      EMBER_THEME,
+      IRIS_THEME,
+      COBALT_THEME,
+    ]) {
       expect(getThemeDefinition(theme.id)).toBe(theme);
       expect(getThemeModes(theme)).toEqual(["light", "dark"]);
       expect(theme.sidebarArtwork).toBe(true);
