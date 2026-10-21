@@ -55,7 +55,9 @@ search earlier tasks to see how similar work was done.
 
 A skill is a reusable playbook: when it applies, how to do the work, and how to check it. Add
 skills on the **Skills** tab (or **Add starter skills**), then tick them on each employee.
-Agents receive the instructions of every skill they have on each task they work.
+Agents receive the instructions of every skill they have on each task they work; when an
+employee's skills add up to more than a page, the prompt lists them by name and the agent reads
+the ones that apply.
 
 ## How work flows
 
@@ -70,6 +72,9 @@ Agents receive the instructions of every skill they have on each task they work.
   thread.
 - A task with no reviewer stops in **Review** for you. **Backlog** tasks never start on their
   own.
+- When a subtask gets stuck in **Blocked**, its manager is started to unblock it: it answers the
+  question, reassigns the subtask, or narrows it, and asks you on its own task when only you can
+  help. A subtask that is only waiting on its own subtasks doesn't count as stuck.
 
 Every agent is told where it works: the folder, the branch, the base it started from, which
 other tasks share that folder, and that work from other tasks is only there once it is merged.
@@ -85,8 +90,27 @@ the task gets your comment in its thread; otherwise the assignee (or the CEO, fo
 no assignee) is started just to reply, and moves the task to **To do** if you asked for work.
 Replies start even when the board is at its **Agents at once** limit, but not while
 **Auto-run agents** is off or the employee is paused. Your comments on a task also reach every
-subtask below it and stay in the agents' instructions on every later run. Open a task to see
+subtask below it and stay in the agents' instructions on every later run. Each employee keeps
+one thread per task: replies, work, rework, and repeat reviews all continue it, so agents keep
+their context and each new message carries only what changed. Open a task to see
 its activity, its runs, and links to each agent's thread.
+
+A task lists its **Linked work**: its branch, and the pull requests, previews, and documents its
+agents report, with each pull request's status. Remove a wrong link with its **×**.
+
+## Routines
+
+The **Routines** tab adds a task on a schedule, such as a weekly review for the CEO: pick the
+title, what to do, who does it, how often it repeats, and when it next runs. If the last task a
+routine added is still open when it comes due, it waits for the next turn instead of adding
+another. A routine with nobody assigned adds its task to **Backlog**.
+
+## Spending limits
+
+Set a monthly token limit for the whole company under **Edit company**, or for one employee in
+their editor. Limits count input plus output tokens per calendar month (UTC), the same total the
+dashboard shows. From 80% the org chart and board warn you; at the limit, agents aren't started
+until you raise it or the month ends. An agent already running finishes its run.
 
 ## Dashboard
 

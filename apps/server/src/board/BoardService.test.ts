@@ -21,6 +21,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
 
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -38,13 +39,12 @@ const isBoardError = Schema.is(BoardError);
 const makeHarness = Effect.gen(function* () {
   const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchService.ThreadLaunchInput>>([]);
   const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
-  const sent = yield* Ref.make<ReadonlyArray<ThreadManagementService.ThreadManagementSendInput>>(
-    [],
-  );
+  // Messages to existing threads, in order; taking one waits until it has been sent.
+  const sent = yield* Queue.unbounded<ThreadManagementService.ThreadManagementSendInput>();
   const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
     streamDomainEvents: Stream.fromQueue(events),
     sendToThread: (input) =>
-      Ref.update(sent, (all) => [...all, input]).pipe(
+      Queue.offer(sent, input).pipe(
         Effect.as({} as ThreadManagementService.ThreadManagementSendResult),
       ),
     // A settled thread has no queued follow-up.
@@ -496,14 +496,20 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
       );
       const taskNow = (snapshot: BoardSnapshot) =>
         snapshot.tasks.find((candidate) => candidate.id === task?.id);
-      const finishRun = (threadId: ThreadId, id: string) =>
-        Queue.offer(harness.events, {
+      const settle = Effect.fn("test.settle")(function* (threadId: ThreadId, id: string) {
+        yield* Queue.offer(harness.events, {
           type: "run.updated",
           threadId,
           payload: { id, status: "completed" },
         } as unknown as OrchestrationV2DomainEvent);
+        return yield* boardWhere(
+          board,
+          company.id,
+          (snapshot) => taskNow(snapshot)?.activeRunKind === null,
+        );
+      });
 
-      // Nobody is working the task, so its owner is started just to answer.
+      // Nobody is working the task, so its owner is started just to answer, in a short prompt.
       yield* board.addComment({ taskId: task!.id, body: "Only merge once it is verified." }, user);
       yield* boardWhere(
         board,
@@ -514,32 +520,49 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
       const replyPrompt = reply?.initialMessage?.text ?? "";
       assert.include(replyPrompt, "## Reply now");
       assert.include(replyPrompt, "- On this task (new): Only merge once it is verified.");
-      yield* finishRun(reply!.threadId as ThreadId, "run-reply");
-      const answered = yield* boardWhere(
-        board,
-        company.id,
-        (snapshot) => taskNow(snapshot)?.activeRunKind === null,
-      );
-      // Replying leaves the task where it was, and the answered comment starts nothing more.
-      assert.equal(taskNow(answered)?.status, "backlog");
+      assert.notInclude(replyPrompt, "Departments:");
+      assert.notInclude(replyPrompt, "## What you remember");
+      // The reply opens the task's own thread, in the task's workspace.
+      assert.equal(reply?.workspaceStrategy.type, "worktree");
+      const replied = yield* settle(reply!.threadId as ThreadId, "run-reply-1");
+      const taskThread = reply!.threadId as ThreadId;
+      assert.equal(taskNow(replied)?.status, "backlog");
+      assert.equal(taskNow(replied)?.threadId, taskThread);
       assert.lengthOf(yield* Ref.get(harness.launches), 1);
 
-      // The instruction stays in the work prompt, and reaches subtasks below the task.
+      // The next comment continues that thread with just what is new. Time has to pass for it
+      // to come after the reply that ended.
+      yield* TestClock.adjust("1 minute");
+      yield* board.addComment({ taskId: task!.id, body: "Use the staging site." }, user);
+      yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => taskNow(snapshot)?.activeRunKind === "reply",
+      );
+      const secondReply = yield* Queue.take(harness.sent);
+      assert.equal(secondReply?.threadId, taskThread);
+      assert.include(secondReply?.text ?? "", "- On this task (new): Use the staging site.");
+      assert.include(secondReply?.text ?? "", "- On this task: Only merge once it is verified.");
+      assert.notInclude(secondReply?.text ?? "", "You are Lead");
+      yield* settle(taskThread, "run-reply-2");
+
+      // Work continues the same thread too, starting with the full work prompt.
       yield* board.runCommand(
         { type: "task.update", task: { id: task!.id, status: "todo" } },
         user,
       );
-      const working = yield* boardWhere(
+      yield* boardWhere(
         board,
         company.id,
-        (snapshot) => taskNow(snapshot)?.threadId !== null,
+        (snapshot) => taskNow(snapshot)?.activeRunKind === "work",
       );
-      const workThread = taskNow(working)!.threadId as ThreadId;
-      const workPrompt =
-        (yield* Ref.get(harness.launches)).find((launch) => launch.threadId === workThread)
-          ?.initialMessage?.text ?? "";
-      assert.include(workPrompt, "## What the board told you");
-      assert.include(workPrompt, "- On this task: Only merge once it is verified.");
+      const work = yield* Queue.take(harness.sent);
+      assert.equal(work?.threadId, taskThread);
+      assert.include(work?.text ?? "", "## Where you work");
+      assert.include(work?.text ?? "", "- On this task: Only merge once it is verified.");
+      assert.lengthOf(yield* Ref.get(harness.launches), 1);
+
+      // People's instructions reach subtasks below the task.
       const subtask = yield* board.createTask(
         {
           companyId: company.id,
@@ -547,7 +570,7 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
           parentTaskId: task!.id,
           assigneeAgentId: engineer.id,
         },
-        { kind: "agent", threadId: workThread },
+        { kind: "agent", threadId: taskThread },
       );
       yield* boardWhere(board, company.id, (snapshot) =>
         snapshot.tasks.some(
@@ -555,14 +578,14 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
         ),
       );
       const subtaskPrompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
-      assert.include(subtaskPrompt, '- On "Fix the funnel": Only merge once it is verified.');
+      assert.include(subtaskPrompt, '- On "Fix the funnel": Use the staging site.');
 
       // A comment on a task someone is working reaches that thread at once.
       const launchesBefore = (yield* Ref.get(harness.launches)).length;
-      yield* board.addComment({ taskId: task!.id, body: "Use the staging site." }, user);
-      const [forwarded] = yield* Ref.get(harness.sent);
-      assert.equal(forwarded?.threadId, workThread);
-      assert.include(forwarded?.text ?? "", "Use the staging site.");
+      yield* board.addComment({ taskId: task!.id, body: "Ship it behind a flag." }, user);
+      const forwarded = yield* Queue.take(harness.sent);
+      assert.equal(forwarded?.threadId, taskThread);
+      assert.include(forwarded?.text ?? "", "Ship it behind a flag.");
       assert.include(forwarded?.text ?? "", "Reply on the board with board_add_comment");
       assert.lengthOf(yield* Ref.get(harness.launches), launchesBefore);
     }).pipe(Effect.provide(harness.layer));
@@ -889,9 +912,14 @@ it.effect("lessons an agent remembers reach its next task's prompt", () =>
         .pipe(Effect.flip);
       assert.include(denied.message, "Only the CEO and managers");
       const ceoCard = yield* startCard("Set direction", ceoId);
-      yield* board.remember(
-        { scope: "company", note: "We support Node 20 and newer." },
+      // A date the agent wrote itself is dropped; the line already carries one.
+      const companyMemory = yield* board.remember(
+        { scope: "company", note: "2026-10-20 (Ada): We support Node 20 and newer." },
         { kind: "agent", threadId: ceoCard.threadId },
+      );
+      assert.match(
+        companyMemory.memory,
+        /^- \d{4}-\d{2}-\d{2} \(Ada\): We support Node 20 and newer\.$/,
       );
 
       // A memory past its limit has to be condensed instead of growing.
@@ -918,6 +946,256 @@ it.effect("lessons an agent remembers reach its next task's prompt", () =>
         matches.map((match) => [match.task.title, match.summary]),
         [["Fix the build", "Fixed by pinning esbuild."]],
       );
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+/** Starts `title` for `assigneeAgentId` and waits until its thread is recorded. */
+const startTaskFor = Effect.fn("test.startTaskFor")(function* (
+  board: BoardService.BoardService["Service"],
+  companyId: BoardCompanyId,
+  title: string,
+  assigneeAgentId: BoardAgentId,
+) {
+  const { task } = yield* board.runCommand(
+    { type: "task.create", task: { companyId, title, assigneeAgentId } },
+    user,
+  );
+  const started = yield* boardWhere(
+    board,
+    companyId,
+    (snapshot) => threadOf(snapshot, task?.id) !== null,
+  );
+  return { task: task!, threadId: threadOf(started, task?.id)! };
+});
+
+const finishRun = (harness: { readonly events: Queue.Queue<OrchestrationV2DomainEvent> }) =>
+  Effect.fn("test.finishRun")(function* (threadId: ThreadId, id: string) {
+    yield* Queue.offer(harness.events, {
+      type: "run.updated",
+      threadId,
+      payload: { id, status: "completed" },
+    } as unknown as OrchestrationV2DomainEvent);
+  });
+
+it.effect("lists long skills by name for the agent to read when needed", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { skill } = yield* board.runCommand(
+        {
+          type: "skill.upsert",
+          skill: {
+            companyId: company.id,
+            name: "Release process",
+            description: "How we ship.",
+            instructions: "Step. ".repeat(500),
+          },
+        },
+        user,
+      );
+      yield* board.runCommand(
+        { type: "agent.upsert", agent: { ...lead, skillIds: [skill!.id] } },
+        user,
+      );
+      yield* startTaskFor(board, company.id, "Ship v2", lead.id);
+      const prompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
+      assert.include(prompt, "Read each skill that applies to this task with board_read_skill");
+      assert.include(prompt, "- Release process: How we ship.");
+      assert.notInclude(prompt, "Step. Step.");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("wakes the manager when a subtask gets stuck, not when it waits on its own", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead, engineer } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 5 } },
+        user,
+      );
+      const finish = finishRun(harness);
+      const parent = yield* startTaskFor(board, company.id, "Launch checkout", lead.id);
+      const asLead = { kind: "agent", threadId: parent.threadId } as const;
+      const subtask = yield* board.createTask(
+        {
+          companyId: company.id,
+          title: "Wire up payments",
+          parentTaskId: parent.task.id,
+          assigneeAgentId: engineer.id,
+        },
+        asLead,
+      );
+      yield* board.updateTask({ id: parent.task.id, status: "blocked" }, asLead);
+      yield* finish(parent.threadId, "run-lead");
+      const working = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, subtask.id) !== null,
+      );
+      const asEngineer = { kind: "agent", threadId: threadOf(working, subtask.id)! } as const;
+
+      yield* TestClock.adjust("1 minute");
+      yield* board.addComment(
+        { taskId: subtask.id, body: "I need the Stripe API key to go on." },
+        asEngineer,
+      );
+      yield* board.updateTask({ id: subtask.id, status: "blocked" }, asEngineer);
+      const escalation = yield* Queue.take(harness.sent);
+      assert.equal(escalation.threadId, parent.threadId);
+      assert.include(escalation.text, "## Blocked below you");
+      assert.include(escalation.text, "I need the Stripe API key to go on.");
+      assert.notInclude(escalation.text, "## Reply now");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("links a task's branch and the work its agent reports", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { task, threadId } = yield* startTaskFor(board, company.id, "Fix checkout", lead.id);
+      const asLead = { kind: "agent", threadId } as const;
+      const url = "https://github.com/acme/shop/pull/4";
+      yield* board.linkWork(
+        { taskId: task.id, kind: "pull_request", title: "PR #4", url, status: null },
+        asLead,
+      );
+      yield* board.linkWork(
+        { taskId: task.id, kind: "pull_request", title: "PR #4", url, status: "merged" },
+        asLead,
+      );
+      const detail = yield* board.taskDetail(task.id);
+      assert.deepEqual(
+        detail.links.map((link) => [link.kind, link.status, link.agentId]),
+        [
+          ["branch", null, null],
+          ["pull_request", "merged", lead.id],
+        ],
+      );
+      assert.match(detail.links[0]!.title, /^board\/fix-checkout-[0-9a-f]{8}$/);
+
+      yield* board.runCommand({ type: "link.delete", id: detail.links[1]!.id }, user);
+      assert.lengthOf((yield* board.taskDetail(task.id)).links, 1);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("stops starting an employee once their monthly token limit is spent", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const sql = yield* SqlClient.SqlClient;
+      const { company, lead } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "agent.upsert", agent: { ...lead, monthlyTokenLimit: 1_000 } },
+        user,
+      );
+      const first = yield* startTaskFor(board, company.id, "First task", lead.id);
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_provider_turns (
+          provider_turn_id, thread_id, provider_thread_id, node_id, ordinal, status, started_at,
+          payload_json
+        )
+        VALUES (
+          'turn-1', ${first.threadId}, 'provider-thread-1', 'node-1', 1, 'completed',
+          '1970-01-01T00:00:01.000Z',
+          '{"turnTokenUsage":{"inputTokens":900,"cachedInputTokens":5000,"outputTokens":300}}'
+        )
+      `;
+      const snapshot = yield* board.snapshot(company.id);
+      assert.deepEqual(snapshot.usage?.agents, [{ agentId: lead.id, tokens: 1_200 }]);
+
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: {
+            companyId: company.id,
+            title: "Second task",
+            assigneeAgentId: lead.id,
+            status: "backlog",
+          },
+        },
+        user,
+      );
+      const refused = yield* board
+        .runCommand({ type: "task.start", id: task!.id }, user)
+        .pipe(Effect.flip);
+      assert.include(refused.message, "Lead reached their monthly token limit.");
+
+      // Raising the limit lets the employee work again.
+      yield* board.runCommand(
+        { type: "agent.upsert", agent: { ...lead, monthlyTokenLimit: 10_000 } },
+        user,
+      );
+      const { task: started } = yield* board.runCommand({ type: "task.start", id: task!.id }, user);
+      assert.notEqual(started?.status, "backlog");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("creates a routine's task on schedule and skips while the last one is open", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, autoDispatch: false } },
+        user,
+      );
+      const { routine } = yield* board.runCommand(
+        {
+          type: "routine.upsert",
+          routine: {
+            companyId: company.id,
+            title: "Daily numbers",
+            description: "Check signups and revenue.",
+            assigneeAgentId: ceoId,
+            everyDays: 1,
+            nextRunAt: "1970-01-01T00:02:00.000Z",
+            enabled: true,
+          },
+        },
+        user,
+      );
+      const routineTasks = (snapshot: BoardSnapshot) =>
+        snapshot.tasks.filter((task) => task.title === "Daily numbers");
+
+      yield* TestClock.adjust("3 minutes");
+      const created = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => routineTasks(snapshot).length === 1,
+      );
+      const firstTask = routineTasks(created)[0]!;
+      assert.equal(firstTask.status, "todo");
+      assert.equal(firstTask.assigneeAgentId, ceoId);
+      const advanced = created.routines.find((candidate) => candidate.id === routine!.id);
+      assert.equal(advanced?.nextRunAt, "1970-01-02T00:02:00.000Z");
+      assert.equal(advanced?.lastTaskId, firstTask.id);
+
+      // The first task is still open a day later, so no second copy appears.
+      yield* TestClock.adjust("1 day");
+      const skipped = yield* boardWhere(board, company.id, (snapshot) =>
+        snapshot.routines.some((candidate) => candidate.nextRunAt === "1970-01-03T00:02:00.000Z"),
+      );
+      assert.lengthOf(routineTasks(skipped), 1);
+
+      yield* board.runCommand(
+        { type: "task.update", task: { id: firstTask.id, status: "done" } },
+        user,
+      );
+      yield* TestClock.adjust("1 day");
+      yield* boardWhere(board, company.id, (snapshot) => routineTasks(snapshot).length === 2);
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

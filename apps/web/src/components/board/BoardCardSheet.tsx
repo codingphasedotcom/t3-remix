@@ -6,11 +6,24 @@ import type {
   BoardTask,
   BoardTaskId,
   BoardTaskStatus,
+  BoardWorkLink,
   EnvironmentId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
-import { ExternalLinkIcon, PlayIcon, Trash2Icon } from "lucide-react";
+import {
+  ExternalLinkIcon,
+  FileTextIcon,
+  GitBranchIcon,
+  GitCommitHorizontalIcon,
+  GlobeIcon,
+  LinkIcon,
+  PencilIcon,
+  PlayIcon,
+  Trash2Icon,
+  XIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -19,6 +32,8 @@ import { boardTaskDetailLive } from "../../state/board";
 import { useEnvironmentQuery } from "../../state/query";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import ChatMarkdown from "../ChatMarkdown";
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -71,6 +86,7 @@ function BoardCardDetail(props: {
 
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
+  const [editingDescription, setEditingDescription] = useState(false);
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
   const descriptionDirty = description !== task.description;
@@ -218,26 +234,76 @@ function BoardCardDetail(props: {
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="board-card-detail-description">Description</Label>
-            <Textarea
-              id="board-card-detail-description"
-              value={description}
-              rows={6}
-              disabled={disabled}
-              placeholder="What done looks like."
-              onChange={(event) => setDescription(event.target.value)}
-            />
-            {descriptionDirty ? (
-              <div className="flex justify-end gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setDescription(task.description)}>
-                  Discard
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="board-card-detail-description">Description</Label>
+              {editingDescription ? null : (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={disabled}
+                  onClick={() => {
+                    setDescription(task.description);
+                    setEditingDescription(true);
+                  }}
+                >
+                  <PencilIcon />
+                  Edit
                 </Button>
-                <Button size="sm" onClick={() => void update({ description })}>
-                  Save description
-                </Button>
+              )}
+            </div>
+            {editingDescription ? (
+              <>
+                <Textarea
+                  id="board-card-detail-description"
+                  value={description}
+                  rows={12}
+                  autoFocus
+                  disabled={disabled}
+                  placeholder="What done looks like. Markdown works."
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => setEditingDescription(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={disabled || !descriptionDirty}
+                    onClick={async () => {
+                      if ((await update({ description })) !== null) setEditingDescription(false);
+                    }}
+                  >
+                    Save description
+                  </Button>
+                </div>
+              </>
+            ) : task.description.trim().length > 0 ? (
+              <div className="rounded-lg border px-3 py-2">
+                <ChatMarkdown
+                  text={task.description}
+                  cwd={task.worktreePath ?? undefined}
+                  environmentId={props.environmentId}
+                />
               </div>
-            ) : null}
+            ) : (
+              <span className="text-sm text-muted-foreground">No description.</span>
+            )}
           </div>
+
+          {(detail.data?.links.length ?? 0) > 0 ? (
+            <div className="flex flex-col gap-1">
+              <Label>Linked work</Label>
+              {(detail.data?.links ?? []).map((link) => (
+                <WorkLinkRow
+                  key={link.id}
+                  link={link}
+                  snapshot={snapshot}
+                  disabled={disabled}
+                  onRemove={() => void props.runCommand({ type: "link.delete", id: link.id })}
+                />
+              ))}
+            </div>
+          ) : null}
 
           {parent !== null || subtasks.length > 0 ? (
             <div className="flex flex-col gap-2">
@@ -264,7 +330,13 @@ function BoardCardDetail(props: {
             <Label htmlFor="board-card-comment">Activity</Label>
             <div className="flex flex-col gap-2">
               {(detail.data?.comments ?? []).map((entry) => (
-                <CommentRow key={entry.id} comment={entry} snapshot={snapshot} />
+                <CommentRow
+                  key={entry.id}
+                  comment={entry}
+                  snapshot={snapshot}
+                  cwd={task.worktreePath ?? undefined}
+                  environmentId={props.environmentId}
+                />
               ))}
               {detail.data !== null && detail.data.comments.length === 0 ? (
                 <span className="text-sm text-muted-foreground">No activity yet.</span>
@@ -278,7 +350,7 @@ function BoardCardDetail(props: {
               placeholder={
                 task.activeRunKind !== null
                   ? "Comment — the working agent receives it right away"
-                  : "Comment for the next agent run or a teammate"
+                  : "Comment — the task's agent answers on the board"
               }
               onChange={(event) => setComment(event.target.value)}
               onKeyDown={(event) => {
@@ -334,7 +406,74 @@ function RelatedCard(props: {
   );
 }
 
-function CommentRow(props: { readonly comment: BoardComment; readonly snapshot: BoardSnapshot }) {
+const WORK_LINK_ICONS: Record<BoardWorkLink["kind"], LucideIcon> = {
+  pull_request: PullRequestGlyph.pullRequest,
+  branch: GitBranchIcon,
+  preview: GlobeIcon,
+  commit: GitCommitHorizontalIcon,
+  document: FileTextIcon,
+  other: LinkIcon,
+};
+
+const WORK_LINK_STATUS_VARIANTS = {
+  open: "info",
+  draft: "outline",
+  merged: "success",
+  closed: "secondary",
+} as const satisfies Record<NonNullable<BoardWorkLink["status"]>, string>;
+
+function WorkLinkRow(props: {
+  readonly link: BoardWorkLink;
+  readonly snapshot: BoardSnapshot;
+  readonly disabled: boolean;
+  readonly onRemove: () => void;
+}) {
+  const { link } = props;
+  const Icon = WORK_LINK_ICONS[link.kind];
+  const agent = agentById(props.snapshot.agents, link.agentId);
+  const href = /^https?:\/\//.test(link.url) ? link.url : null;
+  return (
+    <div className="group/link flex min-w-0 items-center gap-2 rounded-md px-1 py-1 text-sm">
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      {href !== null ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="min-w-0 truncate font-medium hover:underline"
+        >
+          {link.title}
+        </a>
+      ) : (
+        <span className="min-w-0 truncate font-mono text-xs">{link.title}</span>
+      )}
+      {link.status !== null ? (
+        <Badge variant={WORK_LINK_STATUS_VARIANTS[link.status]} size="sm">
+          {link.status}
+        </Badge>
+      ) : null}
+      <span className="ms-auto shrink-0 truncate text-xs text-muted-foreground">
+        {agent?.name ?? ""}
+      </span>
+      <Button
+        size="icon-xs"
+        variant="ghost-muted"
+        aria-label={`Remove link ${link.title}`}
+        disabled={props.disabled}
+        onClick={props.onRemove}
+      >
+        <XIcon />
+      </Button>
+    </div>
+  );
+}
+
+function CommentRow(props: {
+  readonly comment: BoardComment;
+  readonly snapshot: BoardSnapshot;
+  readonly cwd: string | undefined;
+  readonly environmentId: EnvironmentId;
+}) {
   const { comment } = props;
   const author =
     comment.authorKind === "user"
@@ -360,7 +499,13 @@ function CommentRow(props: { readonly comment: BoardComment; readonly snapshot: 
       <span className="text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{author}</span> · {time}
       </span>
-      <p className="whitespace-pre-wrap text-sm">{comment.body}</p>
+      {/* People type plain lines; agents write markdown with blank lines between paragraphs. */}
+      <ChatMarkdown
+        text={comment.body}
+        cwd={props.cwd}
+        environmentId={props.environmentId}
+        lineBreaks={comment.authorKind === "user"}
+      />
     </div>
   );
 }

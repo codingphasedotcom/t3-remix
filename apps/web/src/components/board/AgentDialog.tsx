@@ -45,6 +45,7 @@ import { Textarea } from "../ui/textarea";
 import type { RunBoardCommand } from "./BoardPage";
 import { EMPLOYEE_PRESETS, departmentNamed } from "./board.logic";
 import { FACES, faceFor } from "./faces";
+import { TokenLimitField } from "./TokenLimitField";
 
 export interface AgentDraft {
   readonly id: BoardAgentId | null;
@@ -59,6 +60,7 @@ export interface AgentDraft {
   readonly modelSelection: ModelSelection | null;
   readonly runtimeMode: RuntimeMode;
   readonly paused: boolean;
+  readonly monthlyTokenLimit: number | null;
 }
 
 export function draftFromAgent(agent: BoardAgent): AgentDraft {
@@ -75,6 +77,7 @@ export function draftFromAgent(agent: BoardAgent): AgentDraft {
     modelSelection: agent.modelSelection,
     runtimeMode: agent.runtimeMode,
     paused: agent.paused,
+    monthlyTokenLimit: agent.monthlyTokenLimit,
   };
 }
 
@@ -93,6 +96,7 @@ export function newEmployeeDraft(manager: BoardAgent | null): AgentDraft {
     modelSelection: manager?.modelSelection ?? null,
     runtimeMode: "full-access",
     paused: false,
+    monthlyTokenLimit: null,
   };
 }
 
@@ -208,6 +212,7 @@ function AgentForm(props: {
   const company = snapshot.company;
   const [draft, setDraft] = useState(props.draft);
   const [saving, setSaving] = useState(false);
+  const [limitValid, setLimitValid] = useState(true);
   const choices = useModelChoices(props.environmentId, company?.projectId ?? null);
   const isCeo = company !== null && draft.id !== null && company.ceoAgentId === draft.id;
   const selection = draft.modelSelection ?? choices.defaultModel;
@@ -234,6 +239,7 @@ function AgentForm(props: {
     draft.name.trim().length > 0 &&
     department !== null &&
     selection !== null &&
+    limitValid &&
     !saving;
 
   const applyPreset = (title: string) => {
@@ -270,6 +276,7 @@ function AgentForm(props: {
         modelSelection: selection,
         runtimeMode: draft.runtimeMode,
         paused: draft.paused,
+        monthlyTokenLimit: draft.monthlyTokenLimit,
       },
     });
     setSaving(false);
@@ -457,6 +464,18 @@ function AgentForm(props: {
               />
             </div>
           </div>
+          <TokenLimitField
+            id="board-agent-token-limit"
+            label="Monthly token limit"
+            value={draft.monthlyTokenLimit}
+            used={
+              snapshot.usage === null || draft.id === null
+                ? null
+                : (snapshot.usage.agents.find((row) => row.agentId === draft.id)?.tokens ?? 0)
+            }
+            onChange={(monthlyTokenLimit) => setDraft({ ...draft, monthlyTokenLimit })}
+            onValidityChange={setLimitValid}
+          />
           {draft.runtimeMode !== "full-access" ? (
             <span className="text-xs text-muted-foreground">
               Board agents run unattended. With this mode they pause in their thread until you

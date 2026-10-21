@@ -142,11 +142,25 @@ function orgBlock(context: BoardPromptContext): string {
   return lines.join("\n");
 }
 
+/** Skills short enough to inline cost less than a tool call to read them. */
+const MAX_INLINE_SKILL_CHARS = 2_000;
+
 function skillsBlock(context: BoardPromptContext): string | null {
   const skills = context.agent.skillIds
     .map((id) => context.skills.find((skill) => skill.id === id))
     .filter((skill) => skill !== undefined);
   if (skills.length === 0) return null;
+  const total = skills.reduce((sum, skill) => sum + skill.instructions.length, 0);
+  if (total > MAX_INLINE_SKILL_CHARS) {
+    return [
+      "## Your skills",
+      "Read each skill that applies to this task with board_read_skill before you start.",
+      ...skills.map(
+        (skill) =>
+          `- ${skill.name}${skill.description.trim() ? `: ${skill.description.trim()}` : ""}`,
+      ),
+    ].join("\n");
+  }
   return [
     "## Your skills",
     ...skills.map((skill) =>
@@ -301,16 +315,10 @@ function workspaceBlock(context: BoardPromptContext, workspace: BoardWorkspace):
   return lines.join("\n");
 }
 
-const BOARD_TOOLS = `## Working with the board
-The board is how this company coordinates. Use the t3-code board tools instead of messaging other agents:
-- board_read_task re-reads a task with its comments and subtasks; board_list_tasks shows the board.
-- board_list_agents shows the org chart, the departments, and the skills each person has.
-- board_add_comment records progress, decisions, and questions. The board (humans) reads them.
-- board_create_task creates a task. A task in "todo" with an assignee starts that agent right away. You review tasks you assign to others unless you name a different reviewer.
-- board_update_task moves tasks between columns.
-- board_request_hire asks the board to add someone to your team, in the department where they belong. A human approves it before they exist.
-- board_search_tasks finds earlier tasks and their summaries, for "how did we do this before?".
-- board_remember adds a lesson to your memory (scope "self") or, if you manage people, the company's (scope "company"); board_rewrite_memory condenses a memory that is getting full.`;
+// Every tool describes itself, and Claude and Codex threads also get the board section of the
+// t3-code instructions, so prompts only point at the tools instead of listing them again.
+const BOARD_TOOLS =
+  "Coordinate through the t3-code board tools (board_*) instead of messaging other agents.";
 
 const REMEMBER_RULE =
   'Before you finish, record up to three lessons that will help on future tasks with board_remember: conventions, commands, gotchas, and the board\'s preferences. Skip anything only true for this task. Managers record team-wide decisions with scope "company".';
@@ -319,7 +327,7 @@ function rulesBlock(context: BoardPromptContext): string {
   const reports = directReports(context.agents, context.agent.id);
   const manages = reports.length > 0 || isCeo(context);
   const finish =
-    'When the task is complete, add a short summary comment (what was done and how you verified it), then move it to "review". If you cannot proceed, comment why and move it to "blocked".';
+    'Link each pull request, branch, or preview you create with board_link_work, and mark a pull request "merged" once it merges. When the task is complete, add a short summary comment (what was done and how you verified it), then move it to "review". If you cannot proceed, comment why and move it to "blocked".';
   if (!manages) {
     return `## How you work
 You are an individual contributor: do this task's work yourself, in this workspace. ${finish} ${REMEMBER_RULE}`;
@@ -377,10 +385,7 @@ export function buildReworkPrompt(
     .join("\n\n");
 }
 
-export function buildReviewPrompt(
-  context: BoardPromptContext,
-  workspace: { readonly worktreePath: string | null; readonly baseRef: string | null },
-): string {
+export function buildReviewPrompt(context: BoardPromptContext, workspace: ReviewWorkspace): string {
   const assignee = agentName(context.agents, context.task.assigneeAgentId);
   const sections = [identityBlock(context), `You are reviewing a task that ${assignee} finished.`];
   if (context.agent.instructions.trim().length > 0) {
@@ -395,20 +400,45 @@ export function buildReviewPrompt(
   if (board !== null) sections.push(board);
   const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
-  sections.push(
-    [
-      "## How to review",
-      workspace.worktreePath !== null
-        ? `You are in the task's worktree (${workspace.worktreePath}). Inspect the change with git status and git diff${workspace.baseRef ? ` against ${workspace.baseRef}` : ""}, and run the relevant checks.`
-        : "Inspect the working tree with git status and git diff, and run the relevant checks.",
-      "Judge the result against the task's description and the company's mission. Do not redo the work yourself unless a fix is trivial.",
-      '- Approve: comment your verdict, then move the task to "done" with board_update_task.',
-      `- Request changes: comment each required change precisely, then move the task to "todo". ${assignee} resumes automatically.`,
-      "If the review taught you something worth keeping (a recurring mistake, a standard you enforce), record it with board_remember.",
-    ].join("\n"),
-    BOARD_TOOLS,
-  );
+  sections.push(reviewRules(context, workspace), BOARD_TOOLS);
   return sections.join("\n\n");
+}
+
+interface ReviewWorkspace {
+  readonly worktreePath: string | null;
+  readonly baseRef: string | null;
+}
+
+function reviewRules(context: BoardPromptContext, workspace: ReviewWorkspace): string {
+  const assignee = agentName(context.agents, context.task.assigneeAgentId);
+  return [
+    "## How to review",
+    workspace.worktreePath !== null
+      ? `You are in the task's worktree (${workspace.worktreePath}). Inspect the change with git status and git diff${workspace.baseRef ? ` against ${workspace.baseRef}` : ""}, and run the relevant checks.`
+      : "Inspect the working tree with git status and git diff, and run the relevant checks.",
+    "Judge the result against the task's description and the company's mission, starting from the work linked on the task (board_read_task lists it). Do not redo the work yourself unless a fix is trivial.",
+    '- Approve: comment your verdict, then move the task to "done" with board_update_task.',
+    `- Request changes: comment each required change precisely, then move the task to "todo". ${assignee} resumes automatically.`,
+    "If the review taught you something worth keeping (a recurring mistake, a standard you enforce), record it with board_remember.",
+  ].join("\n");
+}
+
+/** Sent into the reviewer's own thread when the task comes back for another review. */
+export function buildReReviewPrompt(
+  context: BoardPromptContext,
+  since: string | null,
+  workspace: ReviewWorkspace,
+): string {
+  const assignee = agentName(context.agents, context.task.assigneeAgentId);
+  const comments = commentLines(context, since ?? undefined);
+  return [
+    `${assignee} sent the task "${context.task.title}" (${context.task.id}) back for review.`,
+    comments.length > 0 ? ["New comments since your last review:", ...comments].join("\n") : "",
+    boardCommentsBlock(context, since ?? undefined) ?? "",
+    reviewRules(context, workspace),
+  ]
+    .filter((section) => section.length > 0)
+    .join("\n\n");
 }
 
 const REPLY_RULES = `## Reply now
@@ -416,36 +446,67 @@ The board just commented (marked new above) and is waiting for your answer. Righ
 Do not do the task's work in this reply. If the comment asks for work on this task, reply, then move the task to "todo" with board_update_task: you will be started on it next, with the comment in view. Otherwise leave the task where it is.`;
 
 /**
- * Starts an agent that answers a person's comment on a task nobody is working. A fresh thread
- * gets the whole picture; the agent's own thread already has it.
+ * Starts an agent that answers a person's comment on a task nobody is working. Its own thread
+ * already knows the task, so only the new comment goes there.
+ */
+/** A subtask stuck on something its manager may be able to settle. */
+export interface BlockedSubtask {
+  readonly task: BoardTask;
+  /** The last thing said on it, usually why it is blocked. */
+  readonly reason: string | null;
+}
+
+const MAX_BLOCKED_REASON_CHARS = 800;
+
+function blockedBlock(context: BoardPromptContext, blocked: ReadonlyArray<BlockedSubtask>): string {
+  return [
+    "## Blocked below you",
+    "These subtasks of your task are blocked and need you:",
+    ...blocked.map(
+      ({ task, reason }) =>
+        `- "${task.title}" (${task.id}), ${agentName(context.agents, task.assigneeAgentId)}: ${reason === null ? "no reason given" : truncate(reason.trim(), MAX_BLOCKED_REASON_CHARS)}`,
+    ),
+    'Unblock each one you can: answer its question in a comment on that subtask and move it back to "todo", reassign it, or narrow its scope. If only the board (a human) can unblock it, comment on your own task saying exactly what you need from them. Do not do the subtask\'s work yourself, and leave your own task where it is.',
+  ].join("\n");
+}
+
+/**
+ * Starts an agent that answers a person's comment, or settles blocked subtasks, on a task
+ * nobody is working. Its own thread already knows the task, so only what is new goes there.
  */
 export function buildReplyPrompt(
   context: BoardPromptContext,
   newSince: string | null,
-  options: { readonly freshThread: boolean },
+  options: { readonly freshThread: boolean; readonly blocked: ReadonlyArray<BlockedSubtask> },
 ): string {
   // With no earlier run on the task, everything the board said is new.
-  const board = boardCommentsBlock(context, newSince ?? "");
+  const since = newSince ?? "";
+  const commented = context.boardComments.some(
+    (comment) => comment.taskId === context.task.id && comment.createdAt > since,
+  );
+  const board = boardCommentsBlock(context, since);
+  const asks = [
+    commented ? REPLY_RULES : "",
+    options.blocked.length > 0 ? blockedBlock(context, options.blocked) : "",
+  ].filter((section) => section.length > 0);
   if (!options.freshThread) {
     return [
-      `The board (a human) commented on the task "${context.task.title}" (${context.task.id}), which is in "${boardStatusLabel(context.task.status)}".`,
+      commented
+        ? `The board (a human) commented on the task "${context.task.title}" (${context.task.id}), which is in "${boardStatusLabel(context.task.status)}".`
+        : `Work under your task "${context.task.title}" (${context.task.id}) is blocked.`,
       board ?? "",
-      REPLY_RULES,
+      ...asks,
     ]
       .filter((section) => section.length > 0)
       .join("\n\n");
   }
-  const sections = [identityBlock(context), orgBlock(context)];
-  if (context.agent.instructions.trim().length > 0) {
-    sections.push(`## Your standing instructions\n${context.agent.instructions.trim()}`);
-  }
-  const memory = memoryBlock(context);
-  if (memory !== null) sections.push(memory);
-  sections.push(taskBlock(context));
+  // A reply needs the task and the conversation, not the org chart or memory; those arrive
+  // with the full work prompt if this thread goes on to work the task.
+  const sections = [identityBlock(context), taskBlock(context)];
   if (board !== null) sections.push(board);
   const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
-  sections.push(REPLY_RULES, BOARD_TOOLS);
+  sections.push(...asks, BOARD_TOOLS);
   return sections.join("\n\n");
 }
 

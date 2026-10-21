@@ -43,6 +43,7 @@ function agent(id: string, reportsTo: string | null, extra: Partial<BoardAgent> 
     modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "sonnet" },
     runtimeMode: "full-access",
     paused: false,
+    monthlyTokenLimit: null,
     createdAt: "2026-10-20T00:00:00.000Z",
     updatedAt: "2026-10-20T00:00:00.000Z",
     ...extra,
@@ -101,6 +102,8 @@ const snapshot: BoardSnapshot = {
     card("billing", "blocked", "grace"),
     card("docs", "todo", null),
   ],
+  routines: [],
+  usage: null,
   threads: [
     {
       threadId: "thread-1" as ThreadId,

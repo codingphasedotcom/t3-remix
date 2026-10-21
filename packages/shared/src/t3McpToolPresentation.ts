@@ -327,6 +327,8 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   board_search_tasks: tool(["Search", "Searching", "Searched", "past tasks"], "board-read"),
   board_list_tasks: tool(["List", "Listing", "Listed", "board tasks"], "board-read"),
   board_read_task: tool(["Read", "Reading", "Read", "a board task"], "board-read"),
+  board_read_skill: tool(["Read", "Reading", "Read", "a skill"], "board-read"),
+  board_link_work: tool(["Link", "Linking", "Linked", "work to a task"], "board-update"),
   board_create_task: tool(["Create", "Creating", "Created", "a board task"], "board-create"),
   board_update_task: tool(["Update", "Updating", "Updated", "a board task"], "board-update"),
   board_add_comment: tool(

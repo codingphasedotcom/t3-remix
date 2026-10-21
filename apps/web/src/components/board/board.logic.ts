@@ -301,3 +301,40 @@ export function employeeThreadTitle(title: string, agentName: string): string {
   const workPrefix = `${agentName}: `;
   return title.startsWith(workPrefix) ? title.slice(workPrefix.length) : title;
 }
+
+/** How much of a monthly token limit is spent; null when there is no limit. */
+export function limitProgress(
+  used: number,
+  limit: number | null,
+): { readonly share: number; readonly nearing: boolean; readonly reached: boolean } | null {
+  if (limit === null) return null;
+  const share = used / limit;
+  return { share, nearing: share >= 0.8 && share < 1, reached: share >= 1 };
+}
+
+/** "5M", "250k", or "1,500,000" as a token count; empty means no limit, and junk is invalid. */
+export function parseTokenLimit(text: string): number | null | "invalid" {
+  const trimmed = text.trim().replaceAll(",", "").replaceAll("_", "").toLowerCase();
+  if (trimmed.length === 0) return null;
+  const match = /^(\d+(?:\.\d+)?)\s*([km]?)$/.exec(trimmed);
+  if (match === null) return "invalid";
+  const scale = match[2] === "m" ? 1_000_000 : match[2] === "k" ? 1_000 : 1;
+  const value = Math.round(Number(match[1]) * scale);
+  return value >= 1 ? value : "invalid";
+}
+
+/** The repeat choices a routine offers, in days. */
+export const ROUTINE_REPEATS: ReadonlyArray<number> = [1, 7, 14, 30];
+
+export function repeatLabel(everyDays: number): string {
+  if (everyDays === 1) return "Every day";
+  if (everyDays === 7) return "Every week";
+  if (everyDays % 7 === 0) return `Every ${everyDays / 7} weeks`;
+  return `Every ${everyDays} days`;
+}
+
+/** A date as a `datetime-local` input value, in the viewer's time zone. */
+export function localDateTimeInput(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

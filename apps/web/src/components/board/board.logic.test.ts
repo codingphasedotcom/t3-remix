@@ -8,7 +8,16 @@ import type {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { dropPosition, employeeThreadTitle, groupTasksByStatus, orgChartRows } from "./board.logic";
+import {
+  dropPosition,
+  employeeThreadTitle,
+  groupTasksByStatus,
+  limitProgress,
+  localDateTimeInput,
+  orgChartRows,
+  parseTokenLimit,
+  repeatLabel,
+} from "./board.logic";
 
 function card(id: string, status: BoardTask["status"], position: number): BoardTask {
   return {
@@ -89,5 +98,39 @@ describe("employeeThreadTitle", () => {
       "Review: Payment form",
     );
     expect(employeeThreadTitle("Renamed by hand", "Linus")).toBe("Renamed by hand");
+  });
+});
+
+describe("token limits", () => {
+  it("reads limits the way people type them", () => {
+    expect(parseTokenLimit("5M")).toBe(5_000_000);
+    expect(parseTokenLimit("250k")).toBe(250_000);
+    expect(parseTokenLimit("1,500,000")).toBe(1_500_000);
+    expect(parseTokenLimit("1.5m")).toBe(1_500_000);
+    expect(parseTokenLimit("  ")).toBeNull();
+    expect(parseTokenLimit("lots")).toBe("invalid");
+    expect(parseTokenLimit("0")).toBe("invalid");
+  });
+
+  it("warns from 80% and stops at the limit", () => {
+    expect(limitProgress(500, null)).toBeNull();
+    expect(limitProgress(700, 1_000)).toEqual({ share: 0.7, nearing: false, reached: false });
+    expect(limitProgress(850, 1_000)).toEqual({ share: 0.85, nearing: true, reached: false });
+    expect(limitProgress(1_000, 1_000)).toEqual({ share: 1, nearing: false, reached: true });
+  });
+});
+
+describe("routines", () => {
+  it("names how often a routine repeats", () => {
+    expect([1, 7, 14, 30].map(repeatLabel)).toEqual([
+      "Every day",
+      "Every week",
+      "Every 2 weeks",
+      "Every 30 days",
+    ]);
+  });
+
+  it("fills a datetime-local input in local time", () => {
+    expect(localDateTimeInput(new Date(2026, 9, 21, 9, 5))).toBe("2026-10-21T09:05");
   });
 });

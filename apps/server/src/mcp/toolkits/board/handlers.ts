@@ -156,6 +156,7 @@ const make = Effect.gen(function* () {
         return {
           task: detail.task,
           comments: detail.comments,
+          links: detail.links,
           parent: snapshot.tasks.find((task) => task.id === detail.task.parentTaskId) ?? null,
           subtasks: snapshot.tasks.filter((task) => task.parentTaskId === detail.task.id),
         };
@@ -220,6 +221,25 @@ const make = Effect.gen(function* () {
       }),
     ),
 
+    board_link_work: McpToolAccess.writes((input) =>
+      Effect.gen(function* () {
+        const taskId = yield* ownTaskId(input.taskId);
+        const link = yield* board
+          .linkWork(
+            {
+              taskId,
+              kind: input.kind,
+              title: input.title,
+              url: input.url,
+              status: input.status ?? null,
+            },
+            yield* actor(),
+          )
+          .pipe(Effect.mapError(boardFailure));
+        return { link };
+      }),
+    ),
+
     board_request_hire: McpToolAccess.writes((input) =>
       Effect.gen(function* () {
         const { companyId } = yield* callerContext(input.companyId);
@@ -255,6 +275,24 @@ const make = Effect.gen(function* () {
         return yield* board
           .rewriteMemory({ scope: input.scope ?? "self", content: input.content }, yield* actor())
           .pipe(Effect.mapError(boardFailure));
+      }),
+    ),
+
+    board_read_skill: McpToolAccess.reads((input) =>
+      Effect.gen(function* () {
+        const { companyId } = yield* callerContext(input.companyId);
+        const snapshot = yield* companyBoard(companyId);
+        const wanted = input.skill.toLowerCase();
+        const skill = snapshot.skills.find(
+          (candidate) => candidate.id === input.skill || candidate.name.toLowerCase() === wanted,
+        );
+        if (skill === undefined) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: `No skill named "${input.skill}". Skills: ${snapshot.skills.map((candidate) => candidate.name).join(", ") || "none"}.`,
+          });
+        }
+        return { skill };
       }),
     ),
 

@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import {
   IsoDateTime,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -35,6 +36,12 @@ export type BoardHireId = typeof BoardHireId.Type;
 export const BoardDepartmentId = TrimmedNonEmptyString.pipe(Schema.brand("BoardDepartmentId"));
 export type BoardDepartmentId = typeof BoardDepartmentId.Type;
 
+export const BoardRoutineId = TrimmedNonEmptyString.pipe(Schema.brand("BoardRoutineId"));
+export type BoardRoutineId = typeof BoardRoutineId.Type;
+
+export const BoardWorkLinkId = TrimmedNonEmptyString.pipe(Schema.brand("BoardWorkLinkId"));
+export type BoardWorkLinkId = typeof BoardWorkLinkId.Type;
+
 const BOARD_TASK_STATUSES = [
   "backlog",
   "todo",
@@ -59,6 +66,12 @@ export const MAX_COMPANY_MEMORY_CHARS = 16_000;
 const BoardConcurrentRuns = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: MAX_BOARD_CONCURRENT_RUNS }),
 );
+
+/** Input plus output tokens per calendar month (UTC); null for no limit. */
+const BoardMonthlyTokenLimit = Schema.NullOr(PositiveInt).annotate({
+  description:
+    "Input plus output tokens per calendar month (UTC). Agents over it are not started until it is raised or the month ends.",
+});
 
 const BoardDepartmentName = TrimmedNonEmptyString.check(Schema.isMaxLength(40));
 
@@ -114,6 +127,7 @@ export const BoardAgent = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   paused: Schema.Boolean,
+  monthlyTokenLimit: BoardMonthlyTokenLimit,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -211,8 +225,36 @@ export const BoardSettings = Schema.Struct({
     description: "Give each task its own git worktree; reviewers open the same worktree.",
   }),
   baseRef: TrimmedNonEmptyString,
+  monthlyTokenLimit: BoardMonthlyTokenLimit,
 });
 export type BoardSettings = typeof BoardSettings.Type;
+
+const BoardRoutineEveryDays = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 365 }));
+
+/** A task the board creates on a schedule, such as a weekly review. */
+export const BoardRoutine = Schema.Struct({
+  id: BoardRoutineId,
+  companyId: BoardCompanyId,
+  title: TrimmedNonEmptyString,
+  description: Schema.String,
+  assigneeAgentId: Schema.NullOr(BoardAgentId),
+  everyDays: BoardRoutineEveryDays,
+  nextRunAt: IsoDateTime,
+  enabled: Schema.Boolean,
+  /** The latest task it created; a new one waits until that one is done. */
+  lastTaskId: Schema.NullOr(BoardTaskId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type BoardRoutine = typeof BoardRoutine.Type;
+
+/** This month's spending, sent only to companies that set a limit somewhere. */
+export const BoardUsage = Schema.Struct({
+  monthStart: IsoDateTime,
+  companyTokens: NonNegativeInt,
+  agents: Schema.Array(Schema.Struct({ agentId: BoardAgentId, tokens: NonNegativeInt })),
+});
+export type BoardUsage = typeof BoardUsage.Type;
 
 /** Just enough of an employee to @mention them from a chat or a task. */
 export const BoardCompanyMember = Schema.Struct({
@@ -296,16 +338,47 @@ export const BoardSnapshot = Schema.Struct({
   hires: Schema.Array(BoardHire),
   tasks: Schema.Array(BoardTask),
   threads: Schema.Array(BoardAgentThread),
+  routines: Schema.Array(BoardRoutine),
+  usage: Schema.NullOr(BoardUsage),
   dashboard: Schema.optional(BoardDashboard).annotate({
     description: "Present only for a subscription that asked for it.",
   }),
 });
 export type BoardSnapshot = typeof BoardSnapshot.Type;
 
+export const BoardWorkLinkKind = Schema.Literals([
+  "pull_request",
+  "branch",
+  "preview",
+  "commit",
+  "document",
+  "other",
+]);
+export type BoardWorkLinkKind = typeof BoardWorkLinkKind.Type;
+
+export const BoardWorkLinkStatus = Schema.Literals(["open", "draft", "merged", "closed"]);
+export type BoardWorkLinkStatus = typeof BoardWorkLinkStatus.Type;
+
+/** Something a task produced, such as a pull request or a preview, so people can find it. */
+export const BoardWorkLink = Schema.Struct({
+  id: BoardWorkLinkId,
+  taskId: BoardTaskId,
+  kind: BoardWorkLinkKind,
+  title: TrimmedNonEmptyString,
+  /** A URL, or a branch name for a branch. */
+  url: TrimmedNonEmptyString,
+  status: Schema.NullOr(BoardWorkLinkStatus),
+  agentId: Schema.NullOr(BoardAgentId),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type BoardWorkLink = typeof BoardWorkLink.Type;
+
 export const BoardTaskDetail = Schema.Struct({
   task: BoardTask,
   comments: Schema.Array(BoardComment),
   runs: Schema.Array(BoardRun),
+  links: Schema.Array(BoardWorkLink),
 });
 export type BoardTaskDetail = typeof BoardTaskDetail.Type;
 
@@ -392,6 +465,7 @@ export const BoardAgentUpsertInput = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   paused: Schema.optional(Schema.Boolean),
+  monthlyTokenLimit: Schema.optional(BoardMonthlyTokenLimit),
 });
 export type BoardAgentUpsertInput = typeof BoardAgentUpsertInput.Type;
 
@@ -404,6 +478,18 @@ export const BoardHireDecisionInput = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeMode),
 });
 export type BoardHireDecisionInput = typeof BoardHireDecisionInput.Type;
+
+export const BoardRoutineUpsertInput = Schema.Struct({
+  id: Schema.optional(BoardRoutineId),
+  companyId: BoardCompanyId,
+  title: TrimmedNonEmptyString,
+  description: Schema.String,
+  assigneeAgentId: Schema.NullOr(BoardAgentId),
+  everyDays: BoardRoutineEveryDays,
+  nextRunAt: IsoDateTime.annotate({ description: "When it next creates a task." }),
+  enabled: Schema.Boolean,
+});
+export type BoardRoutineUpsertInput = typeof BoardRoutineUpsertInput.Type;
 
 export const BoardTaskCreateInput = Schema.Struct({
   companyId: BoardCompanyId,
@@ -439,6 +525,7 @@ export const BoardSettingsUpdateInput = Schema.Struct({
   maxConcurrentRuns: Schema.optional(BoardConcurrentRuns),
   useWorktrees: Schema.optional(Schema.Boolean),
   baseRef: Schema.optional(TrimmedNonEmptyString),
+  monthlyTokenLimit: Schema.optional(BoardMonthlyTokenLimit),
 });
 export type BoardSettingsUpdateInput = typeof BoardSettingsUpdateInput.Type;
 
@@ -460,7 +547,10 @@ export const BoardCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("task.delete"), id: BoardTaskId }),
   Schema.Struct({ type: Schema.Literal("task.start"), id: BoardTaskId }),
   Schema.Struct({ type: Schema.Literal("comment.add"), comment: BoardCommentAddInput }),
+  Schema.Struct({ type: Schema.Literal("link.delete"), id: BoardWorkLinkId }),
   Schema.Struct({ type: Schema.Literal("settings.update"), settings: BoardSettingsUpdateInput }),
+  Schema.Struct({ type: Schema.Literal("routine.upsert"), routine: BoardRoutineUpsertInput }),
+  Schema.Struct({ type: Schema.Literal("routine.delete"), id: BoardRoutineId }),
 ]);
 export type BoardCommand = typeof BoardCommand.Type;
 
@@ -471,6 +561,7 @@ export const BoardCommandResult = Schema.Struct({
   task: Schema.optional(BoardTask),
   comment: Schema.optional(BoardComment),
   settings: Schema.optional(BoardSettings),
+  routine: Schema.optional(BoardRoutine),
 });
 export type BoardCommandResult = typeof BoardCommandResult.Type;
 

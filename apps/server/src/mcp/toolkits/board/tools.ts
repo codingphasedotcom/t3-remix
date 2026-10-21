@@ -6,10 +6,14 @@ import {
   BoardDepartmentId,
   BoardHire,
   BoardRunKind,
+  BoardSkill,
   BoardSkillId,
   BoardTask,
   BoardTaskId,
   BoardTaskStatus,
+  BoardWorkLink,
+  BoardWorkLinkKind,
+  BoardWorkLinkStatus,
   OrchestratorMcpFailure,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
@@ -96,11 +100,12 @@ const BoardListTasksTool = Tool.make("board_list_tasks", {
 const BoardReadTaskTool = Tool.make("board_read_task", {
   ...shared,
   description:
-    "Read one task with its comments, parent, and subtasks. Omit taskId to read the task this thread was started for.",
+    "Read one task with its comments, linked work (pull requests, branches, previews), parent, and subtasks. Omit taskId to read the task this thread was started for.",
   parameters: Schema.Struct({ taskId: Schema.optional(BoardTaskId) }),
   success: Schema.Struct({
     task: BoardTask,
     comments: Schema.Array(BoardComment),
+    links: Schema.Array(BoardWorkLink),
     parent: Schema.NullOr(BoardTask),
     subtasks: Schema.Array(BoardTask),
   }),
@@ -192,7 +197,9 @@ const BoardRememberTool = Tool.make("board_remember", {
     "Save a lasting lesson to memory so future tasks start with it: a convention, a command, a gotcha, or the board's preference. Not a log of this task.",
   parameters: Schema.Struct({
     scope: Schema.optional(MemoryScope),
-    note: TrimmedNonEmptyString.annotate({ description: "One short, self-contained lesson." }),
+    note: TrimmedNonEmptyString.annotate({
+      description: "One short, self-contained lesson. The date and your name are added for you.",
+    }),
   }),
   success: MemoryResult,
 }).annotate(Tool.Destructive, false);
@@ -225,6 +232,41 @@ const BoardSearchTasksTool = Tool.make("board_search_tasks", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
 
+const BoardLinkWorkTool = Tool.make("board_link_work", {
+  ...shared,
+  description:
+    'Link something a task produced, such as a pull request, branch, or preview, so people can find it on the task. Linking the same URL again updates it; set status to "merged" once a pull request merges.',
+  parameters: Schema.Struct({
+    taskId: Schema.optional(BoardTaskId).annotate({
+      description: "Defaults to the task this thread was started for.",
+    }),
+    kind: BoardWorkLinkKind,
+    title: TrimmedNonEmptyString.annotate({
+      description: 'Such as "PR #12: Add the pricing page".',
+    }),
+    url: TrimmedNonEmptyString.annotate({
+      description: "The URL, or the branch name for a branch.",
+    }),
+    status: Schema.optional(BoardWorkLinkStatus).annotate({
+      description: 'For pull requests; defaults to "open".',
+    }),
+  }),
+  success: Schema.Struct({ link: BoardWorkLink }),
+}).annotate(Tool.Destructive, false);
+
+const BoardReadSkillTool = Tool.make("board_read_skill", {
+  ...shared,
+  description:
+    "Read a skill's full instructions. Your prompt lists your skills by name; read the ones that apply before you use them.",
+  parameters: Schema.Struct({
+    companyId: CompanyIdParam,
+    skill: TrimmedNonEmptyString.annotate({ description: "The skill's name or id." }),
+  }),
+  success: Schema.Struct({ skill: BoardSkill }),
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+
 export const BoardToolkit = Toolkit.make(
   BoardListAgentsTool,
   BoardListTasksTool,
@@ -236,4 +278,6 @@ export const BoardToolkit = Toolkit.make(
   BoardRememberTool,
   BoardRewriteMemoryTool,
   BoardSearchTasksTool,
+  BoardReadSkillTool,
+  BoardLinkWorkTool,
 );

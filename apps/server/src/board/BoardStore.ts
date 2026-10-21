@@ -19,6 +19,10 @@ import {
   BoardSkillId,
   BoardTask,
   BoardTaskId,
+  BoardRoutine,
+  BoardRoutineId,
+  BoardWorkLink,
+  BoardWorkLinkId,
   ModelSelection,
   ThreadId,
   type BoardCommentAuthorKind,
@@ -26,6 +30,8 @@ import {
   type BoardRunKind,
   type BoardRunStatus,
   type BoardTaskStatus,
+  type BoardWorkLinkKind,
+  type BoardWorkLinkStatus,
   type ProjectId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -95,6 +101,15 @@ export interface TaskChanges {
   readonly reviewerAgentId?: BoardAgentId | null;
 }
 
+export interface WorkLinkInput {
+  readonly taskId: BoardTaskId;
+  readonly kind: BoardWorkLinkKind;
+  readonly title: string;
+  readonly url: string;
+  readonly status: BoardWorkLinkStatus | null;
+  readonly agentId: BoardAgentId | null;
+}
+
 export interface NewHire {
   readonly companyId: BoardCompanyId;
   readonly requestedByAgentId: BoardAgentId | null;
@@ -158,6 +173,17 @@ export class BoardStore extends Context.Service<
     ) => StoreEffect<ReadonlyArray<StoredTask>>;
 
     readonly listComments: (taskId: BoardTaskId) => StoreEffect<ReadonlyArray<BoardComment>>;
+    readonly listRoutines: (companyId: BoardCompanyId) => StoreEffect<ReadonlyArray<BoardRoutine>>;
+    readonly getRoutine: (id: BoardRoutineId) => StoreEffect<BoardRoutine | null>;
+    readonly upsertRoutine: (routine: BoardRoutine) => StoreEffect<void>;
+    readonly deleteRoutine: (id: BoardRoutineId) => StoreEffect<void>;
+    /** Enabled routines, in every company, whose next run is at or before `at`. */
+    readonly listDueRoutines: (at: string) => StoreEffect<ReadonlyArray<BoardRoutine>>;
+    readonly listWorkLinks: (taskId: BoardTaskId) => StoreEffect<ReadonlyArray<BoardWorkLink>>;
+    /** Adds the link, or updates the one the task already has for the same URL. */
+    readonly upsertWorkLink: (link: WorkLinkInput) => StoreEffect<BoardWorkLink>;
+    readonly getWorkLink: (id: BoardWorkLinkId) => StoreEffect<BoardWorkLink | null>;
+    readonly deleteWorkLink: (id: BoardWorkLinkId) => StoreEffect<void>;
     readonly insertComment: (input: {
       readonly taskId: BoardTaskId;
       readonly authorKind: BoardCommentAuthorKind;
@@ -189,12 +215,32 @@ export class BoardStore extends Context.Service<
       utcOffsetMinutes: number,
     ) => StoreEffect<ReadonlyArray<ThreadTokenDay>>;
     readonly countRunningRuns: (companyId: BoardCompanyId) => StoreEffect<number>;
+    /** Input plus output tokens since `since`, per agent; a thread counts for its latest agent. */
+    readonly tokenUsageSince: (
+      companyId: BoardCompanyId,
+      since: string,
+    ) => StoreEffect<ReadonlyArray<{ readonly agentId: BoardAgentId; readonly tokens: number }>>;
     readonly countRuns: (taskId: BoardTaskId) => StoreEffect<number>;
     /** When the latest run of `kind` (any kind when omitted) ended; null while it runs. */
     readonly lastRunEndedAt: (
       taskId: BoardTaskId,
       kind?: BoardRunKind,
     ) => StoreEffect<string | null>;
+    /** The thread of `agentId`'s latest run on the task (of `kind`, when given). */
+    readonly latestAgentThread: (
+      taskId: BoardTaskId,
+      agentId: BoardAgentId,
+      kind?: BoardRunKind,
+    ) => StoreEffect<ThreadId | null>;
+    /**
+     * Subtasks that became blocked after every run on their parent had ended, leaving out
+     * subtasks that only wait on subtasks of their own.
+     */
+    readonly listNewlyBlockedSubtasks: (
+      companyId: BoardCompanyId,
+    ) => StoreEffect<
+      ReadonlyArray<{ readonly parentId: BoardTaskId; readonly taskId: BoardTaskId }>
+    >;
     /** Tasks with a person's comment posted after every run on the task had ended. */
     readonly listTasksAwaitingReply: (
       companyId: BoardCompanyId,
@@ -250,6 +296,7 @@ interface AgentRow {
   readonly model_selection_json: string;
   readonly runtime_mode: string;
   readonly paused: number;
+  readonly monthly_token_limit: number | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -321,6 +368,7 @@ interface SettingsRow {
   readonly max_concurrent_runs: number;
   readonly use_worktrees: number;
   readonly base_ref: string;
+  readonly monthly_token_limit: number | null;
 }
 
 const SkillIdsJson = Schema.fromJsonString(Schema.Array(BoardSkillId));
@@ -339,6 +387,62 @@ const decodeAgent = Schema.decodeUnknownEffect(BoardAgent);
 const decodeHire = Schema.decodeUnknownEffect(BoardHire);
 const decodeTask = Schema.decodeUnknownEffect(BoardTask);
 const decodeComment = Schema.decodeUnknownEffect(BoardComment);
+const decodeWorkLink = Schema.decodeUnknownEffect(BoardWorkLink);
+const decodeRoutine = Schema.decodeUnknownEffect(BoardRoutine);
+
+interface RoutineRow {
+  readonly routine_id: string;
+  readonly company_id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly assignee_agent_id: string | null;
+  readonly every_days: number;
+  readonly next_run_at: string;
+  readonly enabled: number;
+  readonly last_task_id: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+const toRoutine = (row: RoutineRow) =>
+  decodeRoutine({
+    id: row.routine_id,
+    companyId: row.company_id,
+    title: row.title,
+    description: row.description,
+    assigneeAgentId: row.assignee_agent_id,
+    everyDays: row.every_days,
+    nextRunAt: row.next_run_at,
+    enabled: row.enabled === 1,
+    lastTaskId: row.last_task_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+
+interface WorkLinkRow {
+  readonly link_id: string;
+  readonly task_id: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly url: string;
+  readonly status: string | null;
+  readonly agent_id: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+const toWorkLink = (row: WorkLinkRow) =>
+  decodeWorkLink({
+    id: row.link_id,
+    taskId: row.task_id,
+    kind: row.kind,
+    title: row.title,
+    url: row.url,
+    status: row.status,
+    agentId: row.agent_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
 const decodeRun = Schema.decodeUnknownEffect(BoardRun);
 const decodeSettings = Schema.decodeUnknownEffect(BoardSettings);
 const decodeAgentThread = Schema.decodeUnknownEffect(BoardAgentThread);
@@ -537,15 +641,55 @@ const make = Effect.gen(function* () {
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_runs_thread ON board_runs(thread_id, status)`;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_runs_task ON board_runs(task_id, started_at)`;
   yield* sql`
+    CREATE TABLE IF NOT EXISTS board_work_links (
+      link_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      status TEXT,
+      agent_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `;
+  yield* sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_board_work_links_task_url ON board_work_links(task_id, url)
+  `;
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS board_routines (
+      routine_id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      assignee_agent_id TEXT,
+      every_days INTEGER NOT NULL,
+      next_run_at TEXT NOT NULL,
+      enabled INTEGER NOT NULL,
+      last_task_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `;
+  yield* sql`CREATE INDEX IF NOT EXISTS idx_board_routines_due ON board_routines(enabled, next_run_at)`;
+  yield* sql`
     CREATE TABLE IF NOT EXISTS board_company_settings (
       company_id TEXT PRIMARY KEY,
       auto_dispatch INTEGER NOT NULL,
       max_concurrent_runs INTEGER NOT NULL,
       use_worktrees INTEGER NOT NULL,
       base_ref TEXT NOT NULL,
+      monthly_token_limit INTEGER,
       updated_at TEXT NOT NULL
     )
   `;
+  // Monthly limits arrived after settings and agents; existing rows have none.
+  if (!(yield* columns("board_company_settings")).has("monthly_token_limit")) {
+    yield* sql`ALTER TABLE board_company_settings ADD COLUMN monthly_token_limit INTEGER`;
+  }
+  if (!(yield* columns("board_agents")).has("monthly_token_limit")) {
+    yield* sql`ALTER TABLE board_agents ADD COLUMN monthly_token_limit INTEGER`;
+  }
 
   const newId: BoardStore["Service"]["newId"] = (prefix) =>
     crypto.randomUUIDv4().pipe(
@@ -622,6 +766,7 @@ const make = Effect.gen(function* () {
       modelSelection: yield* decodeModelSelection(row.model_selection_json),
       runtimeMode: row.runtime_mode,
       paused: row.paused === 1,
+      monthlyTokenLimit: row.monthly_token_limit,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
@@ -800,8 +945,11 @@ const make = Effect.gen(function* () {
               (SELECT task_id FROM board_tasks WHERE company_id = ${id})`,
             sql`DELETE FROM board_runs WHERE task_id IN
               (SELECT task_id FROM board_tasks WHERE company_id = ${id})`,
+            sql`DELETE FROM board_work_links WHERE task_id IN
+              (SELECT task_id FROM board_tasks WHERE company_id = ${id})`,
             sql`DELETE FROM board_tasks WHERE company_id = ${id}`,
             sql`DELETE FROM board_hires WHERE company_id = ${id}`,
+            sql`DELETE FROM board_routines WHERE company_id = ${id}`,
             sql`DELETE FROM board_agents WHERE company_id = ${id}`,
             sql`DELETE FROM board_skills WHERE company_id = ${id}`,
             sql`DELETE FROM board_company_settings WHERE company_id = ${id}`,
@@ -878,14 +1026,14 @@ const make = Effect.gen(function* () {
         INSERT INTO board_agents (
           agent_id, company_id, name, title, avatar, department_id, reports_to_agent_id,
           skill_ids_json, instructions, memory, model_selection_json, runtime_mode, paused,
-          created_at, updated_at
+          monthly_token_limit, created_at, updated_at
         )
         VALUES (
           ${agent.id}, ${agent.companyId}, ${agent.name}, ${agent.title}, ${agent.avatar},
           ${agent.departmentId}, ${agent.reportsToAgentId}, ${skillIds}, ${agent.instructions},
           ${agent.memory},
-          ${modelSelection}, ${agent.runtimeMode}, ${agent.paused ? 1 : 0}, ${agent.createdAt},
-          ${agent.updatedAt}
+          ${modelSelection}, ${agent.runtimeMode}, ${agent.paused ? 1 : 0},
+          ${agent.monthlyTokenLimit}, ${agent.createdAt}, ${agent.updatedAt}
         )
         ON CONFLICT (agent_id) DO UPDATE SET
           name = excluded.name,
@@ -899,6 +1047,7 @@ const make = Effect.gen(function* () {
           model_selection_json = excluded.model_selection_json,
           runtime_mode = excluded.runtime_mode,
           paused = excluded.paused,
+          monthly_token_limit = excluded.monthly_token_limit,
           updated_at = excluded.updated_at
       `;
     },
@@ -937,6 +1086,8 @@ const make = Effect.gen(function* () {
               WHERE assignee_agent_id = ${agent.id}`,
             sql`UPDATE board_tasks SET reviewer_agent_id = NULL
               WHERE reviewer_agent_id = ${agent.id}`,
+            sql`UPDATE board_routines SET assignee_agent_id = NULL
+              WHERE assignee_agent_id = ${agent.id}`,
             sql`UPDATE board_companies SET ceo_agent_id = NULL WHERE ceo_agent_id = ${agent.id}`,
             sql`DELETE FROM board_agents WHERE agent_id = ${agent.id}`,
           ],
@@ -1093,6 +1244,7 @@ const make = Effect.gen(function* () {
             sql`UPDATE board_tasks SET parent_task_id = ${task.parentTaskId}
               WHERE parent_task_id = ${task.id}`,
             sql`DELETE FROM board_comments WHERE task_id = ${task.id}`,
+            sql`DELETE FROM board_work_links WHERE task_id = ${task.id}`,
             sql`DELETE FROM board_runs WHERE task_id = ${task.id}`,
             sql`DELETE FROM board_tasks WHERE task_id = ${task.id}`,
           ],
@@ -1143,6 +1295,115 @@ const make = Effect.gen(function* () {
     },
     failWith("Could not read comments."),
   );
+
+  const listRoutines: BoardStore["Service"]["listRoutines"] = Effect.fn("BoardStore.listRoutines")(
+    function* (companyId) {
+      const rows = yield* sql<RoutineRow>`
+        SELECT * FROM board_routines WHERE company_id = ${companyId} ORDER BY created_at, rowid
+      `;
+      return yield* Effect.forEach(rows, toRoutine);
+    },
+    failWith("Could not read the routines."),
+  );
+
+  const getRoutine: BoardStore["Service"]["getRoutine"] = Effect.fn("BoardStore.getRoutine")(
+    function* (id) {
+      const rows = yield* sql<RoutineRow>`SELECT * FROM board_routines WHERE routine_id = ${id}`;
+      const row = rows[0];
+      return row === undefined ? null : yield* toRoutine(row);
+    },
+    failWith("Could not read the routine."),
+  );
+
+  const upsertRoutine: BoardStore["Service"]["upsertRoutine"] = (routine) =>
+    sql`
+      INSERT INTO board_routines (
+        routine_id, company_id, title, description, assignee_agent_id, every_days, next_run_at,
+        enabled, last_task_id, created_at, updated_at
+      )
+      VALUES (
+        ${routine.id}, ${routine.companyId}, ${routine.title}, ${routine.description},
+        ${routine.assigneeAgentId}, ${routine.everyDays}, ${routine.nextRunAt},
+        ${routine.enabled ? 1 : 0}, ${routine.lastTaskId}, ${routine.createdAt}, ${routine.updatedAt}
+      )
+      ON CONFLICT (routine_id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description,
+        assignee_agent_id = excluded.assignee_agent_id,
+        every_days = excluded.every_days,
+        next_run_at = excluded.next_run_at,
+        enabled = excluded.enabled,
+        last_task_id = excluded.last_task_id,
+        updated_at = excluded.updated_at
+    `.pipe(Effect.asVoid, failWith("Could not save the routine."));
+
+  const deleteRoutine: BoardStore["Service"]["deleteRoutine"] = (id) =>
+    sql`DELETE FROM board_routines WHERE routine_id = ${id}`.pipe(
+      Effect.asVoid,
+      failWith("Could not delete the routine."),
+    );
+
+  const listDueRoutines: BoardStore["Service"]["listDueRoutines"] = Effect.fn(
+    "BoardStore.listDueRoutines",
+  )(function* (at) {
+    const rows = yield* sql<RoutineRow>`
+      SELECT * FROM board_routines WHERE enabled = 1 AND next_run_at <= ${at}
+      ORDER BY next_run_at, rowid
+    `;
+    return yield* Effect.forEach(rows, toRoutine);
+  }, failWith("Could not read the routines."));
+
+  const listWorkLinks: BoardStore["Service"]["listWorkLinks"] = Effect.fn(
+    "BoardStore.listWorkLinks",
+  )(function* (taskId) {
+    const rows = yield* sql<WorkLinkRow>`
+      SELECT * FROM board_work_links WHERE task_id = ${taskId} ORDER BY created_at, rowid
+    `;
+    return yield* Effect.forEach(rows, toWorkLink);
+  }, failWith("Could not read the task's links."));
+
+  const getWorkLink: BoardStore["Service"]["getWorkLink"] = Effect.fn("BoardStore.getWorkLink")(
+    function* (id) {
+      const rows = yield* sql<WorkLinkRow>`SELECT * FROM board_work_links WHERE link_id = ${id}`;
+      const row = rows[0];
+      return row === undefined ? null : yield* toWorkLink(row);
+    },
+    failWith("Could not read the link."),
+  );
+
+  const upsertWorkLink: BoardStore["Service"]["upsertWorkLink"] = Effect.fn(
+    "BoardStore.upsertWorkLink",
+  )(function* (link) {
+    const id = BoardWorkLinkId.make(yield* newId("board-link"));
+    const at = yield* now;
+    yield* sql`
+      INSERT INTO board_work_links (
+        link_id, task_id, kind, title, url, status, agent_id, created_at, updated_at
+      )
+      VALUES (
+        ${id}, ${link.taskId}, ${link.kind}, ${link.title}, ${link.url}, ${link.status},
+        ${link.agentId}, ${at}, ${at}
+      )
+      ON CONFLICT (task_id, url) DO UPDATE SET
+        kind = excluded.kind,
+        title = excluded.title,
+        status = excluded.status,
+        agent_id = COALESCE(excluded.agent_id, board_work_links.agent_id),
+        updated_at = excluded.updated_at
+    `;
+    const rows = yield* sql<WorkLinkRow>`
+      SELECT * FROM board_work_links WHERE task_id = ${link.taskId} AND url = ${link.url}
+    `;
+    const row = rows[0];
+    if (row === undefined) return yield* new BoardError({ message: "The link vanished." });
+    return yield* toWorkLink(row);
+  }, failWith("Could not save the link."));
+
+  const deleteWorkLink: BoardStore["Service"]["deleteWorkLink"] = (id) =>
+    sql`DELETE FROM board_work_links WHERE link_id = ${id}`.pipe(
+      Effect.asVoid,
+      failWith("Could not remove the link."),
+    );
 
   const insertComment: BoardStore["Service"]["insertComment"] = Effect.fn(
     "BoardStore.insertComment",
@@ -1322,6 +1583,34 @@ const make = Effect.gen(function* () {
     }));
   }, failWith("Could not read token usage."));
 
+  const tokenUsageSince: BoardStore["Service"]["tokenUsageSince"] = (companyId, since) =>
+    sql<{ readonly agent_id: string | null; readonly tokens: number }>`
+      SELECT
+        (SELECT r.agent_id FROM board_runs r WHERE r.thread_id = p.thread_id
+          ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1) AS agent_id,
+        COALESCE(SUM(
+          COALESCE(json_extract(p.payload_json, '$.turnTokenUsage.inputTokens'), 0)
+          + COALESCE(json_extract(p.payload_json, '$.turnTokenUsage.outputTokens'), 0)
+        ), 0) AS tokens
+      FROM orchestration_v2_projection_provider_turns p
+      WHERE p.thread_id IN (
+        SELECT r.thread_id FROM board_runs r
+        JOIN board_tasks t ON t.task_id = r.task_id
+        WHERE t.company_id = ${companyId}
+      )
+        AND COALESCE(p.started_at, p.completed_at) >= ${since}
+      GROUP BY agent_id
+    `.pipe(
+      Effect.map((rows) =>
+        rows.flatMap((row) =>
+          row.agent_id === null
+            ? []
+            : [{ agentId: BoardAgentId.make(row.agent_id), tokens: row.tokens }],
+        ),
+      ),
+      failWith("Could not read token usage."),
+    );
+
   const countRunningRuns: BoardStore["Service"]["countRunningRuns"] = (companyId) =>
     sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count FROM board_runs r
@@ -1348,6 +1637,39 @@ const make = Effect.gen(function* () {
     `.pipe(
       Effect.map((rows) => rows[0]?.ended_at ?? null),
       failWith("Could not read the last run."),
+    );
+
+  const latestAgentThread: BoardStore["Service"]["latestAgentThread"] = (taskId, agentId, kind) =>
+    sql<{ readonly thread_id: string }>`
+      SELECT thread_id FROM board_runs
+      WHERE task_id = ${taskId} AND agent_id = ${agentId}
+        AND (${kind ?? null} IS NULL OR kind = ${kind ?? null})
+      ORDER BY started_at DESC, rowid DESC LIMIT 1
+    `.pipe(
+      Effect.map((rows) => (rows[0] === undefined ? null : (rows[0].thread_id as ThreadId))),
+      failWith("Could not read the agent's thread."),
+    );
+
+  const listNewlyBlockedSubtasks: BoardStore["Service"]["listNewlyBlockedSubtasks"] = (companyId) =>
+    sql<{ readonly parent_task_id: string; readonly task_id: string }>`
+      SELECT c.parent_task_id, c.task_id FROM board_tasks c
+      WHERE c.company_id = ${companyId} AND c.status = 'blocked' AND c.parent_task_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM board_tasks g WHERE g.parent_task_id = c.task_id AND g.status != 'done'
+        )
+        AND c.status_changed_at > COALESCE(
+          (SELECT MAX(COALESCE(r.ended_at, '9999')) FROM board_runs r
+            WHERE r.task_id = c.parent_task_id),
+          ''
+        )
+    `.pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          parentId: BoardTaskId.make(row.parent_task_id),
+          taskId: BoardTaskId.make(row.task_id),
+        })),
+      ),
+      failWith("Could not read blocked tasks."),
     );
 
   // A run still going counts as ending in the future: whoever it is sees the comment live.
@@ -1378,7 +1700,7 @@ const make = Effect.gen(function* () {
   const getSettings: BoardStore["Service"]["getSettings"] = Effect.fn("BoardStore.getSettings")(
     function* (companyId) {
       const rows = yield* sql<SettingsRow>`
-        SELECT auto_dispatch, max_concurrent_runs, use_worktrees, base_ref
+        SELECT auto_dispatch, max_concurrent_runs, use_worktrees, base_ref, monthly_token_limit
         FROM board_company_settings WHERE company_id = ${companyId}
       `;
       const row = rows[0];
@@ -1388,6 +1710,7 @@ const make = Effect.gen(function* () {
         maxConcurrentRuns: row?.max_concurrent_runs ?? DEFAULT_MAX_CONCURRENT_RUNS,
         useWorktrees: row === undefined ? true : row.use_worktrees === 1,
         baseRef: row?.base_ref ?? DEFAULT_BASE_REF,
+        monthlyTokenLimit: row?.monthly_token_limit ?? null,
       });
     },
     failWith("Could not read board settings."),
@@ -1399,17 +1722,20 @@ const make = Effect.gen(function* () {
     const at = yield* now;
     yield* sql`
         INSERT INTO board_company_settings (
-          company_id, auto_dispatch, max_concurrent_runs, use_worktrees, base_ref, updated_at
+          company_id, auto_dispatch, max_concurrent_runs, use_worktrees, base_ref,
+          monthly_token_limit, updated_at
         )
         VALUES (
           ${settings.companyId}, ${settings.autoDispatch ? 1 : 0}, ${settings.maxConcurrentRuns},
-          ${settings.useWorktrees ? 1 : 0}, ${settings.baseRef}, ${at}
+          ${settings.useWorktrees ? 1 : 0}, ${settings.baseRef}, ${settings.monthlyTokenLimit},
+          ${at}
         )
         ON CONFLICT (company_id) DO UPDATE SET
           auto_dispatch = excluded.auto_dispatch,
           max_concurrent_runs = excluded.max_concurrent_runs,
           use_worktrees = excluded.use_worktrees,
           base_ref = excluded.base_ref,
+          monthly_token_limit = excluded.monthly_token_limit,
           updated_at = excluded.updated_at
       `;
   }, failWith("Could not save board settings."));
@@ -1457,6 +1783,18 @@ const make = Effect.gen(function* () {
     countRuns,
     lastRunEndedAt,
     listTasksAwaitingReply,
+    tokenUsageSince,
+    listNewlyBlockedSubtasks,
+    listRoutines,
+    getRoutine,
+    upsertRoutine,
+    deleteRoutine,
+    listDueRoutines,
+    listWorkLinks,
+    upsertWorkLink,
+    getWorkLink,
+    deleteWorkLink,
+    latestAgentThread,
     lastRunStartedAt,
     getSettings,
     upsertSettings,

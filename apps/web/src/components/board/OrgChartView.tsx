@@ -8,7 +8,7 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { draftFromAgent, newEmployeeDraft, type AgentDraft } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
-import { agentById, departmentLabel } from "./board.logic";
+import { agentById, departmentLabel, limitProgress } from "./board.logic";
 import { faceFor, unusedFaceKey } from "./faces";
 
 /** Each level of the chart gets its own accent, like a printed org chart. */
@@ -207,6 +207,10 @@ function OrgCard(props: {
     .map((id) => snapshot.skills.find((skill) => skill.id === id)?.name)
     .filter((name) => name !== undefined);
   const lessons = agent.memory.split("\n").filter((line) => line.trim().length > 0).length;
+  const limit = limitProgress(
+    snapshot.usage?.agents.find((row) => row.agentId === agent.id)?.tokens ?? 0,
+    agent.monthlyTokenLimit,
+  );
   const openCards = snapshot.tasks.filter(
     (task) => task.assigneeAgentId === agent.id && task.status !== "done",
   ).length;
@@ -265,6 +269,15 @@ function OrgCard(props: {
             ) : working ? (
               <Badge variant="info" size="sm">
                 Working
+              </Badge>
+            ) : null}
+            {limit?.reached ? (
+              <Badge variant="error" size="sm">
+                Limit reached
+              </Badge>
+            ) : limit?.nearing ? (
+              <Badge variant="warning" size="sm">
+                {Math.round(limit.share * 100)}% of limit
               </Badge>
             ) : null}
             {openCards > 0 ? (

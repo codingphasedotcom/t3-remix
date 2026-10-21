@@ -3,6 +3,7 @@ import {
   BoardCompanyId,
   BoardDepartmentId,
   BoardError,
+  BoardRoutineId,
   BoardSkillId,
   MAX_AGENT_MEMORY_CHARS,
   MAX_COMPANY_MEMORY_CHARS,
@@ -35,15 +36,24 @@ import {
   type BoardTaskId,
   type BoardTaskStatus,
   type BoardTaskUpdateInput,
+  type BoardRoutine,
+  type BoardRoutineUpsertInput,
+  type BoardUsage,
+  type BoardWorkLink,
+  type BoardWorkLinkId,
+  type BoardWorkLinkKind,
+  type BoardWorkLinkStatus,
   type OrchestrationV2Run,
   type ProjectId,
 } from "@t3tools/contracts";
 import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
@@ -57,11 +67,13 @@ import { buildDashboard } from "./boardDashboard.ts";
 import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
 import {
   boardStatusLabel,
+  buildReReviewPrompt,
   buildReplyPrompt,
   buildReviewPrompt,
   buildReworkPrompt,
   buildUserCommentMessage,
   buildWorkPrompt,
+  type BlockedSubtask,
   type BoardPromptContext,
   type BoardWorkspace,
 } from "./boardPrompts.ts";
@@ -133,6 +145,17 @@ export class BoardService extends Context.Service<
       input: BoardCommentAddInput,
       actor: BoardActor,
     ) => Effect.Effect<BoardComment, BoardError>;
+    /** Records something a task produced, such as a pull request, or updates its status. */
+    readonly linkWork: (
+      input: {
+        readonly taskId: BoardTaskId;
+        readonly kind: BoardWorkLinkKind;
+        readonly title: string;
+        readonly url: string;
+        readonly status: BoardWorkLinkStatus | null;
+      },
+      actor: BoardActor,
+    ) => Effect.Effect<BoardWorkLink, BoardError>;
     /** An agent asks the board to add a teammate; a person approves it in the app. */
     readonly requestHire: (
       input: BoardHireRequestInput,
@@ -176,6 +199,9 @@ function cardBranchName(task: BoardTask, threadId: ThreadId): string {
     .slice(-8);
   return `board/${slug}-${token}`;
 }
+
+/** "2026-10-20:" or "2026-10-20 (Grace):" at the start of a memory note. */
+const LEADING_NOTE_DATE = /^\d{4}-\d{2}-\d{2}(?:\s*\([^)]*\))?\s*[:\u2013\u2014-]\s*/;
 
 function boardError(message: string, cause?: unknown): BoardError {
   return new BoardError({ message, ...(cause === undefined ? {} : { cause }) });
@@ -263,6 +289,43 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /** This month's tokens; only read when a limit is set, since nothing else needs it live. */
+  const monthlyUsage = Effect.fn("BoardService.monthlyUsage")(function* (
+    companyId: BoardCompanyId,
+    settings: BoardSettings,
+    agents: ReadonlyArray<BoardAgent>,
+  ) {
+    if (
+      settings.monthlyTokenLimit === null &&
+      agents.every((agent) => agent.monthlyTokenLimit === null)
+    ) {
+      return null;
+    }
+    const monthStart = `${(yield* store.now).slice(0, 7)}-01T00:00:00.000Z`;
+    const byAgent = yield* store.tokenUsageSince(companyId, monthStart);
+    return {
+      monthStart,
+      companyTokens: byAgent.reduce((sum, row) => sum + row.tokens, 0),
+      agents: byAgent,
+    } satisfies BoardUsage;
+  });
+
+  /** Why an agent may not start this month, or null when it may. */
+  const limitReached = (
+    usage: BoardUsage | null,
+    settings: BoardSettings,
+    agent: BoardAgent,
+  ): string | null => {
+    if (usage === null) return null;
+    if (settings.monthlyTokenLimit !== null && usage.companyTokens >= settings.monthlyTokenLimit) {
+      return "The company reached its monthly token limit.";
+    }
+    const spent = usage.agents.find((row) => row.agentId === agent.id)?.tokens ?? 0;
+    return agent.monthlyTokenLimit !== null && spent >= agent.monthlyTokenLimit
+      ? `${agent.name} reached their monthly token limit.`
+      : null;
+  };
+
   const snapshot: BoardService["Service"]["snapshot"] = Effect.fn("BoardService.snapshot")(
     function* (companyId) {
       const companies = yield* store.listCompanySummaries();
@@ -277,17 +340,23 @@ const make = Effect.gen(function* () {
           hires: [],
           tasks: [],
           threads: [],
+          routines: [],
+          usage: null,
         } satisfies BoardSnapshot;
       }
+      const settings = yield* store.getSettings(company.id);
+      const agents = yield* store.listAgents(company.id);
       return {
         companies,
         company,
-        settings: yield* store.getSettings(company.id),
-        agents: yield* store.listAgents(company.id),
+        settings,
+        agents,
         skills: yield* store.listSkills(company.id),
         hires: yield* store.listHires(company.id),
         tasks: (yield* store.listTasks(company.id)).map((stored) => stored.task),
         threads: yield* store.listAgentThreads(company.id),
+        routines: yield* store.listRoutines(company.id),
+        usage: yield* monthlyUsage(company.id, settings, agents),
       } satisfies BoardSnapshot;
     },
   );
@@ -345,6 +414,7 @@ const make = Effect.gen(function* () {
         task: stored.task,
         comments: yield* store.listComments(taskId),
         runs: yield* store.listRuns(taskId),
+        links: yield* store.listWorkLinks(taskId),
       } satisfies BoardTaskDetail;
     },
   );
@@ -432,6 +502,7 @@ const make = Effect.gen(function* () {
       modelSelection: input.ceo.modelSelection,
       runtimeMode: input.ceo.runtimeMode,
       paused: false,
+      monthlyTokenLimit: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -594,6 +665,10 @@ const make = Effect.gen(function* () {
       modelSelection: input.modelSelection,
       runtimeMode: input.runtimeMode,
       paused: input.paused ?? existing?.paused ?? false,
+      monthlyTokenLimit:
+        input.monthlyTokenLimit === undefined
+          ? (existing?.monthlyTokenLimit ?? null)
+          : input.monthlyTokenLimit,
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
     };
@@ -787,7 +862,8 @@ const make = Effect.gen(function* () {
       const { agent, company } = yield* memoryWriter(input.scope, actor);
       const current = input.scope === "company" ? company.memory : agent.memory;
       const day = (yield* store.now).slice(0, 10);
-      const note = input.note.trim().replaceAll("\n", " ");
+      // The line already carries the day and author, so a date the agent wrote is dropped.
+      const note = input.note.trim().replaceAll("\n", " ").replace(LEADING_NOTE_DATE, "");
       const author = input.scope === "company" ? ` (${agent.name})` : "";
       const next = `${current.trimEnd()}${current.trim().length > 0 ? "\n" : ""}- ${day}${author}: ${note}`;
       return yield* saveMemory(input.scope, agent, company, next);
@@ -922,6 +998,107 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const linkWork: BoardService["Service"]["linkWork"] = Effect.fn("BoardService.linkWork")(
+    function* (input, actor) {
+      const current = yield* requireTask(input.taskId);
+      const actingAs = yield* actingAgent(actor, current.task.companyId);
+      if (actor.kind === "agent" && actingAs === null) {
+        return yield* boardError("Only agents of this task's company can link work to it.");
+      }
+      const link = yield* store.upsertWorkLink({
+        taskId: input.taskId,
+        kind: input.kind,
+        title: input.title,
+        url: input.url,
+        status: input.status ?? (input.kind === "pull_request" ? "open" : null),
+        agentId: actingAs?.id ?? null,
+      });
+      yield* notify(current.task.companyId);
+      return link;
+    },
+  );
+
+  const deleteWorkLink = Effect.fn("BoardService.deleteWorkLink")(function* (id: BoardWorkLinkId) {
+    const link = yield* store.getWorkLink(id);
+    if (link === null) return;
+    const current = yield* requireTask(link.taskId);
+    yield* store.deleteWorkLink(id);
+    yield* notify(current.task.companyId);
+  });
+
+  const upsertRoutine = Effect.fn("BoardService.upsertRoutine")(function* (
+    input: BoardRoutineUpsertInput,
+  ) {
+    const company = yield* requireCompany(input.companyId);
+    yield* assertAgentsInCompany(yield* store.listAgents(company.id), [input.assigneeAgentId]);
+    const existing = input.id === undefined ? null : yield* store.getRoutine(input.id);
+    if (existing !== null && existing.companyId !== company.id) {
+      return yield* boardError("That routine belongs to another company.");
+    }
+    const at = yield* store.now;
+    const routine: BoardRoutine = {
+      id: existing?.id ?? BoardRoutineId.make(yield* store.newId("board-routine")),
+      companyId: company.id,
+      title: input.title,
+      description: input.description,
+      assigneeAgentId: input.assigneeAgentId,
+      everyDays: input.everyDays,
+      nextRunAt: input.nextRunAt,
+      enabled: input.enabled,
+      lastTaskId: existing?.lastTaskId ?? null,
+      createdAt: existing?.createdAt ?? at,
+      updatedAt: at,
+    };
+    yield* store.upsertRoutine(routine);
+    yield* notify(company.id);
+    return routine;
+  });
+
+  const deleteRoutine = Effect.fn("BoardService.deleteRoutine")(function* (id: BoardRoutineId) {
+    const routine = yield* store.getRoutine(id);
+    if (routine === null) return;
+    yield* store.deleteRoutine(id);
+    yield* notify(routine.companyId);
+  });
+
+  /**
+   * Creates each due routine's task. A routine whose previous task is still open skips this
+   * turn rather than piling up copies, and runs missed while the server was down collapse
+   * into one.
+   */
+  const runDueRoutines = Effect.fn("BoardService.runDueRoutines")(function* () {
+    const at = yield* store.now;
+    for (const routine of yield* store.listDueRoutines(at)) {
+      const previous =
+        routine.lastTaskId === null ? null : yield* store.getTask(routine.lastTaskId);
+      let lastTaskId = routine.lastTaskId;
+      if (previous === null || previous.task.status === "done") {
+        const task = yield* createTask(
+          {
+            companyId: routine.companyId,
+            title: routine.title,
+            description: routine.description,
+            assigneeAgentId: routine.assigneeAgentId,
+            status: routine.assigneeAgentId === null ? "backlog" : "todo",
+          },
+          { kind: "user" },
+        );
+        yield* systemComment(task.id, `Created by the routine "${routine.title}".`);
+        lastTaskId = task.id;
+      }
+      const period = routine.everyDays * 24 * 60 * 60 * 1000;
+      let next = Date.parse(routine.nextRunAt);
+      while (next <= Date.parse(at)) next += period;
+      yield* store.upsertRoutine({
+        ...routine,
+        nextRunAt: DateTime.formatIso(DateTime.makeUnsafe(next)),
+        lastTaskId,
+        updatedAt: at,
+      });
+      yield* notify(routine.companyId);
+    }
+  });
+
   const updateSettings = Effect.fn("BoardService.updateSettings")(function* (
     input: BoardSettingsUpdateInput,
   ) {
@@ -935,6 +1112,9 @@ const make = Effect.gen(function* () {
         : { maxConcurrentRuns: input.maxConcurrentRuns }),
       ...(input.useWorktrees === undefined ? {} : { useWorktrees: input.useWorktrees }),
       ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
+      ...(input.monthlyTokenLimit === undefined
+        ? {}
+        : { monthlyTokenLimit: input.monthlyTokenLimit }),
     };
     yield* store.upsertSettings(next);
     yield* notify(input.companyId);
@@ -1114,6 +1294,8 @@ const make = Effect.gen(function* () {
     readonly agents: ReadonlyArray<BoardAgent>;
     readonly allTasks: ReadonlyArray<BoardTask>;
     readonly settings: BoardSettings;
+    /** For a reply: subtasks that became blocked since the task last ran. */
+    readonly blockedSubtasks?: ReadonlyArray<BoardTask>;
   }) {
     const { company, stored, kind, agent } = input;
     const task = stored.task;
@@ -1123,32 +1305,70 @@ const make = Effect.gen(function* () {
     const commandId = CommandId.make(`board:${key}`);
     const messageId = MessageId.make(`board-message:${key}`);
 
-    // Rework, and the assignee's replies, continue its own thread so it keeps its context.
+    // Each employee keeps one thread per task: its work, rework, reviews and replies continue
+    // there, so it keeps its context and each later message carries only what is new. Work and
+    // the assignee's replies share the task's thread, which lives in the task's workspace.
+    const ownsTaskThread = kind === "work" || agent.id === task.assigneeAgentId;
+    const agentThread = yield* store.latestAgentThread(
+      task.id,
+      agent.id,
+      kind === "review" ? "review" : undefined,
+    );
+    // A reassigned task's thread holds someone else's conversation; the new assignee starts
+    // its own thread in the same workspace.
+    const previousThread = ownsTaskThread
+      ? task.threadId !== null && agentThread === task.threadId
+        ? task.threadId
+        : null
+      : agentThread;
     const reuseThread =
-      task.threadId !== null &&
-      (kind === "work" || (kind === "reply" && agent.id === task.assigneeAgentId));
+      previousThread !== null &&
+      (yield* threads.getThreadShell(previousThread).pipe(
+        Effect.map((shell) => shell !== null),
+        Effect.orElseSucceed(() => false),
+      ));
     const threadId = reuseThread
-      ? (task.threadId as ThreadId)
+      ? (previousThread as ThreadId)
       : ThreadId.make(yield* store.newId("board-thread"));
-    // Everything a person said after the last run ended is new to the replying agent.
+    // Read before this run is recorded, so "since" means since the previous run.
     const replySince = kind === "reply" ? yield* store.lastRunEndedAt(task.id) : null;
+    const reworkSince = yield* store.lastRunEndedAt(task.id, "work");
+    const reviewSince = yield* store.lastRunEndedAt(task.id, "review");
+    const workedBefore = (yield* store.lastRunStartedAt(task.id, "work")) !== null;
     const runId = yield* store.insertRun({ taskId: task.id, agentId: agent.id, threadId, kind });
     if (kind === "work") yield* store.updateTask(task.id, { status: "in_progress" });
     // A reply announces itself with the reply; a system line would only add noise.
     if (kind !== "reply") {
+      const continuing = reuseThread ? " (continuing in the same thread)" : "";
       yield* systemComment(
         task.id,
         kind === "work"
-          ? `${agent.name} started working${reuseThread ? " (continuing in the same thread)" : ""}.`
-          : `${agent.name} started reviewing.`,
+          ? `${agent.name} started working${continuing}.`
+          : `${agent.name} started reviewing${continuing}.`,
       );
     }
     yield* notify(company.id);
 
+    const blocked: ReadonlyArray<BlockedSubtask> = yield* Effect.forEach(
+      input.blockedSubtasks ?? [],
+      (subtask) =>
+        store.listComments(subtask.id).pipe(
+          Effect.map((comments): BlockedSubtask => {
+            const said = comments.filter((comment) => comment.authorKind !== "user");
+            const reason =
+              said.findLast((comment) => comment.authorKind === "agent") ?? said.at(-1) ?? null;
+            return { task: subtask, reason: reason?.body ?? null };
+          }),
+        ),
+    );
+    const reviewWorkspace = {
+      worktreePath: task.worktreePath,
+      baseRef: stored.baseRef ?? (input.settings.useWorktrees ? input.settings.baseRef : null),
+    };
     const launched = yield* Effect.exit(
       Effect.gen(function* () {
         const plan =
-          kind === "work"
+          ownsTaskThread && kind !== "review"
             ? yield* planWorkspace({
                 stored,
                 threadId,
@@ -1157,7 +1377,6 @@ const make = Effect.gen(function* () {
               })
             : null;
         if (reuseThread) {
-          const since = yield* store.lastRunEndedAt(task.id, "work");
           yield* threads.sendToThread({
             projectId: task.projectId,
             commandId,
@@ -1165,8 +1384,13 @@ const make = Effect.gen(function* () {
             messageId,
             text:
               kind === "reply"
-                ? buildReplyPrompt(context, replySince, { freshThread: false })
-                : buildReworkPrompt(context, since, plan!.prompt),
+                ? buildReplyPrompt(context, replySince, { freshThread: false, blocked })
+                : kind === "review"
+                  ? buildReReviewPrompt(context, reviewSince, reviewWorkspace)
+                  : // A thread opened for a reply has not had the work prompt yet.
+                    workedBefore
+                    ? buildReworkPrompt(context, reworkSince, plan!.prompt)
+                    : buildWorkPrompt(context, plan!.prompt),
             attachments: [],
             mode: "queue",
             createdBy: "system",
@@ -1180,15 +1404,11 @@ const make = Effect.gen(function* () {
             ? { type: "existing_worktree", worktreePath: task.worktreePath }
             : { type: "root" });
         const prompt =
-          plan !== null
-            ? buildWorkPrompt(context, plan.prompt)
-            : kind === "reply"
-              ? buildReplyPrompt(context, replySince, { freshThread: true })
-              : buildReviewPrompt(context, {
-                  worktreePath: task.worktreePath,
-                  baseRef:
-                    stored.baseRef ?? (input.settings.useWorktrees ? input.settings.baseRef : null),
-                });
+          kind === "reply"
+            ? buildReplyPrompt(context, replySince, { freshThread: true, blocked })
+            : kind === "review"
+              ? buildReviewPrompt(context, reviewWorkspace)
+              : buildWorkPrompt(context, plan!.prompt);
         const result = yield* threadLaunch.launch({
           commandId,
           threadId,
@@ -1231,8 +1451,19 @@ const make = Effect.gen(function* () {
       );
       return;
     }
-    if (kind === "work" && !reuseThread && launched.value !== null) {
+    if (ownsTaskThread && kind !== "review" && launched.value !== null) {
       yield* store.setTaskThread(task.id, threadId, launched.value);
+      // The task's branch is the first thing people look for, so it is linked from the start.
+      if (launched.value.branch !== null) {
+        yield* store.upsertWorkLink({
+          taskId: task.id,
+          kind: "branch",
+          title: launched.value.branch,
+          url: launched.value.branch,
+          status: null,
+          agentId: null,
+        });
+      }
       yield* notify(company.id);
     }
   });
@@ -1247,6 +1478,9 @@ const make = Effect.gen(function* () {
       /** Work and reviews wait for a free slot; replies do not. */
       readonly slotFree: boolean;
       readonly awaitingReply: boolean;
+      readonly blockedSubtasks: ReadonlyArray<BoardTask>;
+      /** Agents over a monthly limit are not started, even by hand. */
+      readonly overLimit: (agent: BoardAgent) => boolean;
     },
   ) {
     const { manual } = options;
@@ -1254,7 +1488,9 @@ const make = Effect.gen(function* () {
     if (task.activeRunKind !== null) return null;
     const ready = (id: BoardAgentId | null) => {
       const agent = agents.find((candidate) => candidate.id === id);
-      return agent === undefined || (agent.paused && !manual) ? null : agent;
+      return agent === undefined || (agent.paused && !manual) || options.overLimit(agent)
+        ? null
+        : agent;
     };
     // Work and review prompts carry the board's comments, so they answer them too.
     if (task.status === "todo" && options.slotFree) {
@@ -1273,12 +1509,14 @@ const make = Effect.gen(function* () {
         return { kind: "review" as const, agent };
       }
     }
-    if (!options.awaitingReply) return null;
+    if (!options.awaitingReply && options.blockedSubtasks.length === 0) return null;
     // The task's owner answers; a task nobody owns goes to the CEO.
     const responder =
       ready(task.assigneeAgentId) ??
       (task.assigneeAgentId === null ? ready(company.ceoAgentId) : null);
-    return responder === null ? null : { kind: "reply" as const, agent: responder };
+    return responder === null
+      ? null
+      : { kind: "reply" as const, agent: responder, blockedSubtasks: options.blockedSubtasks };
   });
 
   const dispatchCompany = Effect.fn("BoardService.dispatchCompany")(function* (
@@ -1293,6 +1531,14 @@ const make = Effect.gen(function* () {
     const tasks = yield* store.listTasks(companyId);
     const allTasks = tasks.map((stored) => stored.task);
     const awaitingReply = yield* store.listTasksAwaitingReply(companyId);
+    const usage = yield* monthlyUsage(companyId, settings, agents);
+    const blockedByParent = new Map<BoardTaskId, Array<BoardTask>>();
+    for (const { parentId, taskId } of yield* store.listNewlyBlockedSubtasks(companyId)) {
+      const subtask = allTasks.find((candidate) => candidate.id === taskId);
+      if (subtask !== undefined) {
+        blockedByParent.set(parentId, [...(blockedByParent.get(parentId) ?? []), subtask]);
+      }
+    }
     let slots = settings.maxConcurrentRuns - (yield* store.countRunningRuns(companyId));
     for (const stored of tasks) {
       if (options.onlyTaskId !== undefined && stored.task.id !== options.onlyTaskId) continue;
@@ -1300,8 +1546,10 @@ const make = Effect.gen(function* () {
       const next = yield* nextRunFor(company, stored, agents, {
         manual,
         slotFree: slots > 0 || manual,
-        // A person is waiting on these, so they do not queue for a free slot.
+        // A person or a stuck teammate is waiting on these, so they do not queue for a slot.
         awaitingReply: awaitingReply.has(stored.task.id),
+        blockedSubtasks: blockedByParent.get(stored.task.id) ?? [],
+        overLimit: (agent) => limitReached(usage, settings, agent) !== null,
       });
       if (next === null) continue;
       yield* startRun({ company, stored, ...next, agents, allTasks, settings });
@@ -1330,6 +1578,22 @@ const make = Effect.gen(function* () {
     }
     if (task.status !== "review" && task.assigneeAgentId === null) {
       return yield* boardError("Assign an agent before starting the task.");
+    }
+    // Starting by hand explains a limit instead of quietly leaving the task waiting.
+    const starter = yield* store.getAgent(
+      (task.status === "review" ? task.reviewerAgentId : task.assigneeAgentId)!,
+    );
+    if (starter !== null) {
+      const settings = yield* store.getSettings(task.companyId);
+      const agents = yield* store.listAgents(task.companyId);
+      const reason = limitReached(
+        yield* monthlyUsage(task.companyId, settings, agents),
+        settings,
+        starter,
+      );
+      if (reason !== null) {
+        return yield* boardError(`${reason} Raise it to start this task.`);
+      }
     }
     if (task.status !== "review") {
       yield* updateTask({ id, status: "todo" }, { kind: "user" });
@@ -1416,6 +1680,14 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  // Routines are checked every minute; a task created a little late is fine.
+  yield* forkParked(
+    runDueRoutines().pipe(
+      Effect.catch((cause) => Effect.logWarning("Board routines failed", { cause })),
+      Effect.repeat(Schedule.spaced("1 minute")),
+    ),
+  );
+
   // Card changes from people and agents can make work startable. Subscribing here, before the
   // service is returned, means no change published after construction is missed.
   const dispatchTriggers = yield* PubSub.subscribe(changes);
@@ -1455,8 +1727,14 @@ const make = Effect.gen(function* () {
         return startTask(command.id).pipe(Effect.map((task) => ({ task })));
       case "comment.add":
         return addComment(command.comment, actor).pipe(Effect.map((comment) => ({ comment })));
+      case "link.delete":
+        return deleteWorkLink(command.id).pipe(Effect.as({}));
       case "settings.update":
         return updateSettings(command.settings).pipe(Effect.map((settings) => ({ settings })));
+      case "routine.upsert":
+        return upsertRoutine(command.routine).pipe(Effect.map((routine) => ({ routine })));
+      case "routine.delete":
+        return deleteRoutine(command.id).pipe(Effect.as({}));
     }
   };
 
@@ -1470,6 +1748,7 @@ const make = Effect.gen(function* () {
     createTask,
     updateTask,
     addComment,
+    linkWork,
     requestHire,
     remember,
     rewriteMemory,

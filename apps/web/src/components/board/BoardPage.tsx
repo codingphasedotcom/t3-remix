@@ -19,6 +19,7 @@ import {
   LayoutDashboardIcon,
   NetworkIcon,
   PlusIcon,
+  RepeatIcon,
   SettingsIcon,
   SparklesIcon,
   Trash2Icon,
@@ -59,10 +60,12 @@ import { BoardNewCardDialog } from "./BoardNewCardDialog";
 import { CompanyDialog } from "./CompanyDialog";
 import { DashboardView } from "./DashboardView";
 import { OrgChartView } from "./OrgChartView";
+import { RoutinesView } from "./RoutinesView";
 import { SkillsView } from "./SkillsView";
-import { agentById } from "./board.logic";
+import { TokenLimitField } from "./TokenLimitField";
+import { agentById, limitProgress } from "./board.logic";
 
-export type BoardTab = "board" | "dashboard" | "org" | "skills";
+export type BoardTab = "board" | "dashboard" | "org" | "skills" | "routines";
 
 export interface BoardPageProps {
   readonly environmentId?: EnvironmentId | undefined;
@@ -316,6 +319,14 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               <SparklesIcon />
               Skills
             </Button>
+            <Button
+              size="sm"
+              variant={tab === "routines" ? "secondary" : "ghost"}
+              onClick={() => go({ company: company.id, tab: "routines" })}
+            >
+              <RepeatIcon />
+              Routines
+            </Button>
           </div>
         </div>
         {tab === "board" ? (
@@ -332,6 +343,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
       {tab === "board" ? (
         <>
           <MissionBanner company={company} ceoName={ceo?.name ?? null} />
+          <CompanyLimitBanner snapshot={snapshot} />
           <BoardColumns
             snapshot={snapshot}
             canOperate={canOperate}
@@ -353,6 +365,8 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           runCommand={runCommand}
           onEditAgent={setAgentDraft}
         />
+      ) : tab === "routines" ? (
+        <RoutinesView snapshot={snapshot} canOperate={canOperate} runCommand={runCommand} />
       ) : (
         <SkillsView snapshot={snapshot} canOperate={canOperate} runCommand={runCommand} />
       )}
@@ -367,6 +381,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
       />
       <EditCompanyDialog
         company={editingCompany ? company : null}
+        snapshot={snapshot}
         agents={snapshot.agents}
         onClose={() => setEditingCompany(false)}
         runCommand={runCommand}
@@ -388,6 +403,21 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         }
       />
     </>
+  );
+}
+
+function CompanyLimitBanner(props: { readonly snapshot: BoardSnapshot }) {
+  const progress = limitProgress(
+    props.snapshot.usage?.companyTokens ?? 0,
+    props.snapshot.settings?.monthlyTokenLimit ?? null,
+  );
+  if (progress === null || (!progress.nearing && !progress.reached)) return null;
+  return (
+    <div className="mx-(--workspace-gutter-start) mb-3 text-sm text-warning">
+      {progress.reached
+        ? "This company used its monthly token limit. Agents won't start until you raise it under Edit company or the month ends."
+        : `This company has used ${Math.round(progress.share * 100)}% of its monthly token limit.`}
+    </div>
   );
 }
 
@@ -422,6 +452,7 @@ function BoardMessage(props: { readonly title: string; readonly description: str
 
 function EditCompanyDialog(props: {
   readonly company: BoardCompany | null;
+  readonly snapshot: BoardSnapshot;
   readonly agents: ReadonlyArray<BoardAgent>;
   readonly onClose: () => void;
   readonly runCommand: RunBoardCommand;
@@ -448,6 +479,7 @@ interface DepartmentDraft {
 
 function EditCompanyForm(props: {
   readonly company: BoardCompany;
+  readonly snapshot: BoardSnapshot;
   readonly agents: ReadonlyArray<BoardAgent>;
   readonly onClose: () => void;
   readonly runCommand: RunBoardCommand;
@@ -459,7 +491,17 @@ function EditCompanyForm(props: {
     props.company.departments.map((department) => ({ key: department.id, ...department })),
   );
   const [nextKey, setNextKey] = useState(0);
+  const savedLimit = props.snapshot.settings?.monthlyTokenLimit ?? null;
+  const [tokenLimit, setTokenLimit] = useState(savedLimit);
+  const [limitValid, setLimitValid] = useState(true);
   const save = async () => {
+    if (tokenLimit !== savedLimit) {
+      const limited = await props.runCommand({
+        type: "settings.update",
+        settings: { companyId: props.company.id, monthlyTokenLimit: tokenLimit },
+      });
+      if (limited === null) return;
+    }
     const saved = await props.runCommand({
       type: "company.update",
       company: {
@@ -487,6 +529,7 @@ function EditCompanyForm(props: {
     setNextKey(nextKey + 1);
   };
   const canSave =
+    limitValid &&
     name.trim().length > 0 &&
     memory.length <= MAX_COMPANY_MEMORY_CHARS &&
     departments.length > 0 &&
@@ -563,6 +606,14 @@ function EditCompanyForm(props: {
               removing it.
             </span>
           </div>
+          <TokenLimitField
+            id="board-edit-company-token-limit"
+            label="Monthly token limit for the company"
+            value={tokenLimit}
+            used={props.snapshot.usage?.companyTokens ?? null}
+            onChange={setTokenLimit}
+            onValidityChange={setLimitValid}
+          />
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="board-edit-company-memory">Company memory</Label>
