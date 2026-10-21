@@ -1001,7 +1001,7 @@ const make = Effect.gen(function* () {
       `;
       return yield* Effect.forEach(rows, toStoredTask);
     },
-    failWith("Could not list cards."),
+    failWith("Could not list tasks."),
   );
 
   const getTask: BoardStore["Service"]["getTask"] = Effect.fn("BoardStore.getTask")(function* (id) {
@@ -1010,7 +1010,7 @@ const make = Effect.gen(function* () {
       `;
     const row = rows[0];
     return row === undefined ? null : yield* toStoredTask(row);
-  }, failWith("Could not read the card."));
+  }, failWith("Could not read the task."));
 
   const nextPosition = (companyId: BoardCompanyId, status: BoardTaskStatus) =>
     sql<{ readonly position: number | null }>`
@@ -1037,7 +1037,7 @@ const make = Effect.gen(function* () {
       `;
       return id;
     },
-    failWith("Could not create the card."),
+    failWith("Could not create the task."),
   );
 
   const updateTask: BoardStore["Service"]["updateTask"] = Effect.fn("BoardStore.updateTask")(
@@ -1065,7 +1065,7 @@ const make = Effect.gen(function* () {
       `;
       return statusChanged;
     },
-    failWith("Could not update the card."),
+    failWith("Could not update the task."),
   );
 
   const setTaskThread: BoardStore["Service"]["setTaskThread"] = Effect.fn(
@@ -1078,7 +1078,7 @@ const make = Effect.gen(function* () {
           branch = ${workspace.branch}, base_ref = ${workspace.baseRef}, updated_at = ${at}
         WHERE task_id = ${id}
       `;
-  }, failWith("Could not link the card to its thread."));
+  }, failWith("Could not link the task to its thread."));
 
   const deleteTask: BoardStore["Service"]["deleteTask"] = (task) =>
     sql
@@ -1094,7 +1094,7 @@ const make = Effect.gen(function* () {
           { discard: true },
         ),
       )
-      .pipe(failWith("Could not delete the card."));
+      .pipe(failWith("Could not delete the task."));
 
   const countOpenSubtasks: BoardStore["Service"]["countOpenSubtasks"] = (parentId) =>
     sql<{ readonly open: number }>`
@@ -1126,7 +1126,7 @@ const make = Effect.gen(function* () {
       `;
       return yield* Effect.forEach(rows, toStoredTask);
     },
-    failWith("Could not search cards."),
+    failWith("Could not search tasks."),
   );
 
   const listComments: BoardStore["Service"]["listComments"] = Effect.fn("BoardStore.listComments")(
@@ -1213,7 +1213,7 @@ const make = Effect.gen(function* () {
       const row = rows[0];
       return row === undefined ? null : yield* toRunningRun(row);
     },
-    failWith("Could not resolve the thread's card."),
+    failWith("Could not resolve the thread's task."),
   );
 
   const listAgentThreads: BoardStore["Service"]["listAgentThreads"] = Effect.fn(

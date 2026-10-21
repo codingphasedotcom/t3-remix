@@ -46,7 +46,7 @@ const BOARD_TASK_STATUSES = [
 
 export const BoardTaskStatus = Schema.Literals(BOARD_TASK_STATUSES).annotate({
   description:
-    "Card column. todo with an assignee starts the assignee; review with a reviewer starts the reviewer; done is final.",
+    "Task column. todo with an assignee starts the assignee; review with a reviewer starts the reviewer; done is final.",
 });
 export type BoardTaskStatus = typeof BoardTaskStatus.Type;
 
@@ -109,7 +109,7 @@ export const BoardAgent = Schema.Struct({
   skillIds: Schema.Array(BoardSkillId),
   instructions: Schema.String,
   memory: Schema.String.annotate({
-    description: "Lessons this agent keeps between cards.",
+    description: "Lessons this agent keeps between tasks.",
   }),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -207,13 +207,13 @@ export const BoardSettings = Schema.Struct({
   autoDispatch: Schema.Boolean,
   maxConcurrentRuns: BoardConcurrentRuns,
   useWorktrees: Schema.Boolean.annotate({
-    description: "Give each card its own git worktree; reviewers open the same worktree.",
+    description: "Give each task its own git worktree; reviewers open the same worktree.",
   }),
   baseRef: TrimmedNonEmptyString,
 });
 export type BoardSettings = typeof BoardSettings.Type;
 
-/** Just enough of an employee to @mention them from a chat or a card. */
+/** Just enough of an employee to @mention them from a chat or a task. */
 export const BoardCompanyMember = Schema.Struct({
   id: BoardAgentId,
   name: TrimmedNonEmptyString,
@@ -258,13 +258,13 @@ export type BoardRunStats = typeof BoardRunStats.Type;
 export const BoardDashboardDay = Schema.Struct({
   day: Schema.String.annotate({ description: "YYYY-MM-DD in the viewer's UTC offset." }),
   runs: NonNegativeInt,
-  cardsFinished: NonNegativeInt,
+  tasksFinished: NonNegativeInt,
   tokens: NonNegativeInt,
 });
 export type BoardDashboardDay = typeof BoardDashboardDay.Type;
 
 /**
- * Run history and token spend for one company. Cards, people, and departments are already in
+ * Run history and token spend for one company. Tasks, people, and departments are already in
  * the board snapshot, so the dashboard carries only what the snapshot cannot.
  */
 export const BoardDashboard = Schema.Struct({
@@ -280,7 +280,7 @@ export const BoardDashboard = Schema.Struct({
   ).annotate({ description: "Grouped by the model each run's thread used, busiest first." }),
   days: Schema.Array(BoardDashboardDay).annotate({ description: "Oldest first, one per day." }),
   medianCycleMs: Schema.NullOr(Schema.Number).annotate({
-    description: "Median time from a card's creation to done.",
+    description: "Median time from a task's creation to done.",
   }),
 });
 export type BoardDashboard = typeof BoardDashboard.Type;

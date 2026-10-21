@@ -47,7 +47,7 @@ import {
 
 const METRICS: ReadonlyArray<{ readonly id: ActivityMetric; readonly label: string }> = [
   { id: "runs", label: "Runs" },
-  { id: "cardsFinished", label: "Cards finished" },
+  { id: "tasksFinished", label: "Tasks finished" },
   { id: "tokens", label: "Tokens" },
 ];
 
@@ -84,7 +84,7 @@ export function DashboardView(props: {
   const inReview = columns.find((column) => column.status === "review")?.count ?? 0;
   const doneAllTime = columns.find((column) => column.status === "done")?.count ?? 0;
   const finishedRecently =
-    dashboard?.days.reduce((total, day) => total + day.cardsFinished, 0) ?? null;
+    dashboard?.days.reduce((total, day) => total + day.tasksFinished, 0) ?? null;
   const paused = snapshot.agents.filter((agent) => agent.paused).length;
   const loading = (value: ReactNode) => (dashboard === null ? null : value);
 
@@ -98,7 +98,7 @@ export function DashboardView(props: {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatTile
-          label="Open cards"
+          label="Open tasks"
           value={formatCount(openCards)}
           detail={`${blocked} blocked · ${inReview} in review`}
         />
@@ -172,7 +172,7 @@ export function DashboardView(props: {
           )}
         </Panel>
 
-        <Panel title="Cards by column">
+        <Panel title="Tasks by column">
           <BarList
             rows={columns.map((column) => ({
               key: column.status,

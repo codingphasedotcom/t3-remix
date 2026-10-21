@@ -72,7 +72,7 @@ const make = Effect.gen(function* () {
     if (assignment === null) {
       return yield* new OrchestratorMcpFailure({
         code: "target_required",
-        message: "Pass taskId: this thread was not started for a board card.",
+        message: "Pass taskId: this thread was not started for a board task.",
       });
     }
     return assignment.taskId;
@@ -258,7 +258,7 @@ const make = Effect.gen(function* () {
       }),
     ),
 
-    board_search_cards: McpToolAccess.reads((input) =>
+    board_search_tasks: McpToolAccess.reads((input) =>
       Effect.gen(function* () {
         const { companyId } = yield* callerContext(input.companyId);
         const matches = yield* board

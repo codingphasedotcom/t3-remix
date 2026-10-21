@@ -146,14 +146,14 @@ const boardWhere = (
 const threadOf = (snapshot: BoardSnapshot, taskId: BoardTaskId | undefined) =>
   snapshot.tasks.find((task) => task.id === taskId)?.threadId ?? null;
 
-it.effect("a manager's delegated card runs, then comes back to that manager for review", () =>
+it.effect("a manager's delegated task runs, then comes back to that manager for review", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
       const board = yield* BoardService.BoardService;
       const { company, ceoId, lead, engineer } = yield* createCompany(board);
 
-      // The board gives the CTO a card; it starts in its own thread.
+      // The board gives the CTO a task; it starts in its own thread.
       const { task: parent } = yield* board.runCommand(
         {
           type: "task.create",
@@ -213,7 +213,7 @@ it.effect("a manager's delegated card runs, then comes back to that manager for 
         worktreePath: `/worktrees/${String(leadThread)}`,
       });
 
-      // The engineer's run ends without moving its card; the CTO is started to review it.
+      // The engineer's run ends without moving its task; the CTO is started to review it.
       yield* Queue.offer(harness.events, {
         type: "run.updated",
         threadId: threadOf(working, subtask.id),
@@ -270,7 +270,7 @@ it.effect("tells every agent which folder, branch, and base it works in", () =>
         return launch!;
       });
 
-      // A top-level card gets its own worktree on a branch named before launch.
+      // A top-level task gets its own worktree on a branch named before launch.
       const { task: parent } = yield* board.runCommand(
         {
           type: "task.create",
@@ -285,13 +285,13 @@ it.effect("tells every agent which folder, branch, and base it works in", () =>
       assert.match(branch, /^board\/build-checkout-[0-9a-f]{8}$/);
       const leadPrompt = leadLaunch.initialMessage?.text ?? "";
       assert.include(leadPrompt, "## Where you work");
-      assert.include(leadPrompt, "- Folder: a new git worktree made for this card.");
-      assert.include(leadPrompt, `- Branch: ${branch}, made for this card.`);
+      assert.include(leadPrompt, "- Folder: a new git worktree made for this task.");
+      assert.include(leadPrompt, `- Branch: ${branch}, made for this task.`);
       assert.include(leadPrompt, "- Base: main.");
-      assert.include(leadPrompt, "- Shared: no other card works here.");
+      assert.include(leadPrompt, "- Shared: no other task works here.");
       assert.include(
         leadPrompt,
-        "- Not here: work from other cards that has not been merged into main.",
+        "- Not here: work from other tasks that has not been merged into main.",
       );
 
       // A subtask works in its parent's worktree and branch, alongside its siblings.
@@ -318,13 +318,13 @@ it.effect("tells every agent which folder, branch, and base it works in", () =>
       const subtaskPrompt = (yield* launchFor(subtask.id)).initialMessage?.text ?? "";
       assert.include(
         subtaskPrompt,
-        `- Folder: /worktrees/${String(leadLaunch.threadId)} (the git worktree of your parent card "Build checkout").`,
+        `- Folder: /worktrees/${String(leadLaunch.threadId)} (the git worktree of your parent task "Build checkout").`,
       );
-      assert.include(subtaskPrompt, `- Branch: ${branch}, your parent card's branch.`);
+      assert.include(subtaskPrompt, `- Branch: ${branch}, your parent task's branch.`);
       assert.include(subtaskPrompt, "- Base: main.");
       assert.include(
         subtaskPrompt,
-        '- Shared: yes, with your parent card and its other subtasks: "Receipts" (Engineer, Backlog).',
+        '- Shared: yes, with your parent task and its other subtasks: "Receipts" (Engineer, Backlog).',
       );
       assert.include(subtaskPrompt, "merged into main");
 
@@ -527,7 +527,7 @@ it.effect("adds an agent only once a person approves its hire request", () =>
         user,
       );
 
-      // The CTO, working a card, asks for a designer.
+      // The CTO, working a task, asks for a designer.
       const { task } = yield* board.runCommand(
         {
           type: "task.create",
@@ -573,7 +573,7 @@ it.effect("adds an agent only once a person approves its hire request", () =>
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
-it.effect("returns a split card to its owner once every subtask is done", () =>
+it.effect("returns a split task to its owner once every subtask is done", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
@@ -708,7 +708,7 @@ it.effect("the dashboard credits runs and tokens to each employee and the model 
       const sum = (pick: (day: (typeof dashboard.days)[number]) => number) =>
         dashboard.days.reduce((total, day) => total + pick(day), 0);
       assert.deepEqual(
-        [sum((day) => day.runs), sum((day) => day.cardsFinished), sum((day) => day.tokens)],
+        [sum((day) => day.runs), sum((day) => day.tasksFinished), sum((day) => day.tokens)],
         [1, 1, 1_800],
       );
       assert.isNotNull(dashboard.medianCycleMs);
@@ -744,13 +744,13 @@ it.effect("creates a project folder for a company that asks for a new workspace"
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
-it.effect("lessons an agent remembers reach its next card's prompt", () =>
+it.effect("lessons an agent remembers reach its next task's prompt", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
       const board = yield* BoardService.BoardService;
       const { company, ceoId, engineer } = yield* createCompany(board);
-      // Three cards run at once below; the default allows two.
+      // Three tasks run at once below; the default allows two.
       yield* board.runCommand(
         { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 5 } },
         user,

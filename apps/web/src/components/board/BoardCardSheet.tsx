@@ -126,11 +126,11 @@ function BoardCardDetail(props: {
     <>
       <SheetHeader>
         <SheetTitle className="sr-only">{task.title}</SheetTitle>
-        <SheetDescription className="sr-only">Board card details</SheetDescription>
+        <SheetDescription className="sr-only">Board task details</SheetDescription>
         <Input
           value={title}
           disabled={disabled}
-          aria-label="Card title"
+          aria-label="Task title"
           onChange={(event) => setTitle(event.target.value)}
           onBlur={() => {
             const next = title.trim();
@@ -237,7 +237,7 @@ function BoardCardDetail(props: {
 
           {parent !== null || subtasks.length > 0 ? (
             <div className="flex flex-col gap-2">
-              <Label>Related cards</Label>
+              <Label>Related tasks</Label>
               {parent !== null ? (
                 <RelatedCard
                   prefix="Parent"

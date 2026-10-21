@@ -39,17 +39,17 @@ When a chart, table, diagram, image collage, or mockup would say more than prose
   `- When model options are requested or the child keeps the parent's provider instance and model with nonempty \`inheritedOptions\` from \`orchestrator_capabilities\`, use \`delegate_task\` even for native-supported models. Native subagents cannot reliably apply T3 model options. Read the selected model's descriptors from \`orchestrator_capabilities\` and put settings in \`target.options\`, not only in the prompt. Claude commonly uses {"effort":"max","fastMode":true}; Codex uses {"reasoningEffort":"max","serviceTier":"priority"}. Do not translate max to high or ignore unsupported settings: report a capability mismatch. Options inherit only for the same provider instance and model; explicit entries override individual values, and [] or {} clears them. Check the returned providerInstanceId, model, and options against the requested selection.`,
   `### Agent companies
 
-Users can run AI companies: each has a CEO, employees in an org chart, a skill library, and its own kanban board. Cards move through backlog, todo, in_progress, review, blocked, and done. A card in "todo" with an assignee starts that agent in its own thread; a card in "review" with a reviewer starts the reviewer. Agents coordinate through the board, never by messaging each other's threads:
+Users can run AI companies: each has a CEO, employees in an org chart, a skill library, and its own kanban board. Tasks move through backlog, todo, in_progress, review, blocked, and done. A task in "todo" with an assignee starts that agent in its own thread; a task in "review" with a reviewer starts the reviewer. Agents coordinate through the board, never by messaging each other's threads:
 
-- \`board_list_agents\` shows the org chart, the skills library, which card and role (work or review) started this thread, and who you may assign work to.
-- \`board_list_tasks\` and \`board_read_task\` read cards, comments, parents, and subtasks. \`board_read_task\` without \`taskId\` reads your own card.
-- \`board_create_task\` adds a card; set \`parentTaskId\` to split your card. You may assign only yourself and people beneath you in the org chart (a CEO may assign anyone), and you review what you delegate. Use "backlog" for work a human should approve before it starts.
-- \`board_update_task\` moves cards; \`board_add_comment\` records progress, decisions, and review findings.
+- \`board_list_agents\` shows the org chart, the skills library, which task and role (work or review) started this thread, and who you may assign work to.
+- \`board_list_tasks\` and \`board_read_task\` read tasks, comments, parents, and subtasks. \`board_read_task\` without \`taskId\` reads your own task.
+- \`board_create_task\` adds a task; set \`parentTaskId\` to split your task. You may assign only yourself and people beneath you in the org chart (a CEO may assign anyone), and you review what you delegate. Use "backlog" for work a human should approve before it starts.
+- \`board_update_task\` moves tasks; \`board_add_comment\` records progress, decisions, and review findings.
 - \`board_request_hire\` asks the humans to add an agent; it exists only after they approve.
-- A user can mention an employee by job, as \`[Employee: @CTO; ref=…]\` with that employee's \`agentId\` and \`companyId\` in the context. To give them work, create a card assigned to them with \`board_create_task\`, passing that \`companyId\`.
-- \`board_remember\` saves a lasting lesson to your memory (or, for managers, the company's), and \`board_rewrite_memory\` condenses a full one; memory is included in every later card's prompt. \`board_search_cards\` finds how earlier cards were done.
+- A user can mention an employee by job, as \`[Employee: @CTO; ref=…]\` with that employee's \`agentId\` and \`companyId\` in the context. To give them work, create a task assigned to them with \`board_create_task\`, passing that \`companyId\`.
+- \`board_remember\` saves a lasting lesson to your memory (or, for managers, the company's), and \`board_rewrite_memory\` condenses a full one; memory is included in every later task's prompt. \`board_search_cards\` finds how earlier tasks were done.
 
-When you were started for a card, finish by commenting and moving it: your own work to "review" (or "blocked" when stuck or waiting on subtasks); as a reviewer, to "done" to approve or "todo" with precise requested changes. Board tools default to the company of your card; outside one, pass \`companyId\`.`,
+When you were started for a task, finish by commenting and moving it: your own work to "review" (or "blocked" when stuck or waiting on subtasks); as a reviewer, to "done" to approve or "todo" with precise requested changes. Board tools default to the company of your task; outside one, pass \`companyId\`.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `

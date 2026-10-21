@@ -64,7 +64,7 @@ export function SkillsView(props: {
             <h2 className="text-sm font-medium">Skill library</h2>
             <span className="text-xs text-muted-foreground">
               A skill is a reusable playbook. Agents get the instructions of every skill you give
-              them on each card they work.
+              them on each task they work.
             </span>
           </div>
           <div className="flex gap-2">

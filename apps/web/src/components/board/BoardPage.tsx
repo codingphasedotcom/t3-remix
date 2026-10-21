@@ -191,7 +191,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             </EmptyMedia>
             <EmptyTitle>Start your first company</EmptyTitle>
             <EmptyDescription>
-              Give it a mission and a CEO. You hand the CEO cards; the CEO splits them into work for
+              Give it a mission and a CEO. You hand the CEO tasks; the CEO splits them into work for
               employees, who each have a role and skills.
             </EmptyDescription>
           </EmptyHeader>
@@ -243,7 +243,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
                   <span className="flex flex-col">
                     <span>{summary.name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {summary.agentCount} agents · {summary.openTaskCount} open cards
+                      {summary.agentCount} agents · {summary.openTaskCount} open tasks
                     </span>
                   </span>
                 </SelectItem>
@@ -323,7 +323,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             <BoardSettingsMenu snapshot={snapshot} disabled={!canOperate} runCommand={runCommand} />
             <Button size="sm" disabled={!canOperate} onClick={() => setNewCardOpen(true)}>
               <PlusIcon />
-              New card
+              New task
             </Button>
           </div>
         ) : null}
@@ -402,7 +402,7 @@ function MissionBanner(props: { readonly company: BoardCompany; readonly ceoName
       ) : null}
       {props.ceoName !== null ? (
         <span className="ms-auto shrink-0 text-xs text-muted-foreground">
-          New cards go to {props.ceoName}, the CEO
+          New tasks go to {props.ceoName}, the CEO
         </span>
       ) : null}
     </div>
@@ -616,7 +616,7 @@ function BoardSettingsMenu(props: {
             <div className="flex flex-col gap-1">
               <Label htmlFor="board-auto-dispatch">Auto-run agents</Label>
               <span className="text-xs text-muted-foreground">
-                Start assignees and reviewers as soon as their cards are ready.
+                Start assignees and reviewers as soon as their tasks are ready.
               </span>
             </div>
             <Switch
@@ -628,9 +628,9 @@ function BoardSettingsMenu(props: {
           </div>
           <div className="flex items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="board-worktrees">Worktree per card</Label>
+              <Label htmlFor="board-worktrees">Worktree per task</Label>
               <span className="text-xs text-muted-foreground">
-                Isolate each card on its own branch from {settings.baseRef}.
+                Isolate each task on its own branch from {settings.baseRef}.
               </span>
             </div>
             <Switch

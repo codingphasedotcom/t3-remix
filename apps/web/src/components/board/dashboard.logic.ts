@@ -67,7 +67,7 @@ export interface EmployeeRow {
   readonly role: string;
   readonly department: string | null;
   readonly activity: EmployeeActivity;
-  /** Cards assigned to them that are not done. */
+  /** Tasks assigned to them that are not done. */
   readonly openCards: number;
   readonly doneCards: number;
   readonly stats: BoardRunStats;
@@ -128,7 +128,7 @@ export function departmentRows(
 
 export interface AttentionItems {
   readonly blocked: ReadonlyArray<BoardTask>;
-  /** Unassigned cards waiting in To do, which nothing will start. */
+  /** Unassigned tasks waiting in To do, which nothing will start. */
   readonly unassigned: ReadonlyArray<BoardTask>;
   readonly pendingHires: number;
   readonly failing: ReadonlyArray<{ readonly agentId: BoardAgentId; readonly failed: number }>;
@@ -160,7 +160,7 @@ export function hasAttentionItems(attention: AttentionItems): boolean {
   );
 }
 
-export type ActivityMetric = "runs" | "cardsFinished" | "tokens";
+export type ActivityMetric = "runs" | "tasksFinished" | "tokens";
 
 /** Rounds a duration to its two largest units, such as "3h 20m" or "45s". */
 export function formatSpan(ms: number): string {

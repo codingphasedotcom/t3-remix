@@ -16,8 +16,8 @@ export interface BoardColumn {
 
 export const BOARD_COLUMNS: ReadonlyArray<BoardColumn> = [
   { status: "backlog", label: "Backlog", hint: "Waits for a human to schedule it." },
-  { status: "todo", label: "To do", hint: "Cards with an assignee start automatically." },
-  { status: "in_progress", label: "In progress", hint: "An agent is working the card." },
+  { status: "todo", label: "To do", hint: "Tasks with an assignee start automatically." },
+  { status: "in_progress", label: "In progress", hint: "An agent is working the task." },
   { status: "review", label: "Review", hint: "The reviewer starts when one is set." },
   { status: "blocked", label: "Blocked", hint: "Needs a decision or its subtasks." },
   { status: "done", label: "Done", hint: "Approved work." },
@@ -132,21 +132,21 @@ export interface SkillPreset {
 export const SKILL_PRESETS: ReadonlyArray<SkillPreset> = [
   {
     name: "Planning and delegation",
-    description: "Turn a goal into small, assignable cards.",
+    description: "Turn a goal into small, assignable tasks.",
     instructions:
-      'Read the goal and the codebase before planning. Split work into cards that one person can finish and verify in a single sitting, each with a concrete definition of done. Assign each card to the teammate whose skills fit it best, and say what to hand back. Avoid cards that only say "investigate" unless the answer decides what to build.',
+      'Read the goal and the codebase before planning. Split work into tasks that one person can finish and verify in a single sitting, each with a concrete definition of done. Assign each task to the teammate whose skills fit it best, and say what to hand back. Avoid tasks that only say "investigate" unless the answer decides what to build.',
   },
   {
     name: "Code review",
     description: "Approve only changes you would merge.",
     instructions:
-      "Read the full diff. Check correctness, edge cases, error handling, tests that would catch a regression, and changes outside the card's scope. Run the tests. When requesting changes, list each one with the file, the problem, and what would fix it.",
+      "Read the full diff. Check correctness, edge cases, error handling, tests that would catch a regression, and changes outside the task's scope. Run the tests. When requesting changes, list each one with the file, the problem, and what would fix it.",
   },
   {
     name: "Testing",
     description: "Prove behavior with automated tests.",
     instructions:
-      "Write tests for the behavior the card asks for, including the failure and edge cases. Prefer tests that exercise real behavior over mocks of the code under test. Run the whole relevant test suite before reporting done, and paste the result into your comment.",
+      "Write tests for the behavior the task asks for, including the failure and edge cases. Prefer tests that exercise real behavior over mocks of the code under test. Run the whole relevant test suite before reporting done, and paste the result into your comment.",
   },
   {
     name: "Frontend",
@@ -183,7 +183,7 @@ export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
     department: "Engineering",
     name: "Grace",
     instructions:
-      "You own the technical direction. Break engineering work into cards for your engineers, review what they deliver, and keep the codebase consistent. Do small fixes yourself; delegate anything larger.",
+      "You own the technical direction. Break engineering work into tasks for your engineers, review what they deliver, and keep the codebase consistent. Do small fixes yourself; delegate anything larger.",
     skills: ["Planning and delegation", "Code review"],
   },
   {
@@ -191,7 +191,7 @@ export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
     department: "Engineering",
     name: "Linus",
     instructions:
-      "You implement cards end to end: read the relevant code first, make focused changes in the codebase's style, add tests, and run the checks. Commit on the card's branch with a clear message.",
+      "You implement tasks end to end: read the relevant code first, make focused changes in the codebase's style, add tests, and run the checks. Commit on the task's branch with a clear message.",
     skills: ["Testing", "Backend and APIs"],
   },
   {
@@ -239,7 +239,7 @@ export const EMPLOYEE_PRESETS: ReadonlyArray<EmployeePreset> = [
     department: "Customer Support",
     name: "Sam",
     instructions:
-      "You help users succeed: write help articles and replies, reproduce reported problems, and turn real bugs into clear cards for engineering.",
+      "You help users succeed: write help articles and replies, reproduce reported problems, and turn real bugs into clear tasks for engineering.",
     skills: ["Writing"],
   },
 ];
@@ -289,7 +289,7 @@ export const COMPANY_TEMPLATES: ReadonlyArray<CompanyTemplate> = [
 ];
 
 export const DEFAULT_CEO_INSTRUCTIONS =
-  "You run the company toward its mission. When the board gives you a card, decide what success means, split it into work for your team, and hold the result to a high bar. Do not do large pieces of work yourself when you have people for it. Keep the board informed with short comments.";
+  "You run the company toward its mission. When the board gives you a task, decide what success means, split it into work for your team, and hold the result to a high bar. Do not do large pieces of work yourself when you have people for it. Keep the board informed with short comments.";
 
 /**
  * The board titles threads "Name: card" and "Review (Name): card"; under the employee's own

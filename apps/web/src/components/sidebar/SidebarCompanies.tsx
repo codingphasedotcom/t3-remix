@@ -104,7 +104,7 @@ function CompaniesForEnvironment(props: { readonly environmentId: EnvironmentId 
     return (
       <SidebarGroup className="flex-1">
         <div className="flex flex-col items-start gap-2 px-2 py-3 text-sm text-muted-foreground">
-          <span>No companies yet. A company has a CEO and employees who work your cards.</span>
+          <span>No companies yet. A company has a CEO and employees who work your tasks.</span>
           <Button size="sm" variant="outline" onClick={() => void navigate({ to: "/board" })}>
             <Building2Icon />
             Create a company

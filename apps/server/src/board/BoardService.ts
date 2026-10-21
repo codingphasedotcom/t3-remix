@@ -203,7 +203,7 @@ const make = Effect.gen(function* () {
 
   const requireTask = Effect.fn("BoardService.requireTask")(function* (id: BoardTaskId) {
     const stored = yield* store.getTask(id);
-    if (stored === null) return yield* boardError(`Board card ${id} was not found.`);
+    if (stored === null) return yield* boardError(`Board task ${id} was not found.`);
     return stored;
   });
 
@@ -700,7 +700,7 @@ const make = Effect.gen(function* () {
       if (input.parentTaskId !== undefined && input.parentTaskId !== null) {
         const parent = yield* requireTask(input.parentTaskId);
         if (parent.task.companyId !== company.id) {
-          return yield* boardError("A subtask must belong to its parent card's company.");
+          return yield* boardError("A subtask must belong to its parent task's company.");
         }
       }
       const assigneeAgentId = input.assigneeAgentId ?? null;
@@ -740,7 +740,7 @@ const make = Effect.gen(function* () {
     if (actor.kind !== "agent") return yield* boardError("Only agents write memory this way.");
     const running = yield* store.runForThread(actor.threadId);
     if (running === null) {
-      return yield* boardError("Only company agents working a card have a memory.");
+      return yield* boardError("Only company agents working a task have a memory.");
     }
     const agent = yield* store.getAgent(running.run.agentId);
     const company = yield* store.getCompany(running.companyId);
@@ -752,7 +752,7 @@ const make = Effect.gen(function* () {
         agents.some((candidate) => candidate.reportsToAgentId === agent.id);
       if (!manages) {
         return yield* boardError(
-          "Only the CEO and managers write company memory. Keep it in your own memory, or comment on your card so your manager can record it.",
+          "Only the CEO and managers write company memory. Keep it in your own memory, or comment on your task so your manager can record it.",
         );
       }
     }
@@ -843,7 +843,7 @@ const make = Effect.gen(function* () {
         const allowed = assignableBy(company, agents, actingAs);
         if (!involved && !allowed.some((agent) => agent.id === before.assigneeAgentId)) {
           return yield* boardError(
-            "You can only change cards you work on, review, created, or that belong to your reports.",
+            "You can only change tasks you work on, review, created, or that belong to your reports.",
           );
         }
         if (input.assigneeAgentId !== undefined) {
@@ -861,7 +861,7 @@ const make = Effect.gen(function* () {
       if (statusChanged && input.status !== undefined) {
         yield* systemComment(
           input.id,
-          `${actorLabel(actingAs, actor)} moved this card from ${boardStatusLabel(before.status)} to ${boardStatusLabel(input.status)}.`,
+          `${actorLabel(actingAs, actor)} moved this task from ${boardStatusLabel(before.status)} to ${boardStatusLabel(input.status)}.`,
         );
         if (input.status === "done" && before.parentTaskId !== null) {
           yield* resumeParentIfSubtasksDone(before.parentTaskId);
@@ -1188,7 +1188,7 @@ const make = Effect.gen(function* () {
       yield* store.updateTask(task.id, { status: "blocked" });
       yield* systemComment(
         task.id,
-        `${agent.name} could not be started. Check the agent's provider and model, then move the card back.`,
+        `${agent.name} could not be started. Check the agent's provider and model, then move the task back.`,
       );
       return;
     }
@@ -1260,14 +1260,14 @@ const make = Effect.gen(function* () {
     const current = yield* requireTask(id);
     const task = current.task;
     if (task.activeRunKind !== null) {
-      return yield* boardError("An agent is already working on this card.");
+      return yield* boardError("An agent is already working on this task.");
     }
-    if (task.status === "done") return yield* boardError("Move the card out of Done to rework it.");
+    if (task.status === "done") return yield* boardError("Move the task out of Done to rework it.");
     if (task.status === "review" && task.reviewerAgentId === null) {
       return yield* boardError("Set a reviewer before starting the review.");
     }
     if (task.status !== "review" && task.assigneeAgentId === null) {
-      return yield* boardError("Assign an agent before starting the card.");
+      return yield* boardError("Assign an agent before starting the task.");
     }
     if (task.status !== "review") {
       yield* updateTask({ id, status: "todo" }, { kind: "user" });
@@ -1296,8 +1296,8 @@ const make = Effect.gen(function* () {
       yield* systemComment(
         stored.task.id,
         succeeded
-          ? `${name} finished without moving the card; moved it to Review.`
-          : `${name}'s run ended (${runStatus}); moved the card to Blocked.`,
+          ? `${name} finished without moving the task; moved it to Review.`
+          : `${name}'s run ended (${runStatus}); moved the task to Blocked.`,
       );
     } else if (run.kind === "review" && stored.task.status === "review") {
       yield* systemComment(

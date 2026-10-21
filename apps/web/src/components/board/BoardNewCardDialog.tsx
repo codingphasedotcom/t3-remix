@@ -84,7 +84,7 @@ function NewCardForm(props: {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>New card</DialogTitle>
+          <DialogTitle>New task</DialogTitle>
           <DialogDescription>
             Describe the outcome you want. The CEO plans it and delegates the work to the team; you
             review the result. Keep it in the backlog to start it later.

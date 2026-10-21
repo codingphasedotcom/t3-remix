@@ -30,7 +30,7 @@ const shared = {
 
 const CompanyIdParam = Schema.optional(BoardCompanyId).annotate({
   description:
-    "Company whose board to use. Defaults to the company of the card this thread works on.",
+    "Company whose board to use. Defaults to the company of the task this thread works on.",
 });
 
 const BoardCaller = Schema.NullOr(
@@ -40,7 +40,7 @@ const BoardCaller = Schema.NullOr(
     kind: BoardRunKind,
   }),
 ).annotate({
-  description: "Who you are on this board and which card started you; null for an ordinary thread.",
+  description: "Who you are on this board and which task started you; null for an ordinary thread.",
 });
 
 const OrgMember = Schema.Struct({
@@ -80,12 +80,12 @@ const BoardListAgentsTool = Tool.make("board_list_agents", {
 const BoardListTasksTool = Tool.make("board_list_tasks", {
   ...shared,
   description:
-    "List cards on the company's board, ordered by column position. Filter by column or assignee.",
+    "List tasks on the company's board, ordered by column position. Filter by column or assignee.",
   parameters: Schema.Struct({
     companyId: CompanyIdParam,
     status: Schema.optional(BoardTaskStatus),
     assigneeAgentId: Schema.optional(BoardAgentId).annotate({
-      description: "Only cards assigned to this agent.",
+      description: "Only tasks assigned to this agent.",
     }),
   }),
   success: Schema.Struct({ tasks: Schema.Array(BoardTask), you: BoardCaller }),
@@ -96,7 +96,7 @@ const BoardListTasksTool = Tool.make("board_list_tasks", {
 const BoardReadTaskTool = Tool.make("board_read_task", {
   ...shared,
   description:
-    "Read one card with its comments, parent, and subtasks. Omit taskId to read the card this thread was started for.",
+    "Read one task with its comments, parent, and subtasks. Omit taskId to read the task this thread was started for.",
   parameters: Schema.Struct({ taskId: Schema.optional(BoardTaskId) }),
   success: Schema.Struct({
     task: BoardTask,
@@ -111,7 +111,7 @@ const BoardReadTaskTool = Tool.make("board_read_task", {
 const BoardCreateTaskTool = Tool.make("board_create_task", {
   ...shared,
   description:
-    'Create a card. Set parentTaskId to split your card into subtasks and assign someone in your reporting line. A card in "todo" with an assignee starts that agent right away; you review it unless you name another reviewer. "backlog" waits for a human.',
+    'Create a task. Set parentTaskId to split your task into subtasks and assign someone in your reporting line. A task in "todo" with an assignee starts that agent right away; you review it unless you name another reviewer. "backlog" waits for a human.',
   parameters: Schema.Struct({
     companyId: CompanyIdParam,
     title: TrimmedNonEmptyString,
@@ -129,7 +129,7 @@ const BoardCreateTaskTool = Tool.make("board_create_task", {
 const BoardUpdateTaskTool = Tool.make("board_update_task", {
   ...shared,
   description:
-    'Move or edit a card. Move your own card to "review" when done, "blocked" when stuck or waiting on subtasks. Reviewers move cards to "done" to approve or "todo" to request changes.',
+    'Move or edit a task. Move your own task to "review" when done, "blocked" when stuck or waiting on subtasks. Reviewers move tasks to "done" to approve or "todo" to request changes.',
   parameters: Schema.Struct({
     taskId: BoardTaskId,
     status: Schema.optional(BoardTaskStatus),
@@ -144,7 +144,7 @@ const BoardUpdateTaskTool = Tool.make("board_update_task", {
 const BoardAddCommentTool = Tool.make("board_add_comment", {
   ...shared,
   description:
-    "Add a comment to a card: progress, decisions, review findings, or questions for the board and teammates. Omit taskId to comment on this thread's card.",
+    "Add a comment to a task: progress, decisions, review findings, or questions for the board and teammates. Omit taskId to comment on this thread's task.",
   parameters: Schema.Struct({
     taskId: Schema.optional(BoardTaskId),
     body: TrimmedNonEmptyString,
@@ -189,7 +189,7 @@ const MemoryResult = Schema.Struct({
 const BoardRememberTool = Tool.make("board_remember", {
   ...shared,
   description:
-    "Save a lasting lesson to memory so future cards start with it: a convention, a command, a gotcha, or the board's preference. Not a log of this card.",
+    "Save a lasting lesson to memory so future tasks start with it: a convention, a command, a gotcha, or the board's preference. Not a log of this task.",
   parameters: Schema.Struct({
     scope: Schema.optional(MemoryScope),
     note: TrimmedNonEmptyString.annotate({ description: "One short, self-contained lesson." }),
@@ -208,10 +208,10 @@ const BoardRewriteMemoryTool = Tool.make("board_rewrite_memory", {
   success: MemoryResult,
 }).annotate(Tool.Destructive, true);
 
-const BoardSearchCardsTool = Tool.make("board_search_cards", {
+const BoardSearchTasksTool = Tool.make("board_search_tasks", {
   ...shared,
   description:
-    "Search the company's cards (titles, descriptions, comments) to see how earlier work was done. Returns each card with the last summary an agent left; read its thread with t3_thread_read for detail.",
+    "Search the company's tasks (titles, descriptions, comments) to see how earlier work was done. Returns each task with the last summary an agent left; read its thread with t3_thread_read for detail.",
   parameters: Schema.Struct({
     companyId: CompanyIdParam,
     query: TrimmedNonEmptyString,
@@ -235,5 +235,5 @@ export const BoardToolkit = Toolkit.make(
   BoardRequestHireTool,
   BoardRememberTool,
   BoardRewriteMemoryTool,
-  BoardSearchCardsTool,
+  BoardSearchTasksTool,
 );

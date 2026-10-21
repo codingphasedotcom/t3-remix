@@ -71,7 +71,7 @@ export function OrgChartView(props: {
   );
 
   const remove = async (agent: BoardAgent) => {
-    const message = `Remove ${agent.name} from ${company.name}?\nTheir reports move up to their manager and their cards become unassigned.`;
+    const message = `Remove ${agent.name} from ${company.name}?\nTheir reports move up to their manager and their tasks become unassigned.`;
     const confirmed =
       (await requestConfirmDialog(message, { variant: "destructive" })) ?? window.confirm(message);
     if (confirmed) await props.runCommand({ type: "agent.delete", id: agent.id });

@@ -284,8 +284,8 @@ function AgentForm(props: {
         </DialogTitle>
         <DialogDescription>
           {isCeo
-            ? "The CEO takes the board's cards and delegates them to the company."
-            : "Employees work the cards their manager assigns, using their skills and instructions."}
+            ? "The CEO takes the board's tasks and delegates them to the company."
+            : "Employees work the tasks their manager assigns, using their skills and instructions."}
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
@@ -447,7 +447,7 @@ function AgentForm(props: {
               <div className="flex flex-col gap-1">
                 <Label htmlFor="board-agent-paused">Paused</Label>
                 <span className="text-xs text-muted-foreground">
-                  Paused agents keep their cards but are not started.
+                  Paused agents keep their tasks but are not started.
                 </span>
               </div>
               <Switch
@@ -482,7 +482,7 @@ function AgentForm(props: {
               id="board-agent-memory"
               value={draft.memory}
               rows={5}
-              placeholder="Lessons this agent writes down between cards appear here. You can edit or clear them."
+              placeholder="Lessons this agent writes down between tasks appear here. You can edit or clear them."
               onChange={(event) => setDraft({ ...draft, memory: event.target.value })}
             />
           </div>

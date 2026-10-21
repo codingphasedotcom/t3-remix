@@ -1,8 +1,8 @@
 # Agent companies
 
 An agent company is a team of AI agents with a CEO, employees in an org chart, a skill
-library, and its own kanban board. You give the CEO cards; the CEO plans each one, hands
-the work to its employees, reviews what they deliver, and hands the finished card back to
+library, and its own kanban board. You give the CEO tasks; the CEO plans each one, hands
+the work to its employees, reviews what they deliver, and hands the finished task back to
 you. Agents coordinate only through the board, never by messaging each other.
 
 Open **Companies** from the sidebar footer on web and desktop, or switch the sidebar to
@@ -24,7 +24,7 @@ menu at the top left.
 with a face for every employee (pick another in their editor). Use **Add employee** or the
 add-report button on any person to hire under them. Each employee has a role, a department, a
 manager, skills, a model, permissions, and standing instructions. Pause an employee to keep
-their cards without starting them.
+their tasks without starting them.
 
 ## Departments
 
@@ -43,51 +43,51 @@ stops in its thread until you approve its prompts there.
 
 ## Memory
 
-Agents start every card fresh, so each employee keeps a memory: short lessons such as the
-project's test command or a preference you stated. Before finishing a card, an agent records
+Agents start every task fresh, so each employee keeps a memory: short lessons such as the
+project's test command or a preference you stated. Before finishing a task, an agent records
 anything worth keeping; the CEO and managers also keep a company memory that every agent sees.
 Both are included in each agent's prompt, are capped in size, and are condensed by the agents
 when they fill up. Read or edit an employee's memory in their editor on **Org chart**, and the
 company memory under **Edit company** in the company menu. Agents can also
-search earlier cards to see how similar work was done.
+search earlier tasks to see how similar work was done.
 
 ## Skills
 
 A skill is a reusable playbook: when it applies, how to do the work, and how to check it. Add
 skills on the **Skills** tab (or **Add starter skills**), then tick them on each employee.
-Agents receive the instructions of every skill they have on each card they work.
+Agents receive the instructions of every skill they have on each task they work.
 
 ## How work flows
 
-- A card in **To do** with an assignee starts that agent in a new thread. New cards go to the
+- A task in **To do** with an assignee starts that agent in a new thread. New tasks go to the
   CEO unless you pick someone else.
-- A manager splits its card into subtasks for its reports and moves its own card to
-  **Blocked**. Subtasks work in the parent card's worktree, so the parent's branch collects
+- A manager splits its task into subtasks for its reports and moves its own task to
+  **Blocked**. Subtasks work in the parent task's worktree, so the parent's branch collects
   the whole result. When every subtask is done, the parent returns to **To do** and the
   manager continues.
 - Work a manager delegates comes back to that manager for review: **Done** approves it;
   **To do** sends it back with requested changes, and the employee continues in its own
   thread.
-- A card with no reviewer stops in **Review** for you. **Backlog** cards never start on their
+- A task with no reviewer stops in **Review** for you. **Backlog** tasks never start on their
   own.
 
 Every agent is told where it works: the folder, the branch, the base it started from, which
-other cards share that folder, and that work from other cards is only there once it is merged.
-Branches are not merged for you, so a card that needs another card's work waits until you
+other tasks share that folder, and that work from other tasks is only there once it is merged.
+Branches are not merged for you, so a task that needs another task's work waits until you
 merge it.
 
-Type `@` and a job, such as `@CTO` or `@QA`, to mention an employee. In a new card's title or
+Type `@` and a job, such as `@CTO` or `@QA`, to mention an employee. In a new task's title or
 description, the first person you mention becomes the assignee unless you already picked one. In
-a chat in the company's project, the agent sees exactly who you mean and can hand them a card.
+a chat in the company's project, the agent sees exactly who you mean and can hand them a task.
 
-Comments you add while an agent is working reach that agent right away. Open a card to see
+Comments you add while an agent is working reach that agent right away. Open a task to see
 its activity, its runs, and links to each agent's thread.
 
 ## Dashboard
 
-**Dashboard** shows how the company is doing: open and finished cards, who is working now, how
-often runs succeed, how long cards take from creation to done, and the tokens spent. Below that
-are daily activity for the last 14 days, a **Needs attention** list (blocked or unassigned cards,
+**Dashboard** shows how the company is doing: open and finished tasks, who is working now, how
+often runs succeed, how long tasks take from creation to done, and the tokens spent. Below that
+are daily activity for the last 14 days, a **Needs attention** list (blocked or unassigned tasks,
 hire requests, failed runs), a breakdown by model and by department, and a row for every
 employee.
 
@@ -98,7 +98,7 @@ A running agent's tokens appear when its run ends. Days start at midnight in you
 
 The board's settings menu controls:
 
-- **Auto-run agents**: turn off to start cards only with **Start agent** on a card.
-- **Worktree per card**: each top-level card gets its own worktree on a `board/<card>` branch
+- **Auto-run agents**: turn off to start tasks only with **Start agent** on a task.
+- **Worktree per task**: each top-level task gets its own worktree on a `board/<task>` branch
   from the project's current `HEAD`. Turn off to let agents share the project checkout.
-- **Agents at once**: how many cards can run at the same time. Ready cards wait for a slot.
+- **Agents at once**: how many tasks can run at the same time. Ready tasks wait for a slot.

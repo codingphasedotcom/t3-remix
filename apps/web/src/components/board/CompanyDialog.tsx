@@ -169,7 +169,7 @@ function CompanyForm(props: {
       <DialogHeader>
         <DialogTitle>New company</DialogTitle>
         <DialogDescription>
-          A company has a CEO who takes your cards and delegates them to employees. Each company has
+          A company has a CEO who takes your tasks and delegates them to employees. Each company has
           its own board, org chart, and skills.
         </DialogDescription>
       </DialogHeader>

@@ -117,9 +117,9 @@ export function buildDashboard(input: {
   };
 
   const firstDayMs = millis(localDay(input.now, utcOffsetMinutes)) - (DASHBOARD_DAYS - 1) * DAY_MS;
-  const days = new Map<string, { runs: number; cardsFinished: number; tokens: number }>();
+  const days = new Map<string, { runs: number; tasksFinished: number; tokens: number }>();
   for (let index = 0; index < DASHBOARD_DAYS; index += 1) {
-    days.set(dayAt(firstDayMs + index * DAY_MS), { runs: 0, cardsFinished: 0, tokens: 0 });
+    days.set(dayAt(firstDayMs + index * DAY_MS), { runs: 0, tasksFinished: 0, tokens: 0 });
   }
 
   for (const { run, modelSelection } of input.runs) {
@@ -156,7 +156,7 @@ export function buildDashboard(input: {
     if (task.status !== "done") continue;
     cycleTimes.push(Math.max(0, millis(statusChangedAt) - millis(task.createdAt)));
     const day = days.get(localDay(statusChangedAt, utcOffsetMinutes));
-    if (day !== undefined) day.cardsFinished += 1;
+    if (day !== undefined) day.tasksFinished += 1;
   }
 
   return {
