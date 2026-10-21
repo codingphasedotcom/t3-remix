@@ -212,10 +212,20 @@ export const BoardSettings = Schema.Struct({
 });
 export type BoardSettings = typeof BoardSettings.Type;
 
+/** Just enough of an employee to @mention them from a chat or a card. */
+export const BoardCompanyMember = Schema.Struct({
+  id: BoardAgentId,
+  name: TrimmedNonEmptyString,
+  title: TrimmedString,
+  avatar: BoardAvatar,
+});
+export type BoardCompanyMember = typeof BoardCompanyMember.Type;
+
 export const BoardCompanySummary = Schema.Struct({
   id: BoardCompanyId,
   name: TrimmedNonEmptyString,
   projectId: ProjectId,
+  members: Schema.Array(BoardCompanyMember),
   agentCount: Schema.Int,
   openTaskCount: Schema.Int,
   pendingHireCount: Schema.Int,

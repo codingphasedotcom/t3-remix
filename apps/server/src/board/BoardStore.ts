@@ -698,11 +698,29 @@ const make = Effect.gen(function* () {
         FROM board_companies c
         ORDER BY c.created_at, c.company_id
       `;
+    const members = yield* sql<{
+      readonly agent_id: string;
+      readonly company_id: string;
+      readonly name: string;
+      readonly title: string;
+      readonly avatar: string;
+    }>`
+        SELECT agent_id, company_id, name, title, avatar FROM board_agents
+        ORDER BY created_at, agent_id
+      `;
     return yield* Effect.forEach(rows, (row) =>
       decodeCompanySummary({
         id: row.company_id,
         name: row.name,
         projectId: row.project_id,
+        members: members
+          .filter((member) => member.company_id === row.company_id)
+          .map((member) => ({
+            id: member.agent_id,
+            name: member.name,
+            title: member.title,
+            avatar: member.avatar,
+          })),
         agentCount: row.agent_count,
         openTaskCount: row.open_task_count,
         pendingHireCount: row.pending_hire_count,

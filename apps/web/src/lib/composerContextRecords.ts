@@ -158,6 +158,51 @@ export function threadContextReference(record: ThreadContextRecord): ComposerCon
   return { kind: "thread", contextId: record.contextId, label: record.label };
 }
 
+// Board ids are "<prefix>:<uuid>". The reference carries both uuids, so the record that tells the
+// agent exactly who was mentioned can be rebuilt from the prompt when it is sent.
+const EMPLOYEE_ID_PREFIX = "board-agent:";
+const COMPANY_ID_PREFIX = "board-company:";
+const EMPLOYEE_CONTEXT_ID = /^employee_([0-9a-f-]{36})_([0-9a-f-]{36})$/i;
+
+export function employeeContextReference(employee: {
+  readonly agentId: string;
+  readonly companyId: string;
+  readonly label: string;
+}): ComposerContextReference {
+  const agent = employee.agentId.slice(EMPLOYEE_ID_PREFIX.length);
+  const company = employee.companyId.slice(COMPANY_ID_PREFIX.length);
+  return {
+    kind: "employee",
+    contextId:
+      employee.agentId.startsWith(EMPLOYEE_ID_PREFIX) &&
+      employee.companyId.startsWith(COMPANY_ID_PREFIX)
+        ? `employee_${agent}_${company}`
+        : toKindScopedComposerContextId("employee", employee.agentId),
+    label: sanitizeComposerContextLabel(`@${employee.label}`, "employee"),
+  };
+}
+
+/** The agent and company behind every employee the prompt mentions. */
+function employeeContextRecords(prompt: string): ComposerContextRecord[] {
+  const records = new Map<string, ComposerContextRecord>();
+  for (const occurrence of collectComposerContextReferences(prompt)) {
+    const match =
+      occurrence.kind === "employee" ? EMPLOYEE_CONTEXT_ID.exec(occurrence.contextId) : null;
+    if (match === null || records.has(occurrence.contextId)) continue;
+    records.set(occurrence.contextId, {
+      version: 1,
+      kind: "employee",
+      contextId: occurrence.contextId,
+      label: occurrence.label,
+      payload: {
+        agentId: `${EMPLOYEE_ID_PREFIX}${match[1]}`,
+        companyId: `${COMPANY_ID_PREFIX}${match[2]}`,
+      },
+    });
+  }
+  return [...records.values()];
+}
+
 export function threadContextRecord(ref: ScopedThreadRef, title: string): ThreadContextRecord {
   const label = sanitizeComposerContextLabel(title, "thread");
   return {
@@ -307,6 +352,8 @@ export function attachmentContextRecord(
 }
 
 export function buildMessageContext(input: {
+  /** The text being sent, for references whose record is rebuilt from the text itself. */
+  prompt?: string;
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   reviewComments: ReadonlyArray<ReviewCommentContext>;
   previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
@@ -328,6 +375,7 @@ export function buildMessageContext(input: {
       }),
     ),
     ...(input.attachments ?? []).map(attachmentContextRecord),
+    ...(input.prompt === undefined ? [] : employeeContextRecords(input.prompt)),
   ];
   return records.length === 0 ? undefined : { version: 1, records };
 }

@@ -28,6 +28,8 @@ import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
 import { PierreEntryIcon } from "./PierreEntryIcon";
+import { faceFor } from "../board/faces";
+import type { MentionCandidate } from "../board/boardMentions";
 import { ComposerBanner } from "./ComposerBanner";
 import { resolvePullRequestState } from "../pullRequest/pullRequestPresentation";
 
@@ -75,6 +77,13 @@ export type ComposerCommandItem =
       id: string;
       type: "thread";
       thread: ScopedThreadRef;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "employee";
+      employee: MentionCandidate;
       label: string;
       description: string;
     };
@@ -202,6 +211,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       {props.item.type === "thread" ? (
         <MessagesSquareIcon aria-hidden="true" className="size-4 shrink-0 text-secondary-label" />
       ) : null}
+      {props.item.type === "employee" ? <EmployeeFace employee={props.item.employee} /> : null}
       {pullRequestPresentation ? (
         <pullRequestPresentation.Icon
           role="img"
@@ -237,6 +247,20 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
 export function composerSuggestionOptionId(listId: string, itemId: string): string {
   // JSON escapes lone UTF-16 surrogates before URI encoding without losing identity.
   return `${listId}-${encodeURIComponent(JSON.stringify(itemId))}`;
+}
+
+function EmployeeFace(props: { employee: MentionCandidate }) {
+  const face = faceFor({ id: props.employee.agentId, avatar: props.employee.avatar });
+  return face === null ? (
+    <UserRoundIcon aria-hidden="true" className="size-4 shrink-0 text-secondary-label" />
+  ) : (
+    <img
+      src={face.url}
+      alt=""
+      className="size-4 shrink-0 rounded-full bg-muted ring-1 ring-border"
+      draggable={false}
+    />
+  );
 }
 
 const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {

@@ -20,6 +20,7 @@ import {
   attachmentContextRecord,
   buildMessageContext,
   composerContextImportLookupIds,
+  employeeContextReference,
   isPullRequestSummaryContext,
   isSameComposerContextPayload,
   pullRequestContextDisplayState,
@@ -747,5 +748,37 @@ describe("selectedMessageContextFragment", () => {
         markdown: `[b.ts L4](t3-context://v1/review-comment/${review.contextId})`,
       }),
     ).toBeNull();
+  });
+});
+
+describe("employee mentions", () => {
+  it("rebuilds who was mentioned from the sent text", () => {
+    const reference = employeeContextReference({
+      agentId: "board-agent:0f8c2a1e-4b7d-4e2a-9c1f-1a2b3c4d5e6f",
+      companyId: "board-company:7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d",
+      label: "CTO",
+    });
+    expect(reference.label).toBe("@CTO");
+    const prompt = `${formatInlineContextReference(reference)} please own the login page`;
+
+    expect(
+      buildMessageContext({
+        prompt,
+        terminalContexts: [],
+        reviewComments: [],
+        previewAnnotations: [],
+      })?.records,
+    ).toEqual([
+      {
+        version: 1,
+        kind: "employee",
+        contextId: reference.contextId,
+        label: "@CTO",
+        payload: {
+          agentId: "board-agent:0f8c2a1e-4b7d-4e2a-9c1f-1a2b3c4d5e6f",
+          companyId: "board-company:7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d",
+        },
+      },
+    ]);
   });
 });

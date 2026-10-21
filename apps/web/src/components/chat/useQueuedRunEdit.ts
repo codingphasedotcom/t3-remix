@@ -115,6 +115,7 @@ async function submitQueuedRunEdit(input: {
     );
     const newRecords =
       buildMessageContext({
+        prompt: editText,
         terminalContexts: content.terminalContexts.filter(
           (context) => context.text.trim().length > 0,
         ),

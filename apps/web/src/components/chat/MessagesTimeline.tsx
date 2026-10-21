@@ -119,6 +119,7 @@ import {
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import { T3Wordmark } from "../T3Wordmark";
+import { EmployeeContextChip } from "../EmployeeContextChip";
 import { ThreadContextChip } from "../ThreadContextChip";
 import {
   ArrowRightIcon,
@@ -4574,6 +4575,9 @@ function UserMessageContextReferenceChip(props: {
     contextId: props.reference.contextId as ComposerContextId,
     label: props.reference.label,
   });
+  if (props.reference.kind === "employee") {
+    return <EmployeeContextChip label={props.reference.label} copyMarkdown={copyMarkdown} />;
+  }
   return userMessageContextPresentationRegistry.render(props.reference.kind, props.record, {
     reference: props.reference,
     annotationImage: props.annotationImage,

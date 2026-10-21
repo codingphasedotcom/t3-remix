@@ -495,6 +495,14 @@ it.effect("keeps the org chart a tree with the CEO at the top", () =>
         snapshot.companies.map((summary) => [summary.name, summary.agentCount]),
         [["Acme", 2]],
       );
+      // Summaries carry who can be @mentioned, by job.
+      assert.deepEqual(
+        snapshot.companies[0]?.members.map((member) => [member.name, member.title]),
+        [
+          ["Ada", "CEO"],
+          ["Engineer", "Engineer"],
+        ],
+      );
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

@@ -12,11 +12,11 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
 import { AgentSelect } from "./AgentSelect";
 import type { RunBoardCommand } from "./BoardPage";
+import { mentionCandidates, type MentionCandidate } from "./boardMentions";
+import { MentionField } from "./MentionField";
 
 export function BoardNewCardDialog(props: {
   readonly open: boolean;
@@ -41,13 +41,22 @@ function NewCardForm(props: {
   const [assigneeAgentId, setAssigneeAgentId] = useState<BoardAgentId | null>(
     company?.ceoAgentId ?? null,
   );
+  // The first person @mentioned takes the card, unless an assignee was already picked.
+  const [assigneeFollowsMention, setAssigneeFollowsMention] = useState(true);
   const [reviewerAgentId, setReviewerAgentId] = useState<BoardAgentId | null>(null);
   const [saving, setSaving] = useState(false);
+  const candidates = company === null ? [] : mentionCandidates([{ ...company, members: agents }]);
+  const onMention = (candidate: MentionCandidate) => {
+    if (!assigneeFollowsMention) return;
+    setAssigneeAgentId(candidate.agentId);
+    setAssigneeFollowsMention(false);
+  };
 
   const reset = () => {
     setTitle("");
     setDescription("");
     setAssigneeAgentId(null);
+    setAssigneeFollowsMention(true);
     setReviewerAgentId(null);
   };
 
@@ -85,22 +94,27 @@ function NewCardForm(props: {
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-card-title">Title</Label>
-              <Input
+              <MentionField
                 id="board-card-title"
                 value={title}
                 autoFocus
                 placeholder="Add rate limiting to the public API"
-                onChange={(event) => setTitle(event.target.value)}
+                candidates={candidates}
+                onMention={onMention}
+                onChange={setTitle}
               />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-card-description">Description</Label>
-              <Textarea
+              <MentionField
                 id="board-card-description"
+                multiline
                 value={description}
                 rows={6}
-                placeholder="What done looks like, constraints, links…"
-                onChange={(event) => setDescription(event.target.value)}
+                placeholder="What done looks like, constraints, links… Type @ to mention a role."
+                candidates={candidates}
+                onMention={onMention}
+                onChange={setDescription}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -109,7 +123,10 @@ function NewCardForm(props: {
                 <AgentSelect
                   agents={agents}
                   value={assigneeAgentId}
-                  onChange={setAssigneeAgentId}
+                  onChange={(agentId) => {
+                    setAssigneeAgentId(agentId);
+                    setAssigneeFollowsMention(false);
+                  }}
                 />
               </div>
               <div className="flex flex-col gap-2">

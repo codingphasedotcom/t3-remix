@@ -31,6 +31,7 @@ import {
 import type { TerminalContextDraft } from "~/lib/terminalContext";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
+import { EmployeeContextChip } from "./EmployeeContextChip";
 import { ThreadContextChip } from "./ThreadContextChip";
 import {
   createContextPresentationRegistry,
@@ -457,6 +458,8 @@ export function ComposerContextReferenceChip(props: {
   label: string;
 }): ReactElement {
   const records = use(ComposerContextRecordsContext);
+  // An employee mention carries everything it needs in the reference; it has no draft record.
+  if (props.kind === "employee") return <EmployeeContextChip label={props.label} />;
   return composerContextPresentationRegistry.render(props.kind, records.get(props.contextId), {
     label: props.label,
   });

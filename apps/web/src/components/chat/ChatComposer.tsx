@@ -257,6 +257,7 @@ import {
   terminalContextDraftFromRecord,
   terminalContextReference,
   terminalContextRecord,
+  employeeContextReference,
   threadContextRecord,
   threadContextReference,
 } from "~/lib/composerContextRecords";
@@ -286,6 +287,8 @@ import {
   type EnvironmentQueryTarget,
 } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
+import { boardLive } from "~/state/board";
+import { matchMentionCandidates, mentionCandidates } from "../board/boardMentions";
 import { useComposerPathSearch, useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
@@ -2576,6 +2579,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
   const environmentThreadShells = useThreadShells(isPathTrigger);
+  // Employees of the project's companies, fetched only while the @ menu is open.
+  const boardCompanies = useEnvironmentQuery(
+    isPathTrigger && activeProjectId !== null
+      ? boardLive({ environmentId, input: { companyId: null } })
+      : null,
+  ).data?.companies;
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
@@ -2653,7 +2662,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerMenuItems = ((): ComposerCommandItem[] => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
+      const employees = matchMentionCandidates(
+        mentionCandidates(
+          (boardCompanies ?? []).filter((company) => company.projectId === activeProjectId),
+        ),
+        composerTrigger.query,
+      );
       return [
+        ...employees.map((employee) => ({
+          id: `employee:${employee.agentId}`,
+          type: "employee" as const,
+          employee,
+          label: employee.label,
+          description: `${employee.name} · ${employee.companyName}`,
+        })),
         ...matchComposerThreadItems({
           shells: environmentThreadShells,
           environmentId,
@@ -3934,6 +3956,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
         setComposerHighlightedItemId(null);
       }
+      return;
+    }
+    if (item.type === "employee") {
+      if (trigger.kind !== "path") return;
+      const replacement = `${formatInlineContextReference(employeeContextReference(item.employee))} `;
+      const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+        snapshot.value,
+        trigger.rangeEnd,
+        replacement,
+      );
+      const applied = applyPromptReplacement(trigger.rangeStart, replacementRangeEnd, replacement, {
+        expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
+      });
+      if (applied) setComposerHighlightedItemId(null);
       return;
     }
     if (item.type === "thread") {

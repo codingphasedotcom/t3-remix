@@ -75,6 +75,10 @@ other cards share that folder, and that work from other cards is only there once
 Branches are not merged for you, so a card that needs another card's work waits until you
 merge it.
 
+Type `@` and a job, such as `@CTO` or `@QA`, to mention an employee. In a new card's title or
+description, the first person you mention becomes the assignee unless you already picked one. In
+a chat in the company's project, the agent sees exactly who you mean and can hand them a card.
+
 Comments you add while an agent is working reach that agent right away. Open a card to see
 its activity, its runs, and links to each agent's thread.
 
