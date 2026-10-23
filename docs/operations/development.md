@@ -158,6 +158,18 @@ DMGs default to the host architecture. Use `--arch` to choose another target and
 to retain packaging files for inspection. Run `vp run dist:desktop:artifact --help` for other
 options.
 
+### Building a fork beside T3 Code
+
+A plain build is named T3 Code and uses `~/.t3` and T3 Code's app ID, so installing it replaces
+the official app and shares its database. Give a fork its own identity with these variables (in
+the environment or the repository's `.env.local`): `T3CODE_DESKTOP_APP_ID`,
+`T3CODE_DESKTOP_PRODUCT_NAME`, `T3CODE_DESKTOP_HOME_DIR` (the data folder in your home
+directory), and `T3CODE_DESKTOP_USER_DATA_DIR` (the Electron profile folder).
+`vp run dist:desktop:office` builds this fork as T3 Office with data in `~/.t3-office`. Leave
+`GITHUB_REPOSITORY` unset so the build has no update feed and never replaces itself with
+upstream. The `t3code://` link scheme stays shared, so an outside `t3code://` link may open
+either app.
+
 ### Linux AppImage prerequisites
 
 Build on Linux because the browser-secret helper links against the host's libsecret. Install

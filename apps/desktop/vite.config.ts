@@ -16,6 +16,12 @@ const publicConfigDefine = {
   __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
     repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
   ),
+  // Empty values keep T3 Code's own identity; see DesktopBuildIdentity.ts.
+  __T3CODE_BUILD_DESKTOP_IDENTITY__: JSON.stringify({
+    productName: repoEnv.T3CODE_DESKTOP_PRODUCT_NAME?.trim() ?? "",
+    homeDir: repoEnv.T3CODE_DESKTOP_HOME_DIR?.trim() ?? "",
+    userDataDir: repoEnv.T3CODE_DESKTOP_USER_DATA_DIR?.trim() ?? "",
+  }),
 };
 
 export default defineConfig({
