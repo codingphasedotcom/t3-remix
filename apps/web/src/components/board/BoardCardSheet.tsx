@@ -13,6 +13,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ExternalLinkIcon,
+  FileIcon,
   FileTextIcon,
   GitBranchIcon,
   GitCommitHorizontalIcon,
@@ -43,6 +44,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Sheet, SheetDescription, SheetHeader, SheetPopup, SheetTitle } from "../ui/sheet";
 import { Textarea } from "../ui/textarea";
 import { AgentSelect } from "./AgentSelect";
+import { FilePicker } from "./FilePicker";
 import type { RunBoardCommand } from "./BoardPage";
 import { BOARD_COLUMNS, agentById, boardStatusLabel } from "./board.logic";
 
@@ -87,6 +89,8 @@ function BoardCardDetail(props: {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [editingDescription, setEditingDescription] = useState(false);
+  const files = (detail.data?.links ?? []).filter((link) => link.kind === "file");
+  const workLinks = (detail.data?.links ?? []).filter((link) => link.kind !== "file");
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
   const descriptionDirty = description !== task.description;
@@ -290,10 +294,40 @@ function BoardCardDetail(props: {
             )}
           </div>
 
-          {(detail.data?.links.length ?? 0) > 0 ? (
+          <div className="flex flex-col gap-1">
+            <Label>Files</Label>
+            <FilePicker
+              disabled={disabled}
+              onAdd={(paths) => {
+                for (const path of paths) {
+                  void props.runCommand({
+                    type: "link.add",
+                    link: {
+                      taskId: task.id,
+                      kind: "file",
+                      title: path.split(/[\\/]/).findLast((part) => part.length > 0) ?? path,
+                      url: path,
+                    },
+                  });
+                }
+              }}
+            >
+              {files.map((link) => (
+                <WorkLinkRow
+                  key={link.id}
+                  link={link}
+                  snapshot={snapshot}
+                  disabled={disabled}
+                  onRemove={() => void props.runCommand({ type: "link.delete", id: link.id })}
+                />
+              ))}
+            </FilePicker>
+          </div>
+
+          {workLinks.length > 0 ? (
             <div className="flex flex-col gap-1">
               <Label>Linked work</Label>
-              {(detail.data?.links ?? []).map((link) => (
+              {workLinks.map((link) => (
                 <WorkLinkRow
                   key={link.id}
                   link={link}
@@ -413,6 +447,7 @@ const WORK_LINK_ICONS: Record<BoardWorkLink["kind"], LucideIcon> = {
   commit: GitCommitHorizontalIcon,
   document: FileTextIcon,
   other: LinkIcon,
+  file: FileIcon,
 };
 
 const WORK_LINK_STATUS_VARIANTS = {

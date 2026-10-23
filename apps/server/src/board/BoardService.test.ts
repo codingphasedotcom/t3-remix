@@ -1199,3 +1199,59 @@ it.effect("creates a routine's task on schedule and skips while the last one is 
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect("gives agents the files attached to their task and the tasks above it", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead, engineer } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 5 } },
+        user,
+      );
+      const video = "/Users/me/Downloads/launch clip.mp4";
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: {
+            companyId: company.id,
+            title: "Edit the launch video",
+            assigneeAgentId: lead.id,
+            files: [video],
+          },
+        },
+        user,
+      );
+      const started = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, task?.id) !== null,
+      );
+      const detail = yield* board.taskDetail(task!.id);
+      assert.deepEqual(
+        detail.links
+          .filter((link) => link.kind === "file")
+          .map((link) => [link.title, link.url, link.agentId]),
+        [["launch clip.mp4", video, null]],
+      );
+      const prompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
+      assert.include(prompt, "## Files for this task");
+      assert.include(prompt, `- ${video}`);
+      assert.include(prompt, "never move, rename, or delete the originals");
+
+      const subtask = yield* board.createTask(
+        {
+          companyId: company.id,
+          title: "Cut the intro",
+          parentTaskId: task!.id,
+          assigneeAgentId: engineer.id,
+        },
+        { kind: "agent", threadId: threadOf(started, task?.id)! },
+      );
+      yield* boardWhere(board, company.id, (snapshot) => threadOf(snapshot, subtask.id) !== null);
+      const subtaskPrompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
+      assert.include(subtaskPrompt, `- ${video} (attached to "Edit the launch video")`);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);

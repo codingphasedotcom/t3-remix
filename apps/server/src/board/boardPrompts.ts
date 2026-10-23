@@ -33,6 +33,12 @@ export interface BoardPromptContext {
   readonly comments: ReadonlyArray<BoardComment>;
   /** People's comments on this task and the tasks above it, oldest first. */
   readonly boardComments: ReadonlyArray<BoardInstruction>;
+  /** Files people attached to this task and the tasks above it. */
+  readonly files: ReadonlyArray<{
+    readonly taskId: BoardTask["id"];
+    readonly taskTitle: string;
+    readonly path: string;
+  }>;
 }
 
 export interface BoardInstruction {
@@ -236,6 +242,18 @@ function taskBlock(context: BoardPromptContext): string {
     for (const ancestor of context.ancestors) {
       const description = truncate(ancestor.description.trim(), MAX_PARENT_DESCRIPTION_CHARS);
       lines.push(`- ${ancestor.title} (${ancestor.id})${description ? `: ${description}` : ""}`);
+    }
+  }
+  if (context.files.length > 0) {
+    lines.push(
+      "",
+      "## Files for this task",
+      "The board attached these files on this machine. Work from them where they are, or copy them into your workspace; never move, rename, or delete the originals.",
+    );
+    for (const file of context.files) {
+      lines.push(
+        `- ${file.path}${file.taskId === context.task.id ? "" : ` (attached to "${file.taskTitle}")`}`,
+      );
     }
   }
   if (context.subtasks.length > 0) {

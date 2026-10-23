@@ -353,6 +353,8 @@ export const BoardWorkLinkKind = Schema.Literals([
   "commit",
   "document",
   "other",
+  /** A file a person attached for the work, by its path on the server's machine. */
+  "file",
 ]);
 export type BoardWorkLinkKind = typeof BoardWorkLinkKind.Type;
 
@@ -495,6 +497,9 @@ export const BoardTaskCreateInput = Schema.Struct({
   companyId: BoardCompanyId,
   title: TrimmedNonEmptyString,
   description: Schema.optional(Schema.String),
+  files: Schema.optional(Schema.Array(TrimmedNonEmptyString)).annotate({
+    description: "Absolute paths of files on the server's machine the work needs.",
+  }),
   status: Schema.optional(BoardTaskStatus),
   assigneeAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
   reviewerAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
@@ -547,6 +552,15 @@ export const BoardCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("task.delete"), id: BoardTaskId }),
   Schema.Struct({ type: Schema.Literal("task.start"), id: BoardTaskId }),
   Schema.Struct({ type: Schema.Literal("comment.add"), comment: BoardCommentAddInput }),
+  Schema.Struct({
+    type: Schema.Literal("link.add"),
+    link: Schema.Struct({
+      taskId: BoardTaskId,
+      kind: BoardWorkLinkKind,
+      title: TrimmedNonEmptyString,
+      url: TrimmedNonEmptyString,
+    }),
+  }),
   Schema.Struct({ type: Schema.Literal("link.delete"), id: BoardWorkLinkId }),
   Schema.Struct({ type: Schema.Literal("settings.update"), settings: BoardSettingsUpdateInput }),
   Schema.Struct({ type: Schema.Literal("routine.upsert"), routine: BoardRoutineUpsertInput }),

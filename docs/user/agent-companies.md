@@ -95,6 +95,11 @@ one thread per task: replies, work, rework, and repeat reviews all continue it, 
 their context and each new message carries only what changed. Open a task to see
 its activity, its runs, and links to each agent's thread.
 
+Attach files a task needs, such as a video to edit from your Downloads folder, under **Files**
+when you create the task or later in the task. In the desktop app, use **Add files** or drop them
+in; in a browser, paste the file's full path. Nothing is uploaded: agents work from the files
+where they are on the computer running T3 Code, and subtasks see their parent's files too.
+
 A task lists its **Linked work**: its branch, and the pull requests, previews, and documents its
 agents report, with each pull request's status. Remove a wrong link with its **×**.
 

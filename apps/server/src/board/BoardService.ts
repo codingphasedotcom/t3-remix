@@ -200,6 +200,10 @@ function cardBranchName(task: BoardTask, threadId: ThreadId): string {
   return `board/${slug}-${token}`;
 }
 
+function fileName(path: string): string {
+  return path.split(/[\\/]/).findLast((part) => part.length > 0) ?? path;
+}
+
 /** "2026-10-20:" or "2026-10-20 (Grace):" at the start of a memory note. */
 const LEADING_NOTE_DATE = /^\d{4}-\d{2}-\d{2}(?:\s*\([^)]*\))?\s*[:\u2013\u2014-]\s*/;
 
@@ -801,6 +805,17 @@ const make = Effect.gen(function* () {
       if (actor.kind === "agent") {
         yield* systemComment(id, `Created by ${actorLabel(actingAs, actor)}.`);
       }
+      // Files are referenced where they are, never copied: agents run on the same machine.
+      for (const file of new Set(input.files ?? [])) {
+        yield* store.upsertWorkLink({
+          taskId: id,
+          kind: "file",
+          title: fileName(file),
+          url: file,
+          status: null,
+          agentId: actingAs?.id ?? null,
+        });
+      }
       // Read before notifying: the change can start an agent that moves the card at once.
       const created = (yield* requireTask(id)).task;
       yield* notify(company.id);
@@ -1137,6 +1152,18 @@ const make = Effect.gen(function* () {
       parentId = parent.parentTaskId;
     }
     const comments = yield* store.listComments(task.id);
+    // Files attached to a task above this one are usually what its subtasks work on.
+    const files = (yield* Effect.forEach([task, ...ancestors], (owner) =>
+      store
+        .listWorkLinks(owner.id)
+        .pipe(
+          Effect.map((links) =>
+            links
+              .filter((link) => link.kind === "file")
+              .map((link) => ({ taskId: owner.id, taskTitle: owner.title, path: link.url })),
+          ),
+        ),
+    )).flat();
     const boardComments = (yield* Effect.forEach([task, ...ancestors], (owner) =>
       (owner.id === task.id ? Effect.succeed(comments) : store.listComments(owner.id)).pipe(
         Effect.map((list) =>
@@ -1163,6 +1190,7 @@ const make = Effect.gen(function* () {
       subtasks: allTasks.filter((candidate) => candidate.parentTaskId === task.id),
       comments,
       boardComments,
+      files,
     } satisfies BoardPromptContext;
   });
 
@@ -1727,6 +1755,8 @@ const make = Effect.gen(function* () {
         return startTask(command.id).pipe(Effect.map((task) => ({ task })));
       case "comment.add":
         return addComment(command.comment, actor).pipe(Effect.map((comment) => ({ comment })));
+      case "link.add":
+        return linkWork({ ...command.link, status: null }, actor).pipe(Effect.as({}));
       case "link.delete":
         return deleteWorkLink(command.id).pipe(Effect.as({}));
       case "settings.update":

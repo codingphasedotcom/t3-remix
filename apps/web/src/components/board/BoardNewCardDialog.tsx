@@ -1,4 +1,5 @@
 import type { BoardAgentId, BoardSnapshot, BoardTaskStatus } from "@t3tools/contracts";
+import { FileIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "../ui/button";
@@ -16,6 +17,7 @@ import { Label } from "../ui/label";
 import { AgentSelect } from "./AgentSelect";
 import type { RunBoardCommand } from "./BoardPage";
 import { mentionCandidates, type MentionCandidate } from "./boardMentions";
+import { FilePicker } from "./FilePicker";
 import { MentionField } from "./MentionField";
 
 export function BoardNewCardDialog(props: {
@@ -44,6 +46,7 @@ function NewCardForm(props: {
   // The first person @mentioned takes the card, unless an assignee was already picked.
   const [assigneeFollowsMention, setAssigneeFollowsMention] = useState(true);
   const [reviewerAgentId, setReviewerAgentId] = useState<BoardAgentId | null>(null);
+  const [files, setFiles] = useState<ReadonlyArray<string>>([]);
   const [saving, setSaving] = useState(false);
   const candidates = company === null ? [] : mentionCandidates([{ ...company, members: agents }]);
   const onMention = (candidate: MentionCandidate) => {
@@ -58,6 +61,7 @@ function NewCardForm(props: {
     setAssigneeAgentId(null);
     setAssigneeFollowsMention(true);
     setReviewerAgentId(null);
+    setFiles([]);
   };
 
   const create = async (status: BoardTaskStatus) => {
@@ -72,6 +76,7 @@ function NewCardForm(props: {
         status,
         assigneeAgentId,
         reviewerAgentId,
+        ...(files.length > 0 ? { files } : {}),
       },
     });
     setSaving(false);
@@ -116,6 +121,28 @@ function NewCardForm(props: {
                 onMention={onMention}
                 onChange={setDescription}
               />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Files</Label>
+              <FilePicker onAdd={(paths) => setFiles([...new Set([...files, ...paths])])}>
+                {files.map((file) => (
+                  <div key={file} className="flex min-w-0 items-center gap-2 text-sm">
+                    <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{file}</span>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      aria-label={`Remove ${file}`}
+                      onClick={() => setFiles(files.filter((candidate) => candidate !== file))}
+                    >
+                      <XIcon />
+                    </Button>
+                  </div>
+                ))}
+              </FilePicker>
+              <span className="text-xs text-muted-foreground">
+                Agents use the files where they are on this computer; nothing is uploaded.
+              </span>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-2">
