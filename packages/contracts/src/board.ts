@@ -565,6 +565,7 @@ export const BoardCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("settings.update"), settings: BoardSettingsUpdateInput }),
   Schema.Struct({ type: Schema.Literal("routine.upsert"), routine: BoardRoutineUpsertInput }),
   Schema.Struct({ type: Schema.Literal("routine.delete"), id: BoardRoutineId }),
+  Schema.Struct({ type: Schema.Literal("routine.run"), id: BoardRoutineId }),
 ]);
 export type BoardCommand = typeof BoardCommand.Type;
 

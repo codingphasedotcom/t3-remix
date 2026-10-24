@@ -1255,3 +1255,42 @@ it.effect("gives agents the files attached to their task and the tasks above it"
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect("runs a routine on demand without moving its schedule", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, autoDispatch: false } },
+        user,
+      );
+      const nextRunAt = "1970-01-08T09:00:00.000Z";
+      const { routine } = yield* board.runCommand(
+        {
+          type: "routine.upsert",
+          routine: {
+            companyId: company.id,
+            title: "Executive report",
+            description: "Summarize the week.",
+            assigneeAgentId: ceoId,
+            everyDays: 7,
+            nextRunAt,
+            enabled: true,
+          },
+        },
+        user,
+      );
+      const { task } = yield* board.runCommand({ type: "routine.run", id: routine!.id }, user);
+      assert.equal(task?.title, "Executive report");
+      assert.equal(task?.assigneeAgentId, ceoId);
+      const snapshot = yield* board.snapshot(company.id);
+      const after = snapshot.routines.find((candidate) => candidate.id === routine!.id);
+      assert.equal(after?.lastTaskId, task?.id);
+      assert.equal(after?.nextRunAt, nextRunAt);
+      const comments = (yield* board.taskDetail(task!.id)).comments.map((comment) => comment.body);
+      assert.include(comments, 'Created by the routine "Executive report".');
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);

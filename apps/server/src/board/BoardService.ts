@@ -1076,6 +1076,33 @@ const make = Effect.gen(function* () {
     yield* notify(routine.companyId);
   });
 
+  const createRoutineTask = Effect.fn("BoardService.createRoutineTask")(function* (
+    routine: BoardRoutine,
+  ) {
+    const task = yield* createTask(
+      {
+        companyId: routine.companyId,
+        title: routine.title,
+        description: routine.description,
+        assigneeAgentId: routine.assigneeAgentId,
+        status: routine.assigneeAgentId === null ? "backlog" : "todo",
+      },
+      { kind: "user" },
+    );
+    yield* systemComment(task.id, `Created by the routine "${routine.title}".`);
+    return task;
+  });
+
+  /** Creates the routine's task now, whatever its schedule says; the schedule is unchanged. */
+  const runRoutineNow = Effect.fn("BoardService.runRoutineNow")(function* (id: BoardRoutineId) {
+    const routine = yield* store.getRoutine(id);
+    if (routine === null) return yield* boardError("That routine no longer exists.");
+    const task = yield* createRoutineTask(routine);
+    yield* store.upsertRoutine({ ...routine, lastTaskId: task.id, updatedAt: yield* store.now });
+    yield* notify(routine.companyId);
+    return task;
+  });
+
   /**
    * Creates each due routine's task. A routine whose previous task is still open skips this
    * turn rather than piling up copies, and runs missed while the server was down collapse
@@ -1088,18 +1115,7 @@ const make = Effect.gen(function* () {
         routine.lastTaskId === null ? null : yield* store.getTask(routine.lastTaskId);
       let lastTaskId = routine.lastTaskId;
       if (previous === null || previous.task.status === "done") {
-        const task = yield* createTask(
-          {
-            companyId: routine.companyId,
-            title: routine.title,
-            description: routine.description,
-            assigneeAgentId: routine.assigneeAgentId,
-            status: routine.assigneeAgentId === null ? "backlog" : "todo",
-          },
-          { kind: "user" },
-        );
-        yield* systemComment(task.id, `Created by the routine "${routine.title}".`);
-        lastTaskId = task.id;
+        lastTaskId = (yield* createRoutineTask(routine)).id;
       }
       const period = routine.everyDays * 24 * 60 * 60 * 1000;
       let next = Date.parse(routine.nextRunAt);
@@ -1765,6 +1781,8 @@ const make = Effect.gen(function* () {
         return upsertRoutine(command.routine).pipe(Effect.map((routine) => ({ routine })));
       case "routine.delete":
         return deleteRoutine(command.id).pipe(Effect.as({}));
+      case "routine.run":
+        return runRoutineNow(command.id).pipe(Effect.map((task) => ({ task })));
     }
   };
 

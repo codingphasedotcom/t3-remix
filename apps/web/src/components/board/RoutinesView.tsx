@@ -1,8 +1,15 @@
-import type { BoardAgentId, BoardRoutine, BoardRoutineId, BoardSnapshot } from "@t3tools/contracts";
-import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import type {
+  BoardAgentId,
+  BoardRoutine,
+  BoardRoutineId,
+  BoardSnapshot,
+  BoardTaskId,
+} from "@t3tools/contracts";
+import { PencilIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -21,7 +28,13 @@ import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { AgentSelect } from "./AgentSelect";
 import type { RunBoardCommand } from "./BoardPage";
-import { agentById, localDateTimeInput, repeatLabel, ROUTINE_REPEATS } from "./board.logic";
+import {
+  agentById,
+  boardStatusLabel,
+  localDateTimeInput,
+  repeatLabel,
+  ROUTINE_REPEATS,
+} from "./board.logic";
 
 interface RoutineDraft {
   readonly id: BoardRoutineId | null;
@@ -50,6 +63,7 @@ export function RoutinesView(props: {
   readonly snapshot: BoardSnapshot;
   readonly canOperate: boolean;
   readonly runCommand: RunBoardCommand;
+  readonly onOpenCard: (taskId: BoardTaskId) => void;
 }) {
   const { snapshot } = props;
   const company = snapshot.company;
@@ -115,6 +129,8 @@ export function RoutinesView(props: {
         ) : null}
         {snapshot.routines.map((routine) => {
           const assignee = agentById(snapshot.agents, routine.assigneeAgentId);
+          // The task it last created dates the last run; a routine keeps no other history.
+          const lastTask = snapshot.tasks.find((task) => task.id === routine.lastTaskId) ?? null;
           return (
             <div key={routine.id} className="flex items-start gap-3 rounded-lg border bg-card p-3">
               <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -128,7 +144,35 @@ export function RoutinesView(props: {
                     {routine.description}
                   </p>
                 ) : null}
+                <span className="text-xs text-muted-foreground">
+                  {lastTask !== null ? (
+                    <>
+                      Last run {formatRelativeTimeLabel(lastTask.createdAt)}:{" "}
+                      <Button
+                        size="xs"
+                        variant="link"
+                        onClick={() => props.onOpenCard(lastTask.id)}
+                      >
+                        {lastTask.title}
+                      </Button>{" "}
+                      ({boardStatusLabel(lastTask.status)})
+                    </>
+                  ) : routine.lastTaskId !== null ? (
+                    "The task it last created was deleted."
+                  ) : (
+                    "Hasn't run yet."
+                  )}
+                </span>
               </div>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!props.canOperate}
+                onClick={() => void props.runCommand({ type: "routine.run", id: routine.id })}
+              >
+                <PlayIcon />
+                Run now
+              </Button>
               <Switch
                 aria-label={`${routine.enabled ? "Pause" : "Resume"} ${routine.title}`}
                 checked={routine.enabled}

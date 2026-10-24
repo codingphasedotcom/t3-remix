@@ -366,7 +366,12 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           onEditAgent={setAgentDraft}
         />
       ) : tab === "routines" ? (
-        <RoutinesView snapshot={snapshot} canOperate={canOperate} runCommand={runCommand} />
+        <RoutinesView
+          snapshot={snapshot}
+          canOperate={canOperate}
+          runCommand={runCommand}
+          onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
+        />
       ) : (
         <SkillsView snapshot={snapshot} canOperate={canOperate} runCommand={runCommand} />
       )}

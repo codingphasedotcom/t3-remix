@@ -108,7 +108,9 @@ agents report, with each pull request's status. Remove a wrong link with its **Ã
 The **Routines** tab adds a task on a schedule, such as a weekly review for the CEO: pick the
 title, what to do, who does it, how often it repeats, and when it next runs. If the last task a
 routine added is still open when it comes due, it waits for the next turn instead of adding
-another. A routine with nobody assigned adds its task to **Backlog**.
+another. A routine with nobody assigned adds its task to **Backlog**. Each routine shows when it
+last ran and links to the task it created; **Run now** adds its task right away without changing
+the schedule.
 
 ## Spending limits
 
