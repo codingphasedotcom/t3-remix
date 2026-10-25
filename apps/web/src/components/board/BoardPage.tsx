@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { MAX_COMPANY_MEMORY_CHARS } from "@t3tools/contracts";
 import type {
   BoardAgent,
@@ -13,7 +12,6 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import { Navigate, useNavigate } from "@tanstack/react-router";
-import * as Cause from "effect/Cause";
 import {
   Building2Icon,
   EllipsisIcon,
@@ -43,7 +41,6 @@ import { cn } from "../../lib/utils";
 import { boardCommand, boardLive } from "../../state/board";
 import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
-import { useAtomCommand } from "../../state/use-atom-command";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -65,7 +62,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { toastManager } from "../ui/toast";
+import { useRunBoardCommand } from "./useRunBoardCommand";
 import { CloneCompanyDialog } from "./CloneCompanyDialog";
 import {
   CompanyWorkspaceField,
@@ -147,20 +144,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
     connected ? boardLive({ environmentId, input: { companyId: props.company ?? null } }) : null,
   );
   const canOperate = useAtomValue(boardCommand.permissionAtom(environmentId));
-  const command = useAtomCommand(boardCommand, { label: "board update" });
-  const runCommand: RunBoardCommand = async (input) => {
-    const result = await command({ environmentId, input });
-    if (result._tag === "Success") return result.value;
-    if (Cause.hasInterruptsOnly(result.cause)) return null;
-    // The server says why it refused, such as a merge into a folder with uncommitted changes.
-    const error = squashAtomCommandFailure(result);
-    toastManager.add({
-      type: "error",
-      title: "The board couldn't do that",
-      ...(error instanceof Error ? { description: error.message } : {}),
-    });
-    return null;
-  };
+  const runCommand = useRunBoardCommand(environmentId);
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [newCardOpen, setNewCardOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState(false);
@@ -349,20 +333,20 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           </div>
           <OfficeTabs label="Company views">
             <OfficeTab
-              active={tab === "board"}
-              icon={<KanbanSquareIcon />}
-              tone="sky"
-              onClick={() => go({ company: company.id, tab: "board" })}
-            >
-              Board
-            </OfficeTab>
-            <OfficeTab
               active={tab === "dashboard"}
               icon={<LayoutDashboardIcon />}
               tone="emerald"
               onClick={() => go({ company: company.id, tab: "dashboard" })}
             >
               Dashboard
+            </OfficeTab>
+            <OfficeTab
+              active={tab === "board"}
+              icon={<KanbanSquareIcon />}
+              tone="sky"
+              onClick={() => go({ company: company.id, tab: "board" })}
+            >
+              Board
             </OfficeTab>
             <OfficeTab
               active={tab === "org"}

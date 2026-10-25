@@ -40,7 +40,7 @@
     "fmt:check": "vp fmt --check",
     "dist:desktop:artifact": "node scripts/build-desktop-artifact.ts",
     "dist:desktop:dmg": "node scripts/build-desktop-artifact.ts --platform mac --target dmg",
-    "dist:desktop:office": "T3CODE_DESKTOP_APP_ID=com.codingphase.t3office T3CODE_DESKTOP_PRODUCT_NAME='T3 Office' T3CODE_DESKTOP_HOME_DIR=.t3-office T3CODE_DESKTOP_USER_DATA_DIR=t3office node scripts/build-desktop-artifact.ts --platform mac --target dmg",
+    "dist:desktop:remix": "T3CODE_DESKTOP_APP_ID=com.codingphase.t3office T3CODE_DESKTOP_PRODUCT_NAME='T3 Remix' T3CODE_DESKTOP_ICON_PNG=assets/fork/t3-remix-macos-1024.png T3CODE_DESKTOP_HOME_DIR=.t3-office T3CODE_DESKTOP_USER_DATA_DIR=t3office node scripts/build-desktop-artifact.ts --platform mac --target dmg",
     "dist:desktop:dmg:arm64": "node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64",
     "dist:desktop:dmg:x64": "node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch x64",
     "dist:desktop:linux": "node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64",

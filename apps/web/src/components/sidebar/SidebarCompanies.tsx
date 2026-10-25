@@ -9,12 +9,8 @@ import type {
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
-import {
-  Building2Icon,
-  ChevronRightIcon,
-  KanbanSquareIcon,
-  LayoutDashboardIcon,
-} from "lucide-react";
+import { Building2Icon, ChevronRightIcon, LayoutDashboardIcon, PlusIcon } from "lucide-react";
+import { useState } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useThreadRouteRef } from "../../hooks/useThreadRouteTarget";
@@ -28,6 +24,8 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { resolveThreadStatusPill } from "../Sidebar.logic";
 import { ThreadStatusLabel } from "../ThreadStatusIndicators";
 import { AgentAvatar } from "../board/AgentAvatar";
+import { CompanyDialog } from "../board/CompanyDialog";
+import { useRunBoardCommand } from "../board/useRunBoardCommand";
 import { employeeThreadTitle, orgChartRows } from "../board/board.logic";
 import { Button } from "../ui/button";
 import { SidebarGroup, SidebarMenuSubButton, useSidebar } from "../ui/sidebar";
@@ -87,6 +85,9 @@ export function SidebarCompanies() {
 
 function CompaniesForEnvironment(props: { readonly environmentId: EnvironmentId }) {
   const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const [creating, setCreating] = useState(false);
+  const runCommand = useRunBoardCommand(props.environmentId);
   const environment = useEnvironment(props.environmentId);
   const connected =
     environment?.connection.phase === "connected" && environment.serverConfig !== null;
@@ -96,6 +97,19 @@ function CompaniesForEnvironment(props: { readonly environmentId: EnvironmentId 
       : null,
   ).data?.companies;
   const collapsed = useCollapsed();
+  const companyDialog = (
+    <CompanyDialog
+      open={creating}
+      onOpenChange={setCreating}
+      environmentId={props.environmentId}
+      runCommand={runCommand}
+      onCreated={(companyId) => {
+        setCreating(false);
+        if (isMobile) setOpenMobile(false);
+        void navigate({ to: "/board", search: { company: companyId, tab: "org" } });
+      }}
+    />
+  );
 
   if (companies === undefined) {
     return <SidebarEmpty text={connected ? "Loading companies…" : "Environment offline."} />;
@@ -105,17 +119,37 @@ function CompaniesForEnvironment(props: { readonly environmentId: EnvironmentId 
       <SidebarGroup className="flex-1">
         <div className="flex flex-col items-start gap-2 px-2 py-3 text-sm text-muted-foreground">
           <span>No companies yet. A company has a CEO and employees who work your tasks.</span>
-          <Button size="sm" variant="outline" onClick={() => void navigate({ to: "/board" })}>
+          <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
             <Building2Icon />
             Create a company
           </Button>
         </div>
+        {companyDialog}
       </SidebarGroup>
     );
   }
   return (
-    <SidebarGroup className="flex-1" role="tree" aria-label="Companies">
-      <div className="flex flex-col gap-1">
+    <SidebarGroup className="flex-1">
+      <div className="flex items-center justify-between ps-2 pe-1 pb-1">
+        <span className="text-xs font-medium text-sidebar-muted-foreground">Companies</span>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="New company"
+                onClick={() => setCreating(true)}
+              />
+            }
+          >
+            <PlusIcon />
+          </TooltipTrigger>
+          <TooltipPopup>New company</TooltipPopup>
+        </Tooltip>
+      </div>
+      {companyDialog}
+      <div role="tree" aria-label="Companies" className="flex flex-col gap-1">
         {companies.map((company) => (
           <CompanyNode
             key={company.id}
@@ -137,9 +171,9 @@ function CompanyNode(props: {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const open = !props.collapsed.isCollapsed(props.company.id);
-  const openBoard = (companyId: BoardCompanyId, tab?: "dashboard") => {
+  const openDashboard = (companyId: BoardCompanyId) => {
     if (isMobile) setOpenMobile(false);
-    void navigate({ to: "/board", search: { company: companyId, ...(tab ? { tab } : {}) } });
+    void navigate({ to: "/board", search: { company: companyId, tab: "dashboard" } });
   };
   return (
     <div role="treeitem" aria-expanded={open} aria-selected={false}>
@@ -167,29 +201,13 @@ function CompanyNode(props: {
         <Button
           size="xs"
           variant="outline"
-          aria-label={`Open ${props.company.name}'s board`}
+          aria-label={`Open ${props.company.name}'s dashboard`}
           className="shrink-0"
-          onClick={() => openBoard(props.company.id)}
+          onClick={() => openDashboard(props.company.id)}
         >
-          <KanbanSquareIcon />
-          Board
+          <LayoutDashboardIcon />
+          Dashboard
         </Button>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="outline"
-                aria-label={`Open ${props.company.name}'s dashboard`}
-                className="shrink-0"
-                onClick={() => openBoard(props.company.id, "dashboard")}
-              />
-            }
-          >
-            <LayoutDashboardIcon />
-          </TooltipTrigger>
-          <TooltipPopup>Dashboard</TooltipPopup>
-        </Tooltip>
       </div>
       {open ? (
         <CompanyEmployees
