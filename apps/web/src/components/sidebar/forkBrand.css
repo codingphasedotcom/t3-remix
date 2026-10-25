@@ -1,0 +1,5 @@
+/* The fork's brand colors, kept out of index.css so upstream merges never touch them. */
+[data-fork-brand] {
+  background: #aefb2a;
+  color: #000;
+}

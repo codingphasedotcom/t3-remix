@@ -226,8 +226,8 @@ the environment or the repository's `.env.local`): `T3CODE_DESKTOP_APP_ID`,
 `T3CODE_DESKTOP_PRODUCT_NAME`, `T3CODE_DESKTOP_HOME_DIR` (the data folder in your home
 directory), and `T3CODE_DESKTOP_USER_DATA_DIR` (the Electron profile folder);
 `T3CODE_DESKTOP_ICON_PNG` swaps in a 1024px app icon. `vp run dist:desktop:remix` builds this
-fork as T3 Remix with data in `~/.t3-office`; its app ID and folders keep the names from when it
-was called T3 Office, so renaming it kept every company and setting. Leave
+fork as T3 Remix with data in `~/.t3-remix`; its app ID keeps the name from when it was called
+T3 Office, so macOS treats the renamed app as the same one. Leave
 `GITHUB_REPOSITORY` unset so the build has no update feed and never replaces itself with
 upstream. The `t3code://` link scheme stays shared, so an outside `t3code://` link may open
 either app.
