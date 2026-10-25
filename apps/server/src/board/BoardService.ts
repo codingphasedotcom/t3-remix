@@ -18,8 +18,10 @@ import {
   type BoardComment,
   type BoardCommentAddInput,
   type BoardCompany,
+  type BoardCompanyCloneInput,
   type BoardCompanyCreateInput,
   type BoardCompanyUpdateInput,
+  type BoardCompanyWorkspace,
   type BoardDashboard,
   type BoardDepartment,
   type BoardHire,
@@ -468,19 +470,25 @@ const make = Effect.gen(function* () {
     } satisfies BoardAssignment;
   });
 
+  /** The project a company calls home, creating its folder when it asks for a new one. */
+  const resolveWorkspace = Effect.fn("BoardService.resolveWorkspace")(function* (
+    workspace: BoardCompanyWorkspace,
+  ) {
+    if (workspace.type === "existing") return workspace.projectId;
+    const created = yield* projectFolders
+      .createNamedProject({ name: workspace.folderName })
+      .pipe(
+        Effect.mapError((cause) =>
+          boardError("Could not create the company's project folder.", cause),
+        ),
+      );
+    return created.projectId;
+  });
+
   const createCompany = Effect.fn("BoardService.createCompany")(function* (
     input: BoardCompanyCreateInput,
   ) {
-    const projectId: ProjectId =
-      input.workspace.type === "existing"
-        ? input.workspace.projectId
-        : (yield* projectFolders
-            .createNamedProject({ name: input.workspace.folderName })
-            .pipe(
-              Effect.mapError((cause) =>
-                boardError("Could not create the company's project folder.", cause),
-              ),
-            )).projectId;
+    const projectId = yield* resolveWorkspace(input.workspace);
     const at = yield* store.now;
     const companyId = BoardCompanyId.make(yield* store.newId("board-company"));
     const ceoId = BoardAgentId.make(yield* store.newId("board-agent"));
@@ -527,6 +535,11 @@ const make = Effect.gen(function* () {
     input: BoardCompanyUpdateInput,
   ) {
     const current = yield* requireCompany(input.id);
+    if (input.memory !== undefined && input.memory.length > MAX_COMPANY_MEMORY_CHARS) {
+      return yield* boardError(
+        `Company memory is limited to ${MAX_COMPANY_MEMORY_CHARS} characters.`,
+      );
+    }
     const next: BoardCompany = {
       ...current,
       ...(input.name === undefined ? {} : { name: input.name }),
@@ -535,16 +548,102 @@ const make = Effect.gen(function* () {
       ...(input.departments === undefined
         ? {}
         : { departments: yield* nextDepartments(current, input.departments) }),
+      // Last, so a rejected change above never leaves a new project folder behind.
+      ...(input.workspace === undefined
+        ? {}
+        : { projectId: yield* resolveWorkspace(input.workspace) }),
       updatedAt: yield* store.now,
     };
-    if (next.memory.length > MAX_COMPANY_MEMORY_CHARS) {
-      return yield* boardError(
-        `Company memory is limited to ${MAX_COMPANY_MEMORY_CHARS} characters.`,
-      );
-    }
     yield* store.updateCompany(next);
     yield* notify(null);
     return next;
+  });
+
+  const cloneCompany = Effect.fn("BoardService.cloneCompany")(function* (
+    input: BoardCompanyCloneInput,
+  ) {
+    const source = yield* requireCompany(input.sourceCompanyId);
+    const agents = yield* store.listAgents(source.id);
+    const skills = yield* store.listSkills(source.id);
+    const settings = yield* store.getSettings(source.id);
+    const projectId = yield* resolveWorkspace(input.workspace);
+    const at = yield* store.now;
+    const memory = (value: string) => (input.includeMemory === true ? value : "");
+    // Fresh ids for everything, mapped from the originals so the copy points only at itself.
+    const freshIds = <Id extends string>(ids: ReadonlyArray<Id>, prefix: string) =>
+      Effect.forEach(ids, (id) =>
+        store.newId(prefix).pipe(Effect.map((fresh) => [id, fresh] as const)),
+      ).pipe(Effect.map((pairs) => new Map<string, string>(pairs)));
+    const departmentIds = yield* freshIds(
+      source.departments.map((department) => department.id),
+      "board-department",
+    );
+    const skillIds = yield* freshIds(
+      skills.map((skill) => skill.id),
+      "board-skill",
+    );
+    const agentIds = yield* freshIds(
+      agents.map((agent) => agent.id),
+      "board-agent",
+    );
+    const departments = source.departments.map((department): BoardDepartment => ({
+      id: BoardDepartmentId.make(departmentIds.get(department.id)!),
+      name: department.name,
+    }));
+    const company: BoardCompany = {
+      id: BoardCompanyId.make(yield* store.newId("board-company")),
+      name: input.name,
+      mission: input.mission ?? source.mission,
+      departments,
+      memory: memory(source.memory),
+      projectId,
+      ceoAgentId:
+        source.ceoAgentId === null
+          ? null
+          : BoardAgentId.make(agentIds.get(source.ceoAgentId) ?? source.ceoAgentId),
+      createdAt: at,
+      updatedAt: at,
+    };
+    yield* store.insertCompany(company);
+    yield* Effect.forEach(
+      skills,
+      (skill) =>
+        store.upsertSkill({
+          ...skill,
+          id: BoardSkillId.make(skillIds.get(skill.id)!),
+          companyId: company.id,
+          createdAt: at,
+          updatedAt: at,
+        }),
+      { discard: true },
+    );
+    yield* Effect.forEach(
+      agents,
+      (agent) => {
+        const department = departmentIds.get(agent.departmentId);
+        const manager =
+          agent.reportsToAgentId === null ? undefined : agentIds.get(agent.reportsToAgentId);
+        return store.upsertAgent({
+          ...agent,
+          id: BoardAgentId.make(agentIds.get(agent.id)!),
+          companyId: company.id,
+          departmentId:
+            department === undefined ? departments[0]!.id : BoardDepartmentId.make(department),
+          reportsToAgentId: manager === undefined ? null : BoardAgentId.make(manager),
+          skillIds: agent.skillIds.flatMap((id) => {
+            const fresh = skillIds.get(id);
+            return fresh === undefined ? [] : [BoardSkillId.make(fresh)];
+          }),
+          memory: memory(agent.memory),
+          createdAt: at,
+          updatedAt: at,
+        });
+      },
+      { discard: true },
+    );
+    yield* store.upsertSettings({ ...settings, companyId: company.id });
+    yield* notify(null);
+    return company;
   });
 
   const nextDepartments = Effect.fn("BoardService.nextDepartments")(function* (
@@ -1964,6 +2063,8 @@ const make = Effect.gen(function* () {
         return updateCompany(command.company).pipe(Effect.map((company) => ({ company })));
       case "company.delete":
         return deleteCompany(command.id).pipe(Effect.as({}));
+      case "company.clone":
+        return cloneCompany(command.company).pipe(Effect.map((company) => ({ company })));
       case "skill.upsert":
         return upsertSkill(command.skill).pipe(Effect.map((skill) => ({ skill })));
       case "skill.delete":

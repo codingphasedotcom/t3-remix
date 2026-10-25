@@ -583,10 +583,12 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
 
       // Nobody is working the task, so its owner is started just to answer, in a short prompt.
       yield* board.addComment({ taskId: task!.id, body: "Only merge once it is verified." }, user);
+      // The run is recorded before its thread launches; the thread id lands only after the launch.
       yield* boardWhere(
         board,
         company.id,
-        (snapshot) => taskNow(snapshot)?.activeRunKind === "reply",
+        (snapshot) =>
+          taskNow(snapshot)?.activeRunKind === "reply" && taskNow(snapshot)?.threadId !== null,
       );
       const [reply] = yield* Ref.get(harness.launches);
       const replyPrompt = reply?.initialMessage?.text ?? "";
@@ -939,6 +941,180 @@ it.effect("creates a project folder for a company that asks for a new workspace"
       );
       assert.equal(company?.projectId, ProjectId.make("project-globex"));
       assert.equal(company?.name, "Globex");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("moves a company to another project without moving tasks that already started", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { task: before } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Audit the site", assigneeAgentId: lead.id },
+        },
+        user,
+      );
+      const home = ProjectId.make("project-home");
+      const { company: moved } = yield* board.runCommand(
+        {
+          type: "company.update",
+          company: { id: company.id, workspace: { type: "existing", projectId: home } },
+        },
+        user,
+      );
+      assert.equal(moved?.projectId, home);
+      const { task: after } = yield* board.runCommand(
+        { type: "task.create", task: { companyId: company.id, title: "Fix the footer" } },
+        user,
+      );
+      assert.equal(after?.projectId, home);
+      const snapshot = yield* boardWhere(board, company.id, () => true);
+      assert.equal(snapshot.tasks.find((task) => task.id === before?.id)?.projectId, projectId);
+
+      const { company: fresh } = yield* board.runCommand(
+        {
+          type: "company.update",
+          company: { id: company.id, workspace: { type: "new", folderName: "acme-home" } },
+        },
+        user,
+      );
+      assert.equal(fresh?.projectId, ProjectId.make("project-acme-home"));
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("clones a company's team, skills, and settings but none of its work", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId, lead, engineer } = yield* createCompany(board);
+      const { skill } = yield* board.runCommand(
+        {
+          type: "skill.upsert",
+          skill: {
+            companyId: company.id,
+            name: "Testing",
+            description: "",
+            instructions: "Test it.",
+          },
+        },
+        user,
+      );
+      yield* board.runCommand(
+        {
+          type: "agent.upsert",
+          agent: {
+            id: engineer.id,
+            companyId: company.id,
+            name: engineer.name,
+            title: engineer.title,
+            reportsToAgentId: lead.id,
+            skillIds: [skill!.id],
+            instructions: "Write tests.",
+            memory: "Run the tests first.",
+            modelSelection: model,
+            runtimeMode: "full-access",
+          },
+        },
+        user,
+      );
+      yield* board.runCommand(
+        { type: "company.update", company: { id: company.id, memory: "Use pnpm." } },
+        user,
+      );
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 3 } },
+        user,
+      );
+      yield* board.runCommand(
+        { type: "task.create", task: { companyId: company.id, title: "Ship the widget" } },
+        user,
+      );
+
+      const { company: clone } = yield* board.runCommand(
+        {
+          type: "company.clone",
+          company: {
+            sourceCompanyId: company.id,
+            name: "Acme Two",
+            workspace: { type: "new", folderName: "acme-two" },
+          },
+        },
+        user,
+      );
+      assert.isDefined(clone);
+      assert.notEqual(clone!.id, company.id);
+      assert.equal(clone!.name, "Acme Two");
+      assert.equal(clone!.mission, company.mission);
+      assert.equal(clone!.projectId, ProjectId.make("project-acme-two"));
+      assert.equal(clone!.memory, "");
+      assert.deepEqual(
+        clone!.departments.map((department) => department.name),
+        company.departments.map((department) => department.name),
+      );
+      assert.isFalse(
+        clone!.departments.some((department) =>
+          company.departments.some((original) => original.id === department.id),
+        ),
+      );
+
+      const copied = yield* boardWhere(board, clone!.id, () => true);
+      const byName = (name: string) => copied.agents.find((agent) => agent.name === name);
+      const ceo = byName("Ada");
+      const cto = byName("Lead");
+      const coder = byName("Engineer");
+      assert.deepEqual(copied.agents.map((agent) => agent.name).toSorted(), [
+        "Ada",
+        "Engineer",
+        "Lead",
+      ]);
+      assert.equal(clone!.ceoAgentId, ceo?.id);
+      assert.notEqual(ceo?.id, ceoId);
+      assert.equal(cto?.reportsToAgentId, ceo?.id);
+      assert.equal(coder?.reportsToAgentId, cto?.id);
+      assert.equal(coder?.instructions, "Write tests.");
+      assert.equal(coder?.memory, "");
+      assert.isTrue(
+        copied.agents.every((agent) =>
+          clone!.departments.some((department) => department.id === agent.departmentId),
+        ),
+      );
+      assert.deepEqual(
+        copied.skills.map((copiedSkill) => copiedSkill.name),
+        ["Testing"],
+      );
+      assert.notEqual(copied.skills[0]?.id, skill!.id);
+      assert.deepEqual(coder?.skillIds, [copied.skills[0]!.id]);
+      assert.equal(copied.settings?.maxConcurrentRuns, 3);
+      assert.lengthOf(copied.tasks, 0);
+
+      const original = yield* boardWhere(board, company.id, () => true);
+      assert.lengthOf(original.agents, 3);
+      assert.lengthOf(original.tasks, 1);
+
+      const { company: withMemory } = yield* board.runCommand(
+        {
+          type: "company.clone",
+          company: {
+            sourceCompanyId: company.id,
+            name: "Acme Three",
+            workspace: { type: "existing", projectId },
+            includeMemory: true,
+          },
+        },
+        user,
+      );
+      assert.equal(withMemory?.memory, "Use pnpm.");
+      const remembered = yield* boardWhere(board, withMemory!.id, () => true);
+      assert.equal(
+        remembered.agents.find((agent) => agent.name === "Engineer")?.memory,
+        "Run the tests first.",
+      );
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

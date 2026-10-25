@@ -4,13 +4,11 @@ import type {
   BoardSkillId,
   EnvironmentId,
   ModelSelection,
-  ProjectId,
   RuntimeMode,
 } from "@t3tools/contracts";
 import { Building2Icon } from "lucide-react";
 import { useState } from "react";
 
-import { useProjects } from "../../state/entities";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -24,8 +22,12 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
+import {
+  CompanyWorkspaceField,
+  workspaceInput,
+  type WorkspaceChoice,
+} from "./CompanyWorkspaceField";
 import { ModelField, PermissionsField, useModelChoices } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
 import { FACES, unusedFaceKey } from "./faces";
@@ -37,16 +39,6 @@ import {
   departmentNamed,
 } from "./board.logic";
 import { OfficeFieldGroup, OfficeHeading } from "./OfficeSurface";
-
-function folderNameFor(name: string): string {
-  return (
-    name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "company"
-  );
-}
 
 export function CompanyDialog(props: {
   readonly open: boolean;
@@ -70,13 +62,9 @@ function CompanyForm(props: {
   readonly runCommand: RunBoardCommand;
   readonly onCreated: (companyId: BoardCompanyId) => void;
 }) {
-  const projects = useProjects().filter(
-    (project) => project.environmentId === props.environmentId && project.isScratch !== true,
-  );
   const [name, setName] = useState("");
   const [mission, setMission] = useState("");
-  const [workspace, setWorkspace] = useState<"new" | "existing">("new");
-  const [projectId, setProjectId] = useState<ProjectId | null>(projects[0]?.id ?? null);
+  const [workspace, setWorkspace] = useState<WorkspaceChoice>({ type: "new" });
   const [ceoName, setCeoName] = useState("Morgan");
   const [model, setModel] = useState<ModelSelection | null>(null);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("full-access");
@@ -84,27 +72,24 @@ function CompanyForm(props: {
   const [progress, setProgress] = useState<string | null>(null);
   const choices = useModelChoices(props.environmentId, null);
   const selection = model ?? choices.defaultModel;
-  const project = projects.find((candidate) => candidate.id === projectId) ?? null;
+  const home = workspaceInput(workspace, name);
   const template = COMPANY_TEMPLATES.find((candidate) => candidate.id === templateId);
   const canCreate =
     name.trim().length > 0 &&
     ceoName.trim().length > 0 &&
     selection !== null &&
-    (workspace === "new" || project !== null) &&
+    home !== null &&
     progress === null;
 
   const create = async () => {
-    if (selection === null) return;
+    if (selection === null || home === null) return;
     setProgress("Creating the company…");
     const created = await props.runCommand({
       type: "company.create",
       company: {
         name: name.trim(),
         mission: mission.trim(),
-        workspace:
-          workspace === "new" || project === null
-            ? { type: "new", folderName: folderNameFor(name) }
-            : { type: "existing", projectId: project.id },
+        workspace: home,
         ceo: {
           name: ceoName.trim(),
           avatar: FACES[0]?.key ?? "",
@@ -216,47 +201,12 @@ function CompanyForm(props: {
             </div>
           </OfficeFieldGroup>
           <OfficeFieldGroup label="Workspace" tone="emerald">
-            <div className="flex flex-col gap-2">
-              <Label>Where the team works</Label>
-              <div className="flex flex-wrap gap-1">
-                <Button
-                  size="sm"
-                  variant={workspace === "new" ? "outline" : "ghost"}
-                  onClick={() => setWorkspace("new")}
-                >
-                  New project folder
-                </Button>
-                <Button
-                  size="sm"
-                  variant={workspace === "existing" ? "outline" : "ghost"}
-                  disabled={projects.length === 0}
-                  onClick={() => setWorkspace("existing")}
-                >
-                  Existing project
-                </Button>
-              </div>
-              {workspace === "new" ? (
-                <span className="text-xs text-muted-foreground">
-                  Creates a project folder named “{folderNameFor(name)}”.
-                </span>
-              ) : (
-                <Select
-                  value={projectId ?? ""}
-                  onValueChange={(value) => setProjectId(value as ProjectId)}
-                >
-                  <SelectTrigger size="sm">
-                    <SelectValue>{project?.title ?? "Choose a project"}</SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {projects.map((candidate) => (
-                      <SelectItem key={candidate.id} value={candidate.id} label={candidate.title}>
-                        {candidate.title}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              )}
-            </div>
+            <CompanyWorkspaceField
+              environmentId={props.environmentId}
+              value={workspace}
+              onChange={setWorkspace}
+              companyName={name}
+            />
           </OfficeFieldGroup>
           <OfficeFieldGroup label="Model" tone="sky">
             <div className="grid gap-3 sm:grid-cols-2">

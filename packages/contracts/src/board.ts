@@ -436,7 +436,8 @@ export const BoardCompanyWorkspace = Schema.Union([
   Schema.Struct({ type: Schema.Literal("existing"), projectId: ProjectId }),
   Schema.Struct({ type: Schema.Literal("new"), folderName: TrimmedNonEmptyString }),
 ]).annotate({
-  description: "Where the company's agents work: an existing project, or a new project folder.",
+  description:
+    "The company's home project, where its agents work: an existing project, or a new project folder.",
 });
 export type BoardCompanyWorkspace = typeof BoardCompanyWorkspace.Type;
 
@@ -467,8 +468,30 @@ export const BoardCompanyUpdateInput = Schema.Struct({
     description:
       "Every department in order; entries without an id are new. A department with people in it cannot be removed.",
   }),
+  workspace: Schema.optional(BoardCompanyWorkspace).annotate({
+    description:
+      "Moves the company to another project. Tasks that already started stay where they are.",
+  }),
 });
 export type BoardCompanyUpdateInput = typeof BoardCompanyUpdateInput.Type;
+
+/**
+ * A new company with the same team: departments, skills, employees, who reports to whom, and
+ * board settings. Tasks, routines, hire requests, and run history stay with the original.
+ */
+export const BoardCompanyCloneInput = Schema.Struct({
+  sourceCompanyId: BoardCompanyId,
+  name: TrimmedNonEmptyString,
+  mission: Schema.optional(Schema.String).annotate({
+    description: "Defaults to the original company's mission.",
+  }),
+  workspace: BoardCompanyWorkspace,
+  includeMemory: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Also copy what the company and each employee remember. Off by default, since lessons usually belong to the original business.",
+  }),
+});
+export type BoardCompanyCloneInput = typeof BoardCompanyCloneInput.Type;
 
 export const BoardSkillUpsertInput = Schema.Struct({
   id: Schema.optional(BoardSkillId),
@@ -570,6 +593,7 @@ export const BoardCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("company.create"), company: BoardCompanyCreateInput }),
   Schema.Struct({ type: Schema.Literal("company.update"), company: BoardCompanyUpdateInput }),
   Schema.Struct({ type: Schema.Literal("company.delete"), id: BoardCompanyId }),
+  Schema.Struct({ type: Schema.Literal("company.clone"), company: BoardCompanyCloneInput }),
   Schema.Struct({ type: Schema.Literal("skill.upsert"), skill: BoardSkillUpsertInput }),
   Schema.Struct({ type: Schema.Literal("skill.delete"), id: BoardSkillId }),
   Schema.Struct({ type: Schema.Literal("agent.upsert"), agent: BoardAgentUpsertInput }),

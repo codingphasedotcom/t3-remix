@@ -18,6 +18,16 @@ CTO, two engineers, and QA with starter skills; **Just a CEO** lets you build th
 yourself. Each company has its own board, org chart, and skills; switch companies from the
 menu at the top left.
 
+The company's project is its home: agents work in that folder, and the board shows it beside the
+mission. To make an existing repository the home, add its folder as a project, then pick it under
+**Edit company** > **Workspace**. New tasks start in the new project; tasks that already started
+stay where they are.
+
+**Clone company** in the company menu starts a new company with the same team: departments,
+skills, every employee and who they report to, and the board settings. Tasks, routines, and
+history stay with the original. Turn on **Copy what they remember** to bring the company's and
+employees' memory along too.
+
 ## Build the org chart
 
 **Org chart** draws the company top-down, from the CEO through each manager to their reports,

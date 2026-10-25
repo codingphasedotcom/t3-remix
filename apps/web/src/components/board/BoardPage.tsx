@@ -17,6 +17,7 @@ import * as Cause from "effect/Cause";
 import {
   Building2Icon,
   EllipsisIcon,
+  FolderIcon,
   GaugeIcon,
   GitBranchIcon,
   KanbanSquareIcon,
@@ -63,7 +64,15 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarInset } from "../ui/sidebar";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { CloneCompanyDialog } from "./CloneCompanyDialog";
+import {
+  CompanyWorkspaceField,
+  useCompanyProjects,
+  workspaceInput,
+  type WorkspaceChoice,
+} from "./CompanyWorkspaceField";
 import { AgentName } from "./AgentAvatar";
 import { AgentDialog, MemoryCount, type AgentDraft } from "./AgentDialog";
 import { BoardCardSheet } from "./BoardCardSheet";
@@ -155,7 +164,9 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [newCardOpen, setNewCardOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState(false);
+  const [cloningCompany, setCloningCompany] = useState(false);
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
+  const projects = useCompanyProjects(environmentId);
   const snapshot = boardQuery.data;
   const tab = props.tab ?? "board";
 
@@ -258,6 +269,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   const company = snapshot.company;
   const pendingHires = snapshot.hires.filter((hire) => hire.status === "pending").length;
   const ceo = agentById(snapshot.agents, company.ceoAgentId);
+  const home = projects.find((project) => project.id === company.projectId) ?? null;
   const openTask =
     props.card === undefined
       ? null
@@ -321,6 +333,9 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               <MenuPopup align="start">
                 <MenuItem disabled={!canOperate} onClick={() => setEditingCompany(true)}>
                   Edit company
+                </MenuItem>
+                <MenuItem disabled={!canOperate} onClick={() => setCloningCompany(true)}>
+                  Clone company
                 </MenuItem>
                 <MenuItem
                   variant="destructive"
@@ -393,7 +408,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
 
       {tab === "board" ? (
         <>
-          <MissionBanner company={company} ceo={ceo ?? null} />
+          <MissionBanner company={company} ceo={ceo ?? null} home={home} />
           <CompanyLimitBanner snapshot={snapshot} />
           <BoardColumns
             snapshot={snapshot}
@@ -435,7 +450,19 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         snapshot={snapshot}
         runCommand={runCommand}
       />
+      <CloneCompanyDialog
+        open={cloningCompany}
+        onOpenChange={setCloningCompany}
+        environmentId={environmentId}
+        snapshot={snapshot}
+        runCommand={runCommand}
+        onCloned={(companyId) => {
+          setCloningCompany(false);
+          go({ company: companyId, tab: "org" });
+        }}
+      />
       <EditCompanyDialog
+        environmentId={environmentId}
         company={editingCompany ? company : null}
         snapshot={snapshot}
         agents={snapshot.agents}
@@ -482,8 +509,14 @@ function CompanyLimitBanner(props: { readonly snapshot: BoardSnapshot }) {
   );
 }
 
-function MissionBanner(props: { readonly company: BoardCompany; readonly ceo: BoardAgent | null }) {
-  if (props.company.mission.trim().length === 0 && props.ceo === null) return null;
+function MissionBanner(props: {
+  readonly company: BoardCompany;
+  readonly ceo: BoardAgent | null;
+  readonly home: { readonly title: string; readonly workspaceRoot: string } | null;
+}) {
+  if (props.company.mission.trim().length === 0 && props.ceo === null && props.home === null) {
+    return null;
+  }
   return (
     <div
       className={cn(
@@ -497,8 +530,28 @@ function MissionBanner(props: { readonly company: BoardCompany; readonly ceo: Bo
           <span className="min-w-0 truncate text-foreground">{props.company.mission}</span>
         </>
       ) : null}
+      {props.home !== null ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="ms-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" />
+            }
+          >
+            <OfficeIconTile tone="emerald">
+              <FolderIcon />
+            </OfficeIconTile>
+            <span className="font-medium text-foreground">{props.home.title}</span>
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">{props.home.workspaceRoot}</TooltipPopup>
+        </Tooltip>
+      ) : null}
       {props.ceo !== null ? (
-        <span className="ms-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground">
+        <span
+          className={cn(
+            "shrink-0 text-xs whitespace-nowrap text-muted-foreground",
+            props.home === null && "ms-auto",
+          )}
+        >
           {"New tasks go to "}
           <AgentName agent={props.ceo} className="font-medium text-foreground" />
           {", the CEO"}
@@ -530,6 +583,7 @@ function BoardMessage(props: {
 }
 
 function EditCompanyDialog(props: {
+  readonly environmentId: EnvironmentId;
   readonly company: BoardCompany | null;
   readonly snapshot: BoardSnapshot;
   readonly agents: ReadonlyArray<BoardAgent>;
@@ -557,6 +611,7 @@ interface DepartmentDraft {
 }
 
 function EditCompanyForm(props: {
+  readonly environmentId: EnvironmentId;
   readonly company: BoardCompany;
   readonly snapshot: BoardSnapshot;
   readonly agents: ReadonlyArray<BoardAgent>;
@@ -573,6 +628,17 @@ function EditCompanyForm(props: {
   const savedLimit = props.snapshot.settings?.monthlyTokenLimit ?? null;
   const [tokenLimit, setTokenLimit] = useState(savedLimit);
   const [limitValid, setLimitValid] = useState(true);
+  // Null keeps the current project; a choice moves the company once saved.
+  const [workspace, setWorkspace] = useState<WorkspaceChoice | null>(null);
+  const home =
+    useCompanyProjects(props.environmentId).find(
+      (project) => project.id === props.company.projectId,
+    ) ?? null;
+  const nextHome = workspace === null ? undefined : workspaceInput(workspace, name);
+  const moves =
+    nextHome !== undefined &&
+    nextHome !== null &&
+    !(nextHome.type === "existing" && nextHome.projectId === props.company.projectId);
   const save = async () => {
     if (tokenLimit !== savedLimit) {
       const limited = await props.runCommand({
@@ -593,6 +659,7 @@ function EditCompanyForm(props: {
             ? { name: department.name.trim() }
             : { id: department.id, name: department.name.trim() },
         ),
+        ...(moves && nextHome !== undefined && nextHome !== null ? { workspace: nextHome } : {}),
       },
     });
     if (saved !== null) props.onClose();
@@ -609,6 +676,7 @@ function EditCompanyForm(props: {
   };
   const canSave =
     limitValid &&
+    nextHome !== null &&
     name.trim().length > 0 &&
     memory.length <= MAX_COMPANY_MEMORY_CHARS &&
     departments.length > 0 &&
@@ -642,6 +710,56 @@ function EditCompanyForm(props: {
                 onChange={(event) => setMission(event.target.value)}
               />
             </div>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup
+            label="Workspace"
+            tone="emerald"
+            action={
+              workspace === null ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() =>
+                    setWorkspace({ type: "existing", projectId: props.company.projectId })
+                  }
+                >
+                  Change
+                </Button>
+              ) : (
+                <Button size="xs" variant="ghost" onClick={() => setWorkspace(null)}>
+                  Keep current
+                </Button>
+              )
+            }
+          >
+            {workspace === null ? (
+              <div className={cn(OFFICE_CARD, "flex-row items-center gap-3 rounded-xl p-3")}>
+                <OfficeIconTile tone="emerald">
+                  <FolderIcon />
+                </OfficeIconTile>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-sm font-medium">
+                    {home?.title ?? "Project not found"}
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {home?.workspaceRoot ?? "Choose a project for this company."}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <>
+                <CompanyWorkspaceField
+                  environmentId={props.environmentId}
+                  value={workspace}
+                  onChange={setWorkspace}
+                  companyName={name}
+                />
+                <span className="text-xs text-muted-foreground">
+                  New tasks start in the new project. Tasks that already started stay where they
+                  are.
+                </span>
+              </>
+            )}
           </OfficeFieldGroup>
           <OfficeFieldGroup
             label="Departments"
