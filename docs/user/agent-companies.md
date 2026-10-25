@@ -70,7 +70,7 @@ the ones that apply.
 - Work a manager delegates comes back to that manager for review: **Done** approves it;
   **To do** sends it back with requested changes, and the employee continues in its own
   thread.
-- A task with no reviewer stops in **Review** for you. **Backlog** tasks never start on their
+- A task with no reviewer stops in **Review** for you. Tasks in **Ideas** never start on their
   own.
 - When a subtask gets stuck in **Blocked**, its manager is started to unblock it: it answers the
   question, reassigns the subtask, or narrows it, and asks you on its own task when only you can
@@ -125,7 +125,7 @@ When the work lands, by a merge here or once its pull request is merged, a task 
 The **Routines** tab adds a task on a schedule, such as a weekly review for the CEO: pick the
 title, what to do, who does it, how often it repeats, and when it next runs. If the last task a
 routine added is still open when it comes due, it waits for the next turn instead of adding
-another. A routine with nobody assigned adds its task to **Backlog**. Each routine shows when it
+another. A routine with nobody assigned adds its task to **Ideas**. Each routine shows when it
 last ran and links to the task it created; **Run now** adds its task right away without changing
 the schedule.
 

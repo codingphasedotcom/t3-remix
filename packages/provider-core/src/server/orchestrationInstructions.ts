@@ -43,7 +43,7 @@ Users can run AI companies: each has a CEO, employees in an org chart, a skill l
 
 - \`board_list_agents\` shows the org chart, the skills library, which task and role (work or review) started this thread, and who you may assign work to.
 - \`board_list_tasks\` and \`board_read_task\` read tasks, comments, parents, and subtasks. \`board_read_task\` without \`taskId\` reads your own task.
-- \`board_create_task\` adds a task; set \`parentTaskId\` to split your task. You may assign only yourself and people beneath you in the org chart (a CEO may assign anyone), and you review what you delegate. Use "backlog" for work a human should approve before it starts.
+- \`board_create_task\` adds a task; set \`parentTaskId\` to split your task. You may assign only yourself and people beneath you in the org chart (a CEO may assign anyone), and you review what you delegate. Use "backlog" (the Ideas column) for work a human should approve before it starts.
 - \`board_update_task\` moves tasks; \`board_add_comment\` records progress, decisions, and review findings.
 - \`board_request_hire\` asks the humans to add an agent; it exists only after they approve.
 - \`board_link_work\` records the pull requests, branches, and previews a task produced, and their status; \`board_read_skill\` reads a skill's full instructions.

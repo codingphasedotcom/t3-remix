@@ -154,7 +154,7 @@ export function RoutinesView(props: {
                   <span className="text-base leading-snug font-medium">{routine.title}</span>
                   <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
                     {repeatLabel(routine.everyDays)} ·{" "}
-                    {assignee !== null ? <AgentName agent={assignee} /> : "Backlog, unassigned"} ·
+                    {assignee !== null ? <AgentName agent={assignee} /> : "Ideas, unassigned"} ·
                     next {new Date(routine.nextRunAt).toLocaleString()}
                   </span>
                   {routine.description ? (
@@ -316,7 +316,7 @@ function RoutineForm(props: {
                 <AgentSelect
                   agents={props.snapshot.agents}
                   value={draft.assigneeAgentId}
-                  noneLabel="Nobody (backlog)"
+                  noneLabel="Nobody (Ideas)"
                   onChange={(assigneeAgentId) => setDraft({ ...draft, assigneeAgentId })}
                 />
               </div>

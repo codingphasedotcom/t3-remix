@@ -10,7 +10,7 @@ import type {
 import { assignableBy, chainOfCommand, departmentName, directReports } from "./boardOrg.ts";
 
 const STATUS_LABELS: Record<BoardTask["status"], string> = {
-  backlog: "Backlog",
+  backlog: "Ideas",
   todo: "To do",
   in_progress: "In progress",
   review: "Review",

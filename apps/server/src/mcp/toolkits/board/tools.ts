@@ -116,7 +116,7 @@ const BoardReadTaskTool = Tool.make("board_read_task", {
 const BoardCreateTaskTool = Tool.make("board_create_task", {
   ...shared,
   description:
-    'Create a task. Set parentTaskId to split your task into subtasks and assign someone in your reporting line. A task in "todo" with an assignee starts that agent right away; you review it unless you name another reviewer. "backlog" waits for a human.',
+    'Create a task. Set parentTaskId to split your task into subtasks and assign someone in your reporting line. A task in "todo" with an assignee starts that agent right away; you review it unless you name another reviewer. "backlog" (the Ideas column) waits for a human.',
   parameters: Schema.Struct({
     companyId: CompanyIdParam,
     title: TrimmedNonEmptyString,

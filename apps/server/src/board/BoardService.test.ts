@@ -403,7 +403,7 @@ it.effect("tells every agent which folder, branch, and base it works in", () =>
       assert.include(subtaskPrompt, "- Base: main.");
       assert.include(
         subtaskPrompt,
-        '- Shared: yes, with your parent task and its other subtasks: "Receipts" (Engineer, Backlog).',
+        '- Shared: yes, with your parent task and its other subtasks: "Receipts" (Engineer, Ideas).',
       );
       assert.include(subtaskPrompt, "merged into main");
 

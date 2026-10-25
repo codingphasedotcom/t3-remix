@@ -15,7 +15,7 @@ export interface BoardColumn {
 }
 
 export const BOARD_COLUMNS: ReadonlyArray<BoardColumn> = [
-  { status: "backlog", label: "Backlog", hint: "Waits for a human to schedule it." },
+  { status: "backlog", label: "Ideas", hint: "Waits for a human to schedule it." },
   { status: "todo", label: "To do", hint: "Tasks with an assignee start automatically." },
   { status: "in_progress", label: "In progress", hint: "An agent is working the task." },
   { status: "review", label: "Review", hint: "The reviewer starts when one is set." },

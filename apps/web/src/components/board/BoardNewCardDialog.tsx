@@ -98,7 +98,7 @@ function NewCardForm(props: {
             description={
               <DialogDescription>
                 Describe the outcome you want. The CEO plans it and delegates the work to the team;
-                you review the result. Keep it in the backlog to start it later.
+                you review the result. Save it as an idea to start it later.
               </DialogDescription>
             }
           />
@@ -188,7 +188,7 @@ function NewCardForm(props: {
             disabled={saving || title.trim().length === 0}
             onClick={() => void create("backlog")}
           >
-            Add to backlog
+            Save as idea
           </Button>
           <Button
             size="sm"
