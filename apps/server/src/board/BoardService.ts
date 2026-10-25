@@ -51,7 +51,6 @@ import {
   type ProjectId,
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
-import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -70,6 +69,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import { forkParked } from "../serverActivation.ts";
+import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import * as BoardStore from "./BoardStore.ts";
 import { buildDashboard } from "./boardDashboard.ts";
 import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
@@ -1307,7 +1307,7 @@ const make = Effect.gen(function* () {
     const title = `#${pullRequest.number} ${snapshot.title}`;
     const existing = (yield* store.listWorkLinks(task.id)).find((link) => {
       if (link.kind !== "pull_request") return false;
-      const parsed = parseChangeRequestUrl(link.url);
+      const parsed = sourceControlDefinitions.parseChangeRequestUrl(link.url)?.link ?? null;
       return parsed === null
         ? link.url === pullRequest.url
         : parsed.repository.toLowerCase() === pullRequest.repository.toLowerCase() &&
@@ -1640,11 +1640,10 @@ const make = Effect.gen(function* () {
     const commandId = CommandId.make(`board:${key}`);
     const messageId = MessageId.make(`board-message:${key}`);
 
-    // Each employee keeps one thread per task: its work, rework, reviews and replies continue
-    // there, so it keeps its context and each later message carries only what is new. Work and
-    // the assignee's replies share the task's thread, which lives in the task's workspace. A
-    // subtask's review continues in the reviewer's thread on the parent task, where it was
-    // delegated, so a manager does not open a thread for every subtask it checks.
+    // One thread per employee per task keeps context, so later messages carry only what is new.
+    // Work and the assignee's replies share the task's thread in the task's workspace. A
+    // subtask's review continues in the reviewer's thread on the parent, so a manager doesn't
+    // open a thread for every subtask it checks.
     const ownsTaskThread = kind === "work" || agent.id === task.assigneeAgentId;
     const agentThread = yield* store.latestAgentThread(
       task.id,
