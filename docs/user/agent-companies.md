@@ -92,8 +92,9 @@ Replies start even when the board is at its **Agents at once** limit, but not wh
 **Auto-run agents** is off or the employee is paused. Your comments on a task also reach every
 subtask below it and stay in the agents' instructions on every later run. Each employee keeps
 one thread per task: replies, work, rework, and repeat reviews all continue it, so agents keep
-their context and each new message carries only what changed. Open a task to see
-its activity, its runs, and links to each agent's thread.
+their context and each new message carries only what changed. A manager reviews each finished
+subtask in its own thread for the parent task, so delegating adds no thread per review. Open a
+task to see its activity, its runs, and links to each agent's thread.
 
 Attach files a task needs, such as a video to edit from your Downloads folder, under **Files**
 when you create the task or later in the task. In the desktop app, use **Add files** or drop them

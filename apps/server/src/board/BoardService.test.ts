@@ -220,23 +220,30 @@ it.effect("a manager's delegated task runs, then comes back to that manager for 
         worktreePath: `/worktrees/${String(leadThread)}`,
       });
 
-      // The engineer's run ends without moving its task; the CTO is started to review it.
-      yield* Queue.offer(harness.events, {
-        type: "run.updated",
-        threadId: threadOf(working, subtask.id),
-        payload: { id: "run-engineer", status: "completed" },
-      } as unknown as OrchestrationV2DomainEvent);
+      // The CTO parks its own task while the subtask is worked, and its turn ends.
+      const finish = finishRun(harness);
+      yield* board.updateTask({ id: parent!.id, status: "blocked" }, asLead);
+      yield* finish(leadThread, "run-lead");
+
+      // The engineer's run ends without moving its task; the CTO reviews it in the thread where
+      // it delegated, so it opens no thread per subtask.
+      yield* finish(threadOf(working, subtask.id)!, "run-engineer");
       const reviewing = yield* boardWhere(board, company.id, (snapshot) =>
         snapshot.tasks.some((task) => task.id === subtask.id && task.activeRunKind === "review"),
       );
       assert.equal(reviewing.tasks.find((task) => task.id === subtask.id)?.status, "review");
+      const review = yield* Queue.take(harness.sent);
+      assert.equal(review.threadId, leadThread);
+      assert.include(review.text, `Engineer finished the subtask "Payment form" (${subtask.id})`);
+      assert.include(review.text, "## How to review");
+      assert.notInclude(review.text, "Ship the best widgets.");
+      assert.lengthOf(yield* Ref.get(harness.launches), 2);
       // Each employee's threads are listed for the sidebar, newest first.
       assert.deepEqual(
         reviewing.threads.map((thread) => [thread.agentId, thread.kind]),
         [
           [lead.id, "review"],
           [engineer.id, "work"],
-          [lead.id, "work"],
         ],
       );
       const detail = yield* board.taskDetail(subtask.id);
@@ -977,6 +984,42 @@ const finishRun = (harness: { readonly events: Queue.Queue<OrchestrationV2Domain
       payload: { id, status: "completed" },
     } as unknown as OrchestrationV2DomainEvent);
   });
+
+it.effect("a busy manager's review waits for its thread unless a person starts it now", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead, engineer } = yield* createCompany(board);
+      const parent = yield* startTaskFor(board, company.id, "Build checkout", lead.id);
+      const subtask = yield* board.createTask(
+        {
+          companyId: company.id,
+          title: "Payment form",
+          parentTaskId: parent.task.id,
+          assigneeAgentId: engineer.id,
+        },
+        { kind: "agent", threadId: parent.threadId },
+      );
+      const working = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, subtask.id) !== null,
+      );
+
+      // The CTO is still working its own task, so the finished subtask waits for review.
+      yield* finishRun(harness)(threadOf(working, subtask.id)!, "run-engineer");
+      yield* boardWhere(board, company.id, (snapshot) =>
+        snapshot.tasks.some((task) => task.id === subtask.id && task.status === "review"),
+      );
+      yield* board.runCommand({ type: "task.start", id: subtask.id }, user);
+      const review = (yield* Ref.get(harness.launches)).at(-1);
+      assert.equal(review?.title, "Review (Lead): Payment form");
+      assert.notEqual(review?.threadId, parent.threadId);
+      assert.equal(yield* Queue.size(harness.sent), 0);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
 
 it.effect("lists long skills by name for the agent to read when needed", () =>
   Effect.gen(function* () {

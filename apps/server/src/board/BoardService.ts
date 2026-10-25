@@ -1340,6 +1340,8 @@ const make = Effect.gen(function* () {
     readonly settings: BoardSettings;
     /** For a reply: subtasks that became blocked since the task last ran. */
     readonly blockedSubtasks?: ReadonlyArray<BoardTask>;
+    /** For a review: the reviewer's own thread on the parent task, to continue in. */
+    readonly reviewThread?: ThreadId | null;
   }) {
     const { company, stored, kind, agent } = input;
     const task = stored.task;
@@ -1351,7 +1353,9 @@ const make = Effect.gen(function* () {
 
     // Each employee keeps one thread per task: its work, rework, reviews and replies continue
     // there, so it keeps its context and each later message carries only what is new. Work and
-    // the assignee's replies share the task's thread, which lives in the task's workspace.
+    // the assignee's replies share the task's thread, which lives in the task's workspace. A
+    // subtask's review continues in the reviewer's thread on the parent task, where it was
+    // delegated, so a manager does not open a thread for every subtask it checks.
     const ownsTaskThread = kind === "work" || agent.id === task.assigneeAgentId;
     const agentThread = yield* store.latestAgentThread(
       task.id,
@@ -1364,7 +1368,7 @@ const make = Effect.gen(function* () {
       ? task.threadId !== null && agentThread === task.threadId
         ? task.threadId
         : null
-      : agentThread;
+      : (input.reviewThread ?? agentThread);
     const reuseThread =
       previousThread !== null &&
       (yield* threads.getThreadShell(previousThread).pipe(
@@ -1383,7 +1387,12 @@ const make = Effect.gen(function* () {
     if (kind === "work") yield* store.updateTask(task.id, { status: "in_progress" });
     // A reply announces itself with the reply; a system line would only add noise.
     if (kind !== "reply") {
-      const continuing = reuseThread ? " (continuing in the same thread)" : "";
+      const parentTitle = input.allTasks.find((other) => other.id === task.parentTaskId)?.title;
+      const continuing = !reuseThread
+        ? ""
+        : threadId === input.reviewThread
+          ? ` (in their thread for "${parentTitle ?? "the parent task"}")`
+          : " (continuing in the same thread)";
       yield* systemComment(
         task.id,
         kind === "work"
@@ -1430,7 +1439,10 @@ const make = Effect.gen(function* () {
               kind === "reply"
                 ? buildReplyPrompt(context, replySince, { freshThread: false, blocked })
                 : kind === "review"
-                  ? buildReReviewPrompt(context, reviewSince, reviewWorkspace)
+                  ? // Its earlier review of this task is already in this thread.
+                    agentThread === threadId
+                    ? buildReReviewPrompt(context, reviewSince, reviewWorkspace)
+                    : buildReviewPrompt(context, reviewWorkspace, { freshThread: false })
                   : // A thread opened for a reply has not had the work prompt yet.
                     workedBefore
                     ? buildReworkPrompt(context, reworkSince, plan!.prompt)
@@ -1451,7 +1463,7 @@ const make = Effect.gen(function* () {
           kind === "reply"
             ? buildReplyPrompt(context, replySince, { freshThread: true, blocked })
             : kind === "review"
-              ? buildReviewPrompt(context, reviewWorkspace)
+              ? buildReviewPrompt(context, reviewWorkspace, { freshThread: true })
               : buildWorkPrompt(context, plan!.prompt);
         const result = yield* threadLaunch.launch({
           commandId,
@@ -1550,7 +1562,17 @@ const make = Effect.gen(function* () {
         agent !== null &&
         (lastReview === null || lastReview < stored.statusChangedAt || manual)
       ) {
-        return { kind: "review" as const, agent };
+        // A thread takes one run at a time, so a review bound for a busy parent-task thread
+        // waits its turn there, unless a person asked for it now.
+        const reviewThread =
+          task.parentTaskId === null
+            ? null
+            : yield* store.latestAgentThread(task.parentTaskId, agent.id);
+        const busy =
+          reviewThread !== null &&
+          (yield* store.runForThread(reviewThread))?.run.status === "running";
+        if (!busy) return { kind: "review" as const, agent, reviewThread };
+        if (manual) return { kind: "review" as const, agent, reviewThread: null };
       }
     }
     if (!options.awaitingReply && options.blockedSubtasks.length === 0) return null;

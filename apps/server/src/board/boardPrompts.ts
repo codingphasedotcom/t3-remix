@@ -132,7 +132,7 @@ function orgBlock(context: BoardPromptContext): string {
         .map((id) => context.skills.find((skill) => skill.id === id)?.name)
         .filter((name) => name !== undefined);
       lines.push(
-        `- ${describeWithDepartment(context, report)}: ${report.id}${skillNames.length > 0 ? ` — skills: ${skillNames.join(", ")}` : ""}${report.paused ? " (paused)" : ""}`,
+        `- ${describeWithDepartment(context, report)}: ${report.id}${skillNames.length > 0 ? `, skills: ${skillNames.join(", ")}` : ""}${report.paused ? " (paused)" : ""}`,
       );
     }
   }
@@ -355,7 +355,7 @@ You are an individual contributor: do this task's work yourself, in this workspa
       ? "Prefer delegating over doing the work yourself"
       : "You have no reports yet, so do the work yourself, and request hires with board_request_hire when the work needs people you do not have";
   return `## How you work
-You manage work. ${team}. To delegate, split this task into focused subtasks with board_create_task: set parentTaskId to this task, write what done looks like, assign the best-suited person, and use status "todo" so they start. Then comment with your plan and move this task to "blocked". You review each subtask when it is finished: approve it by moving it to "done", or move it back to "todo" with precise changes. Once every subtask is done this task returns to "todo" and you continue here: check that the pieces add up. ${finish} ${REMEMBER_RULE}`;
+You manage work. ${team}. To delegate, split this task into focused subtasks with board_create_task: set parentTaskId to this task, write what done looks like, assign the best-suited person, and use status "todo" so they start. Then comment with your plan and move this task to "blocked". Each finished subtask comes back to you here for review: approve it by moving it to "done", or move it back to "todo" with precise changes. Once every subtask is done this task returns to "todo" and you continue here: check that the pieces add up. ${finish} ${REMEMBER_RULE}`;
 }
 
 export function buildWorkPrompt(context: BoardPromptContext, workspace: BoardWorkspace): string {
@@ -403,8 +403,26 @@ export function buildReworkPrompt(
     .join("\n\n");
 }
 
-export function buildReviewPrompt(context: BoardPromptContext, workspace: ReviewWorkspace): string {
+export function buildReviewPrompt(
+  context: BoardPromptContext,
+  workspace: ReviewWorkspace,
+  options: { readonly freshThread: boolean },
+): string {
   const assignee = agentName(context.agents, context.task.assigneeAgentId);
+  const board = boardCommentsBlock(context);
+  const comments = commentLines(context);
+  if (!options.freshThread) {
+    // The reviewer's thread on the parent task already knows who it is and how the board works.
+    return [
+      `${assignee} finished the subtask "${context.task.title}" (${context.task.id}), and you review it.`,
+      taskBlock(context),
+      board ?? "",
+      comments.length > 0 ? ["## Comments so far", ...comments].join("\n") : "",
+      reviewRules(context, workspace),
+    ]
+      .filter((section) => section.length > 0)
+      .join("\n\n");
+  }
   const sections = [identityBlock(context), `You are reviewing a task that ${assignee} finished.`];
   if (context.agent.instructions.trim().length > 0) {
     sections.push(`## Your standing instructions\n${context.agent.instructions.trim()}`);
@@ -414,9 +432,7 @@ export function buildReviewPrompt(context: BoardPromptContext, workspace: Review
   const memory = memoryBlock(context);
   if (memory !== null) sections.push(memory);
   sections.push(taskBlock(context));
-  const board = boardCommentsBlock(context);
   if (board !== null) sections.push(board);
-  const comments = commentLines(context);
   if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
   sections.push(reviewRules(context, workspace), BOARD_TOOLS);
   return sections.join("\n\n");
@@ -432,7 +448,7 @@ function reviewRules(context: BoardPromptContext, workspace: ReviewWorkspace): s
   return [
     "## How to review",
     workspace.worktreePath !== null
-      ? `You are in the task's worktree (${workspace.worktreePath}). Inspect the change with git status and git diff${workspace.baseRef ? ` against ${workspace.baseRef}` : ""}, and run the relevant checks.`
+      ? `The task's work is in ${workspace.worktreePath}. Inspect the change there with git status and git diff${workspace.baseRef ? ` against ${workspace.baseRef}` : ""}, and run the relevant checks.`
       : "Inspect the working tree with git status and git diff, and run the relevant checks.",
     "Judge the result against the task's description and the company's mission, starting from the work linked on the task (board_read_task lists it). Do not redo the work yourself unless a fix is trivial.",
     '- Approve: comment your verdict, then move the task to "done" with board_update_task.',
