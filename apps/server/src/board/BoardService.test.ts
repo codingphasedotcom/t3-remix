@@ -8,12 +8,16 @@ import {
   type BoardCompanyId,
   type BoardSnapshot,
   type BoardTaskId,
+  type GitRunStackedActionInput,
+  type GitRunStackedActionResult,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadShell,
   type Project,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -23,11 +27,14 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
+import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import type * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as BoardService from "./BoardService.ts";
 import * as BoardStore from "./BoardStore.ts";
 
@@ -36,8 +43,33 @@ const model = { instanceId: ProviderInstanceId.make("claude"), model: "sonnet" }
 const user = { kind: "user" } as const;
 const isBoardError = Schema.is(BoardError);
 
+/** What a git command printed; `git` answers each one, in order, from the harness's script. */
+interface GitReply {
+  readonly exitCode?: number;
+  readonly stdout?: string;
+}
+
+const pullRequestOpened = {
+  action: "commit_push_pr",
+  branch: { status: "skipped_not_requested" },
+  commit: { status: "created" },
+  push: { status: "pushed" },
+  pr: {
+    status: "created",
+    url: "https://github.com/acme/shop/pull/7",
+    number: 7,
+    baseBranch: "main",
+    title: "Fix checkout",
+  },
+  toast: { title: "Created PR", cta: { kind: "none" } },
+} as unknown as GitRunStackedActionResult;
+
 const makeHarness = Effect.gen(function* () {
   const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchService.ThreadLaunchInput>>([]);
+  const gitActions = yield* Ref.make<ReadonlyArray<GitRunStackedActionInput>>([]);
+  const gitCommands = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([]);
+  const gitScript = yield* Ref.make<(args: ReadonlyArray<string>) => GitReply>(() => ({}));
+  const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
   // Messages to existing threads, in order; taking one waits until it has been sent.
   const sent = yield* Queue.unbounded<ThreadManagementService.ThreadManagementSendInput>();
@@ -46,6 +78,10 @@ const makeHarness = Effect.gen(function* () {
     sendToThread: (input) =>
       Queue.offer(sent, input).pipe(
         Effect.as({} as ThreadManagementService.ThreadManagementSendResult),
+      ),
+    dispatch: (command) =>
+      Ref.update(dispatched, (all) => [...all, command]).pipe(
+        Effect.as({} as Orchestrator.OrchestratorV2DispatchResult),
       ),
     // A settled thread has no queued follow-up.
     getThreadShell: () =>
@@ -77,7 +113,33 @@ const makeHarness = Effect.gen(function* () {
   });
   const projects = Layer.mock(ProjectService.ProjectService)({
     getById: () => Effect.succeed(Option.some({ workspaceRoot: "/repo" } as Project)),
+    getShell: () => Effect.succeedNone,
   });
+  const gitWorkflow = Layer.mock(GitWorkflowService.GitWorkflowService)({
+    runStackedAction: (input) =>
+      Ref.update(gitActions, (all) => [...all, input]).pipe(
+        Effect.as(
+          input.action === "commit_push_pr"
+            ? pullRequestOpened
+            : ({ commit: { status: "skipped_no_changes" } } as GitRunStackedActionResult),
+        ),
+      ),
+  });
+  const gitDriver = Layer.mock(GitVcsDriver.GitVcsDriver)({
+    execute: (input) =>
+      Effect.gen(function* () {
+        yield* Ref.update(gitCommands, (all) => [...all, input.args]);
+        const reply = (yield* Ref.get(gitScript))(input.args);
+        return {
+          exitCode: reply.exitCode ?? 0,
+          stdout: reply.stdout ?? "",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        } as GitVcsDriver.ExecuteGitResult;
+      }),
+  });
+  const fileSystem = FileSystem.layerNoop({ realPath: (path) => Effect.succeed(path) });
   const layer = BoardService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -86,10 +148,13 @@ const makeHarness = Effect.gen(function* () {
         launcher,
         folders,
         projects,
+        gitWorkflow,
+        gitDriver,
+        fileSystem,
       ),
     ),
   );
-  return { launches, events, sent, layer };
+  return { launches, events, sent, gitActions, gitCommands, gitScript, dispatched, layer };
 });
 
 /** Creates a company whose CEO, CTO, and engineer form a three-level chain. */
@@ -1079,7 +1144,11 @@ it.effect("wakes the manager when a subtask gets stuck, not when it waits on its
       const working = yield* boardWhere(
         board,
         company.id,
-        (snapshot) => threadOf(snapshot, subtask.id) !== null,
+        (snapshot) =>
+          threadOf(snapshot, subtask.id) !== null &&
+          // The lead's run has to end before the clock moves, or it ends at the same instant the
+          // subtask is blocked and the subtask never counts as blocked since the lead last ran.
+          snapshot.tasks.find((task) => task.id === parent.task.id)?.activeRunKind === null,
       );
       const asEngineer = { kind: "agent", threadId: threadOf(working, subtask.id)! } as const;
 
@@ -1334,6 +1403,142 @@ it.effect("runs a routine on demand without moving its schedule", () =>
       assert.equal(after?.nextRunAt, nextRunAt);
       const comments = (yield* board.taskDetail(task!.id)).comments.map((comment) => comment.body);
       assert.include(comments, 'Created by the routine "Executive report".');
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+const taskStatus = (snapshot: BoardSnapshot, taskId: BoardTaskId) =>
+  snapshot.tasks.find((task) => task.id === taskId)?.status;
+
+it.effect("opens a pull request for a finished task and finishes it once that merges", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { task, threadId } = yield* startTaskFor(board, company.id, "Fix checkout", lead.id);
+      const ship = board.runCommand(
+        { type: "task.ship", id: task.id, method: "pull_request" },
+        user,
+      );
+
+      const early = yield* Effect.flip(ship);
+      assert.equal(early.message, "Ship a task once it is in Review or Done.");
+
+      yield* finishRun(harness)(threadId, "run-work-1");
+      yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => taskStatus(snapshot, task.id) === "review",
+      );
+      const { link } = yield* ship;
+      assert.deepInclude((yield* Ref.get(harness.gitActions))[0], {
+        cwd: `/worktrees/${threadId}`,
+        action: "commit_push_pr",
+        threadId,
+      });
+      assert.deepInclude(link, {
+        kind: "pull_request",
+        title: "#7 Fix checkout",
+        url: "https://github.com/acme/shop/pull/7",
+        status: "open",
+      });
+      // Linked to the task's thread, the pull request is synced like one opened from a chat.
+      assert.deepInclude((yield* Ref.get(harness.dispatched))[0], {
+        type: "thread.pull-request.link",
+        threadId,
+        repository: "acme/shop",
+        number: 7,
+        source: "created",
+      });
+
+      yield* Queue.offer(harness.events, {
+        type: "thread.pull-request-link-updated",
+        threadId,
+        payload: {
+          host: "github.com",
+          repository: "acme/shop",
+          number: 7,
+          url: "https://github.com/acme/shop/pull/7",
+          source: "created",
+          snapshot: { state: "merged", title: "Fix checkout", isDraft: false },
+        },
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* boardWhere(board, company.id, (snapshot) => taskStatus(snapshot, task.id) === "done");
+      const detail = yield* board.taskDetail(task.id);
+      assert.deepEqual(
+        detail.links.filter((entry) => entry.kind === "pull_request").map((entry) => entry.status),
+        ["merged"],
+      );
+      assert.include(
+        detail.comments.map((comment) => comment.body),
+        "Pull request #7 was merged; moved the task from Review to Done.",
+      );
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("merges a finished task's branch only into a clean checkout without conflicts", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { task, threadId } = yield* startTaskFor(board, company.id, "Fix checkout", lead.id);
+      yield* finishRun(harness)(threadId, "run-work-1");
+      yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => taskStatus(snapshot, task.id) === "review",
+      );
+      const branch = (yield* board.taskDetail(task.id)).links.find(
+        (entry) => entry.kind === "branch",
+      )!.title;
+      const merge = board.runCommand({ type: "task.ship", id: task.id, method: "merge" }, user);
+      const ranMerge = Effect.map(Ref.get(harness.gitCommands), (commands) =>
+        commands.filter((args) => args[0] === "merge"),
+      );
+
+      let checkout: "dirty" | "conflicting" | "clean" = "dirty";
+      yield* Ref.set(harness.gitScript, (args) => {
+        if (args[0] === "symbolic-ref") return { stdout: "main\n" };
+        if (args[0] === "merge-base") return { exitCode: 1 };
+        if (args[0] === "status") return { stdout: checkout === "dirty" ? " M README.md\n" : "" };
+        if (args[0] === "merge" && args[1] !== "--abort" && checkout === "conflicting") {
+          return { exitCode: 1, stdout: "CONFLICT (content): Merge conflict in app.ts\n" };
+        }
+        return {};
+      });
+
+      const dirty = yield* Effect.flip(merge);
+      assert.equal(
+        dirty.message,
+        "The project folder has uncommitted changes on main. Commit or stash them, then merge.",
+      );
+      assert.lengthOf(yield* ranMerge, 0);
+
+      checkout = "conflicting";
+      const conflict = yield* Effect.flip(merge);
+      assert.include(conflict.message, `${branch} conflicts with main, so nothing was merged.`);
+      assert.deepInclude(yield* ranMerge, ["merge", "--abort"]);
+      assert.equal((yield* board.taskDetail(task.id)).task.status, "review");
+
+      checkout = "clean";
+      const { task: shipped, link } = yield* merge;
+      assert.equal(shipped?.status, "done");
+      assert.deepInclude(link, { kind: "branch", title: branch, status: "merged" });
+      // Edits the agent left uncommitted are committed in the task's worktree first.
+      assert.deepInclude((yield* Ref.get(harness.gitActions))[0], {
+        cwd: `/worktrees/${threadId}`,
+        action: "commit",
+      });
+      assert.deepInclude(yield* ranMerge, [
+        "merge",
+        "--no-edit",
+        "-m",
+        `Merge ${branch}: Fix checkout`,
+        branch,
+      ]);
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

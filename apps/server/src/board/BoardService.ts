@@ -7,6 +7,7 @@ import {
   BoardSkillId,
   MAX_AGENT_MEMORY_CHARS,
   MAX_COMPANY_MEMORY_CHARS,
+  boardShipBlocker,
   CommandId,
   MessageId,
   ThreadId,
@@ -26,6 +27,7 @@ import {
   type BoardRunKind,
   type BoardSettings,
   type BoardSettingsUpdateInput,
+  type BoardShipMethod,
   type BoardSkill,
   type BoardSkillUpsertInput,
   type BoardSnapshot,
@@ -45,7 +47,9 @@ import {
   type BoardWorkLinkStatus,
   type OrchestrationV2Run,
   type ProjectId,
+  type ThreadPullRequestLink,
 } from "@t3tools/contracts";
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -57,6 +61,8 @@ import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import { createdPullRequestKey } from "../git/linkCreatedPullRequest.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -65,6 +71,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as BoardStore from "./BoardStore.ts";
 import { buildDashboard } from "./boardDashboard.ts";
 import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
+import { makeMergeTaskBranch } from "./boardShip.ts";
 import {
   boardStatusLabel,
   buildReReviewPrompt,
@@ -217,6 +224,8 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const projectFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
   const projects = yield* ProjectService.ProjectService;
+  const git = yield* GitWorkflowService.GitWorkflowService;
+  const mergeTaskBranch = yield* makeMergeTaskBranch;
 
   // `null` means the company list changed, which every subscriber shows.
   const changes = yield* PubSub.unbounded<BoardCompanyId | null>();
@@ -1041,6 +1050,178 @@ const make = Effect.gen(function* () {
     yield* notify(current.task.companyId);
   });
 
+  /** Landing a task's work approves it, so a task waiting in Review is done. */
+  const markLanded = Effect.fn("BoardService.markLanded")(function* (
+    task: BoardTask,
+    landed: string,
+  ) {
+    if (task.status !== "review") {
+      yield* systemComment(task.id, `${landed}.`);
+      return;
+    }
+    yield* store.updateTask(task.id, { status: "done" });
+    yield* systemComment(task.id, `${landed}; moved the task from Review to Done.`);
+    if (task.parentTaskId !== null) yield* resumeParentIfSubtasksDone(task.parentTaskId);
+  });
+
+  /** Opens a pull request for a finished task's branch, or merges it into the project folder. */
+  const shipTask = Effect.fn("BoardService.shipTask")(function* (
+    id: BoardTaskId,
+    method: BoardShipMethod,
+  ) {
+    const stored = yield* requireTask(id);
+    const { task, branch } = stored;
+    const allTasks = (yield* store.listTasks(task.companyId)).map((entry) => entry.task);
+    const blocker = boardShipBlocker(task, allTasks);
+    const { worktreePath, threadId } = task;
+    if (blocker !== null || worktreePath === null || threadId === null || branch === null) {
+      return yield* boardError(blocker ?? "This task has no branch recorded to ship.");
+    }
+    const gitAction = (action: "commit" | "commit_push_pr", failure: string) =>
+      git
+        .runStackedAction({
+          actionId: `board-ship:${task.id}:${action}`,
+          cwd: worktreePath,
+          action,
+          threadId,
+          projectId: task.projectId,
+        })
+        .pipe(Effect.mapError((cause) => boardError(`${failure} ${cause.message}`, cause)));
+
+    if (method === "pull_request") {
+      const result = yield* gitAction("commit_push_pr", "Could not open a pull request.");
+      const { url, number } = result.pr;
+      if (url === undefined || number === undefined) {
+        return yield* boardError(
+          "The pull request was not opened. Open it from the task's thread.",
+        );
+      }
+      // Linked to the task's thread, the pull request's state is synced like one opened from a
+      // chat, and onPullRequestUpdated carries that state back to the board.
+      const project = yield* projects
+        .getShell(task.projectId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const key = createdPullRequestKey(result, Option.getOrUndefined(project));
+      if (key !== null) {
+        yield* threads
+          .dispatch({
+            type: "thread.pull-request.link",
+            commandId: CommandId.make(`board-pr-link:${yield* store.newId("command")}`),
+            threadId,
+            ...key,
+            source: "created",
+          })
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Could not link a board pull request to its thread", {
+                taskId: task.id,
+                cause,
+              }),
+            ),
+          );
+      }
+      const link = yield* store.upsertWorkLink({
+        taskId: task.id,
+        kind: "pull_request",
+        title: `#${number} ${result.pr.title ?? task.title}`,
+        url,
+        status: "open",
+        agentId: null,
+      });
+      const into = result.pr.baseBranch === undefined ? "" : ` into ${result.pr.baseBranch}`;
+      yield* systemComment(
+        task.id,
+        result.pr.status === "opened_existing"
+          ? `The board found pull request #${number} already open for ${branch}.`
+          : `The board opened pull request #${number} from ${branch}${into}.`,
+      );
+      yield* notify(task.companyId);
+      return { task: (yield* requireTask(id)).task, link };
+    }
+
+    const project = yield* projects
+      .getById(task.projectId)
+      .pipe(Effect.mapError((cause) => boardError("Could not read the task's project.", cause)));
+    if (Option.isNone(project)) return yield* boardError("The task's project no longer exists.");
+    // Agents can stop with edits they never committed; those are part of the task's work.
+    yield* gitAction("commit", "Could not commit the task's last changes.");
+    const merged = yield* mergeTaskBranch({
+      projectRoot: project.value.workspaceRoot,
+      branch,
+      baseRef: stored.baseRef,
+      message: `Merge ${branch}: ${task.title}`,
+    }).pipe(
+      Effect.catchTags({
+        GitCommandError: (cause) =>
+          Effect.fail(boardError(`Could not merge ${branch}. ${cause.message}`, cause)),
+      }),
+    );
+    const link = yield* store.upsertWorkLink({
+      taskId: task.id,
+      kind: "branch",
+      title: branch,
+      url: branch,
+      status: "merged",
+      agentId: null,
+    });
+    yield* markLanded(
+      task,
+      merged.alreadyMerged
+        ? `${branch} was already in ${merged.into}`
+        : `The board merged ${branch} into ${merged.into}`,
+    );
+    yield* notify(task.companyId);
+    return { task: (yield* requireTask(id)).task, link };
+  });
+
+  /**
+   * Keeps a task's linked pull requests in step with the PR sync of its thread, which also picks
+   * up pull requests its agent opened on its own.
+   */
+  const onPullRequestUpdated = Effect.fn("BoardService.onPullRequestUpdated")(function* (
+    threadId: ThreadId,
+    pullRequest: ThreadPullRequestLink,
+  ) {
+    const { snapshot } = pullRequest;
+    if (snapshot === null || pullRequest.source === "stack-dismissed") return;
+    const running = yield* store.runForThread(threadId);
+    const stored = running === null ? null : yield* store.getTask(running.run.taskId);
+    // Only a task's own thread speaks for its branch; a manager reviews many tasks in one thread.
+    if (stored === null || stored.task.threadId !== threadId) return;
+    const { task } = stored;
+    const status: BoardWorkLinkStatus =
+      snapshot.state === "merged"
+        ? "merged"
+        : snapshot.state === "closed"
+          ? "closed"
+          : snapshot.isDraft
+            ? "draft"
+            : "open";
+    const title = `#${pullRequest.number} ${snapshot.title}`;
+    const existing = (yield* store.listWorkLinks(task.id)).find((link) => {
+      if (link.kind !== "pull_request") return false;
+      const parsed = parseChangeRequestUrl(link.url);
+      return parsed === null
+        ? link.url === pullRequest.url
+        : parsed.repository.toLowerCase() === pullRequest.repository.toLowerCase() &&
+            parsed.number === pullRequest.number;
+    });
+    // Every sync emits this event, mostly with nothing new.
+    if (existing?.status === status && existing.title === title) return;
+    yield* store.upsertWorkLink({
+      taskId: task.id,
+      kind: "pull_request",
+      title,
+      url: existing?.url ?? pullRequest.url,
+      status,
+      agentId: null,
+    });
+    if (status === "merged" && existing?.status !== "merged") {
+      yield* markLanded(task, `Pull request #${pullRequest.number} was merged`);
+    }
+    yield* notify(task.companyId);
+  });
+
   const upsertRoutine = Effect.fn("BoardService.upsertRoutine")(function* (
     input: BoardRoutineUpsertInput,
   ) {
@@ -1728,9 +1909,10 @@ const make = Effect.gen(function* () {
     recoverRuns().pipe(
       Effect.catch((cause) => Effect.logWarning("Board run recovery failed", { cause })),
       Effect.andThen(
-        Stream.runForEach(threads.streamDomainEvents, (event) =>
-          event.type === "run.updated"
-            ? dispatchLock
+        Stream.runForEach(threads.streamDomainEvents, (event) => {
+          switch (event.type) {
+            case "run.updated":
+              return dispatchLock
                 .withPermits(1)(onRunUpdated(event.threadId, event.payload))
                 .pipe(
                   Effect.catch((cause) =>
@@ -1739,9 +1921,20 @@ const make = Effect.gen(function* () {
                       cause,
                     }),
                   ),
-                )
-            : Effect.void,
-        ),
+                );
+            case "thread.pull-request-link-updated":
+              return onPullRequestUpdated(event.threadId, event.payload).pipe(
+                Effect.catch((cause) =>
+                  Effect.logWarning("Board could not sync a pull request", {
+                    threadId: event.threadId,
+                    cause,
+                  }),
+                ),
+              );
+            default:
+              return Effect.void;
+          }
+        }),
       ),
     ),
   );
@@ -1791,6 +1984,8 @@ const make = Effect.gen(function* () {
         return deleteTask(command.id).pipe(Effect.as({}));
       case "task.start":
         return startTask(command.id).pipe(Effect.map((task) => ({ task })));
+      case "task.ship":
+        return shipTask(command.id, command.method);
       case "comment.add":
         return addComment(command.comment, actor).pipe(Effect.map((comment) => ({ comment })));
       case "link.add":

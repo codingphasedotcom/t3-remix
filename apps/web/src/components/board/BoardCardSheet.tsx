@@ -1,15 +1,17 @@
-import type {
-  BoardAgentId,
-  BoardComment,
-  BoardRun,
-  BoardSnapshot,
-  BoardTask,
-  BoardTaskId,
-  BoardTaskStatus,
-  BoardWorkLink,
-  EnvironmentId,
+import {
+  boardShipBlocker,
+  type BoardAgentId,
+  type BoardComment,
+  type BoardRun,
+  type BoardShipMethod,
+  type BoardSnapshot,
+  type BoardTask,
+  type BoardTaskId,
+  type BoardTaskStatus,
+  type BoardWorkLink,
+  type EnvironmentId,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ClipboardListIcon,
@@ -32,7 +34,9 @@ import { useState } from "react";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { cn } from "../../lib/utils";
 import { boardTaskDetailLive } from "../../state/board";
+import { useProject } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
+import { vcsEnvironment } from "../../state/vcs";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import ChatMarkdown from "../ChatMarkdown";
@@ -103,11 +107,15 @@ function BoardCardDetail(props: {
   const [editingDescription, setEditingDescription] = useState(false);
   const files = (detail.data?.links ?? []).filter((link) => link.kind === "file");
   const workLinks = (detail.data?.links ?? []).filter((link) => link.kind !== "file");
+  const branchLink = workLinks.find((link) => link.kind === "branch") ?? null;
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
   const descriptionDirty = description !== task.description;
   const parent = snapshot.tasks.find((candidate) => candidate.id === task.parentTaskId) ?? null;
   const subtasks = snapshot.tasks.filter((candidate) => candidate.parentTaskId === task.id);
+  // A subtask in its parent's worktree works on the parent's branch, which ships with the parent.
+  const ownsBranch =
+    branchLink !== null && task.worktreePath !== null && parent?.worktreePath !== task.worktreePath;
   const disabled = !props.canOperate;
 
   const update = (patch: {
@@ -356,6 +364,18 @@ function BoardCardDetail(props: {
             </FilePicker>
           </section>
 
+          {ownsBranch ? (
+            <ShipSection
+              environmentId={props.environmentId}
+              task={task}
+              branch={branchLink.title}
+              merged={branchLink.status === "merged"}
+              blocker={boardShipBlocker(task, snapshot.tasks)}
+              disabled={disabled}
+              runCommand={props.runCommand}
+            />
+          ) : null}
+
           {workLinks.length > 0 ? (
             <section className={OFFICE_INSET}>
               <SectionTitle label="Linked work" tone="violet" count={workLinks.length} />
@@ -496,6 +516,66 @@ function SectionTitle(props: {
     <h3 className="flex">{pill}</h3>
   ) : (
     <Label htmlFor={props.htmlFor}>{pill}</Label>
+  );
+}
+
+function ShipSection(props: {
+  readonly environmentId: EnvironmentId;
+  readonly task: BoardTask;
+  readonly branch: string;
+  readonly merged: boolean;
+  readonly blocker: string | null;
+  readonly disabled: boolean;
+  readonly runCommand: RunBoardCommand;
+}) {
+  const [shipping, setShipping] = useState<BoardShipMethod | null>(null);
+  const project = useProject(scopeProjectRef(props.environmentId, props.task.projectId));
+  // Merging goes into whatever the project folder has checked out, so the button names it.
+  const projectStatus = useEnvironmentQuery(
+    project === null
+      ? null
+      : vcsEnvironment.status({
+          environmentId: props.environmentId,
+          input: { cwd: project.workspaceRoot },
+        }),
+  );
+  const target = projectStatus.data?.refName ?? null;
+  const unavailable = props.disabled || props.blocker !== null || shipping !== null;
+
+  const ship = async (method: BoardShipMethod) => {
+    if (method === "merge") {
+      const message = `Merge ${props.branch} into ${target ?? "the branch checked out in the project folder"}?\nThis merges on the computer running T3 Code and doesn't push.`;
+      const confirmed = (await requestConfirmDialog(message)) ?? window.confirm(message);
+      if (!confirmed) return;
+    }
+    setShipping(method);
+    await props.runCommand({ type: "task.ship", id: props.task.id, method });
+    setShipping(null);
+  };
+
+  return (
+    <section className={OFFICE_INSET}>
+      <SectionTitle label="Ship" tone="emerald" />
+      {/* The branch itself, with its merged status, is listed under Linked work. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={unavailable} onClick={() => void ship("pull_request")}>
+          <PullRequestGlyph.pullRequest />
+          {shipping === "pull_request" ? "Opening pull request..." : "Open pull request"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={unavailable || props.merged}
+          onClick={() => void ship("merge")}
+        >
+          <PullRequestGlyph.merged />
+          {shipping === "merge" ? "Merging..." : target === null ? "Merge" : `Merge into ${target}`}
+        </Button>
+      </div>
+      {props.blocker !== null ? (
+        <span className="text-xs text-muted-foreground">{props.blocker}</span>
+      ) : null}
+    </section>
   );
 }
 

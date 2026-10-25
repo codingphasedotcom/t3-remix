@@ -78,8 +78,8 @@ the ones that apply.
 
 Every agent is told where it works: the folder, the branch, the base it started from, which
 other tasks share that folder, and that work from other tasks is only there once it is merged.
-Branches are not merged for you, so a task that needs another task's work waits until you
-merge it.
+Branches are not merged for you, so a task that needs another task's work waits until you ship
+it.
 
 Type `@` and a job, such as `@CTO` or `@QA`, to mention an employee. In a new task's title or
 description, the first person you mention becomes the assignee unless you already picked one. In
@@ -103,6 +103,22 @@ where they are on the computer running T3 Code, and subtasks see their parent's 
 
 A task lists its **Linked work**: its branch, and the pull requests, previews, and documents its
 agents report, with each pull request's status. Remove a wrong link with its **×**.
+
+## Ship finished work
+
+A task with a branch of its own shows **Ship** once it is in **Review** or **Done** and no agent
+is working in its worktree. Subtasks share their parent's branch, so they ship with the parent.
+
+- **Open pull request** commits anything the agents left uncommitted, pushes the branch, and opens
+  a pull request, the same way the git button in a chat does. Its status stays current under
+  **Linked work**, and so do pull requests the task's agent opens on its own.
+- **Merge** merges the branch into whatever branch your project folder has checked out, on the
+  computer running T3 Code. It doesn't push. It stops if the folder has uncommitted changes, and
+  if the branch conflicts it merges nothing, so you can ask the agent in a comment to merge your
+  branch into its own first, or open a pull request instead.
+
+When the work lands, by a merge here or once its pull request is merged, a task waiting in
+**Review** moves to **Done**.
 
 ## Routines
 

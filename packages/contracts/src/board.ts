@@ -376,6 +376,34 @@ export const BoardWorkLink = Schema.Struct({
 });
 export type BoardWorkLink = typeof BoardWorkLink.Type;
 
+/**
+ * How a person ships a finished task's branch: a pull request on the repository's host, or a
+ * merge into the branch checked out in the project folder.
+ */
+export const BoardShipMethod = Schema.Literals(["pull_request", "merge"]);
+export type BoardShipMethod = typeof BoardShipMethod.Type;
+
+/** Why a task's branch cannot be shipped right now, or null when it can. */
+export function boardShipBlocker(task: BoardTask, tasks: ReadonlyArray<BoardTask>): string | null {
+  if (task.threadId === null) return "This task has not started, so it has no branch yet.";
+  if (task.worktreePath === null) {
+    return "This task worked in the project folder, so it has no branch of its own.";
+  }
+  const parent = tasks.find((candidate) => candidate.id === task.parentTaskId);
+  if (parent?.worktreePath === task.worktreePath) return "Subtasks ship with their parent task.";
+  if (task.status !== "review" && task.status !== "done") {
+    return "Ship a task once it is in Review or Done.";
+  }
+  // Subtasks share their parent's worktree, so any of them still running blocks it too.
+  const busy = tasks.some(
+    (other) => other.worktreePath === task.worktreePath && other.activeRunKind !== null,
+  );
+  if (busy) {
+    return "An agent is still working in this task's worktree.";
+  }
+  return null;
+}
+
 export const BoardTaskDetail = Schema.Struct({
   task: BoardTask,
   comments: Schema.Array(BoardComment),
@@ -551,6 +579,7 @@ export const BoardCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("task.update"), task: BoardTaskUpdateInput }),
   Schema.Struct({ type: Schema.Literal("task.delete"), id: BoardTaskId }),
   Schema.Struct({ type: Schema.Literal("task.start"), id: BoardTaskId }),
+  Schema.Struct({ type: Schema.Literal("task.ship"), id: BoardTaskId, method: BoardShipMethod }),
   Schema.Struct({ type: Schema.Literal("comment.add"), comment: BoardCommentAddInput }),
   Schema.Struct({
     type: Schema.Literal("link.add"),
@@ -577,6 +606,7 @@ export const BoardCommandResult = Schema.Struct({
   comment: Schema.optional(BoardComment),
   settings: Schema.optional(BoardSettings),
   routine: Schema.optional(BoardRoutine),
+  link: Schema.optional(BoardWorkLink),
 });
 export type BoardCommandResult = typeof BoardCommandResult.Type;
 

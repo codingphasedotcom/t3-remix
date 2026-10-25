@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { MAX_COMPANY_MEMORY_CHARS } from "@t3tools/contracts";
 import type {
   BoardAgent,
@@ -12,6 +13,7 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import { Navigate, useNavigate } from "@tanstack/react-router";
+import * as Cause from "effect/Cause";
 import {
   Building2Icon,
   EllipsisIcon,
@@ -61,6 +63,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarInset } from "../ui/sidebar";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { toastManager } from "../ui/toast";
 import { AgentName } from "./AgentAvatar";
 import { AgentDialog, MemoryCount, type AgentDraft } from "./AgentDialog";
 import { BoardCardSheet } from "./BoardCardSheet";
@@ -138,7 +141,16 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   const command = useAtomCommand(boardCommand, { label: "board update" });
   const runCommand: RunBoardCommand = async (input) => {
     const result = await command({ environmentId, input });
-    return result._tag === "Success" ? result.value : null;
+    if (result._tag === "Success") return result.value;
+    if (Cause.hasInterruptsOnly(result.cause)) return null;
+    // The server says why it refused, such as a merge into a folder with uncommitted changes.
+    const error = squashAtomCommandFailure(result);
+    toastManager.add({
+      type: "error",
+      title: "The board couldn't do that",
+      ...(error instanceof Error ? { description: error.message } : {}),
+    });
+    return null;
   };
   const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [newCardOpen, setNewCardOpen] = useState(false);
