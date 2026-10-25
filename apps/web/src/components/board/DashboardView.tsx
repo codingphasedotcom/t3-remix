@@ -2,8 +2,10 @@ import type {
   BoardAgent,
   BoardDashboard,
   BoardDashboardDay,
+  BoardDepartmentId,
   BoardSnapshot,
   BoardTaskId,
+  BoardTaskStatus,
   EnvironmentId,
 } from "@t3tools/contracts";
 import {
@@ -12,7 +14,19 @@ import {
   formatPercent,
   formatTokens,
 } from "@t3tools/shared/usageFormat";
-import { AlertTriangleIcon, InboxIcon, UserPlusIcon, XCircleIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  BotIcon,
+  CircleCheckIcon,
+  CoinsIcon,
+  GaugeIcon,
+  InboxIcon,
+  ListTodoIcon,
+  TimerIcon,
+  UserPlusIcon,
+  XCircleIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
@@ -45,14 +59,82 @@ import {
   type EmployeeActivity,
 } from "./dashboard.logic";
 
-const METRICS: ReadonlyArray<{ readonly id: ActivityMetric; readonly label: string }> = [
-  { id: "runs", label: "Runs" },
-  { id: "tasksFinished", label: "Tasks finished" },
-  { id: "tokens", label: "Tokens" },
+const TONES = {
+  gray: { fill: "bg-muted-foreground/40", tint: "bg-muted", ink: "text-muted-foreground" },
+  indigo: {
+    fill: "bg-indigo-500",
+    tint: "bg-indigo-500/10 dark:bg-indigo-500/15",
+    ink: "text-indigo-600 dark:text-indigo-400",
+  },
+  sky: {
+    fill: "bg-sky-500",
+    tint: "bg-sky-500/10 dark:bg-sky-500/15",
+    ink: "text-sky-600 dark:text-sky-400",
+  },
+  amber: {
+    fill: "bg-amber-500",
+    tint: "bg-amber-500/10 dark:bg-amber-500/15",
+    ink: "text-amber-600 dark:text-amber-400",
+  },
+  red: {
+    fill: "bg-red-500",
+    tint: "bg-red-500/10 dark:bg-red-500/15",
+    ink: "text-red-600 dark:text-red-400",
+  },
+  emerald: {
+    fill: "bg-emerald-500",
+    tint: "bg-emerald-500/10 dark:bg-emerald-500/15",
+    ink: "text-emerald-600 dark:text-emerald-400",
+  },
+  teal: {
+    fill: "bg-teal-500",
+    tint: "bg-teal-500/10 dark:bg-teal-500/15",
+    ink: "text-teal-600 dark:text-teal-400",
+  },
+  violet: {
+    fill: "bg-violet-500",
+    tint: "bg-violet-500/10 dark:bg-violet-500/15",
+    ink: "text-violet-600 dark:text-violet-400",
+  },
+} as const;
+
+type Tone = keyof typeof TONES;
+
+// Same hues as the sidebar's thread pills: sky is working, amber waits on a person.
+const COLUMN_TONES: Record<BoardTaskStatus, Tone> = {
+  backlog: "gray",
+  todo: "indigo",
+  in_progress: "sky",
+  review: "amber",
+  blocked: "red",
+  done: "emerald",
+};
+
+// Checked in both themes: the first six stay apart from one another and
+// neighbours stay apart under colour blindness. The ninth department starts over.
+const DEPARTMENT_FILLS = [
+  "bg-blue-500",
+  "bg-teal-500 dark:bg-teal-600",
+  "bg-orange-500 dark:bg-orange-600",
+  "bg-pink-500",
+  "bg-lime-600",
+  "bg-fuchsia-500",
+  "bg-amber-600",
+  "bg-violet-500",
+] as const;
+
+const METRICS: ReadonlyArray<{
+  readonly id: ActivityMetric;
+  readonly label: string;
+  readonly tone: Tone;
+}> = [
+  { id: "runs", label: "Runs", tone: "sky" },
+  { id: "tasksFinished", label: "Tasks finished", tone: "emerald" },
+  { id: "tokens", label: "Tokens", tone: "violet" },
 ];
 
-const percentOrDash = (share: number | null) => (share === null ? "—" : formatPercent(share, 0));
-const spanOrDash = (ms: number | null) => (ms === null ? "—" : formatSpan(ms));
+const percentOrDash = (share: number | null) => (share === null ? "–" : formatPercent(share, 0));
+const spanOrDash = (ms: number | null) => (ms === null ? "–" : formatSpan(ms));
 
 export function DashboardView(props: {
   readonly environmentId: EnvironmentId;
@@ -86,6 +168,11 @@ export function DashboardView(props: {
   const finishedRecently =
     dashboard?.days.reduce((total, day) => total + day.tasksFinished, 0) ?? null;
   const paused = snapshot.agents.filter((agent) => agent.paused).length;
+  const departments = snapshot.company?.departments ?? [];
+  const departmentFill = (departmentId: BoardDepartmentId | null) => {
+    const index = departments.findIndex((department) => department.id === departmentId);
+    return index === -1 ? null : (DEPARTMENT_FILLS[index % DEPARTMENT_FILLS.length] ?? null);
+  };
   const loading = (value: ReactNode) => (dashboard === null ? null : value);
 
   return (
@@ -99,31 +186,43 @@ export function DashboardView(props: {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatTile
           label="Open tasks"
+          icon={ListTodoIcon}
+          tone="indigo"
           value={formatCount(openCards)}
           detail={`${blocked} blocked · ${inReview} in review`}
         />
         <StatTile
           label="Finished, 14 days"
+          icon={CircleCheckIcon}
+          tone="emerald"
           value={loading(formatCount(finishedRecently ?? 0))}
           detail={`${formatCount(doneAllTime)} done all time`}
         />
         <StatTile
           label="Working now"
+          icon={BotIcon}
+          tone="sky"
           value={loading(formatCount(totals?.running ?? 0))}
           detail={`${snapshot.agents.length} employees · ${paused} paused`}
         />
         <StatTile
           label="Run success"
+          icon={GaugeIcon}
+          tone="teal"
           value={loading(percentOrDash(totals === null ? null : successRate(totals)))}
           detail={totals === null ? "" : `${totals.failed} failed of ${formatCount(totals.runs)}`}
         />
         <StatTile
           label="Time to done"
+          icon={TimerIcon}
+          tone="amber"
           value={loading(spanOrDash(dashboard?.medianCycleMs ?? null))}
           detail="Median, created to done"
         />
         <StatTile
           label="Tokens"
+          icon={CoinsIcon}
+          tone="violet"
           value={loading(formatTokens(totals === null ? 0 : totalTokens(totals.tokens)))}
           detail={
             totals === null ? "" : `${percentOrDash(cachedShare(totals.tokens))} of input cached`
@@ -179,6 +278,7 @@ export function DashboardView(props: {
               label: column.label,
               value: column.count,
               display: formatCount(column.count),
+              fill: TONES[COLUMN_TONES[column.status]].fill,
             }))}
           />
         </Panel>
@@ -198,6 +298,7 @@ export function DashboardView(props: {
               label: department.name,
               value: department.openCards,
               display: `${department.openCards} open · ${department.headcount} ${department.headcount === 1 ? "person" : "people"}`,
+              fill: departmentFill(department.id) ?? TONES.gray.fill,
             }))}
           />
         </Panel>
@@ -236,7 +337,12 @@ export function DashboardView(props: {
                       </span>
                     </span>
                   </TableCell>
-                  <TableCell>{row.department ?? "—"}</TableCell>
+                  <TableCell>
+                    <DepartmentName
+                      name={row.department}
+                      fill={departmentFill(row.agent.departmentId)}
+                    />
+                  </TableCell>
                   <TableCell>
                     <ModelName model={row.agent.modelSelection.model} />
                   </TableCell>
@@ -252,7 +358,7 @@ export function DashboardView(props: {
                   <NumberCell>
                     {loading(
                       row.stats.lastRunAt === null
-                        ? "—"
+                        ? "–"
                         : formatRelativeTimeLabel(row.stats.lastRunAt),
                     )}
                   </NumberCell>
@@ -287,12 +393,27 @@ function Panel(props: {
 
 function StatTile(props: {
   readonly label: string;
+  readonly icon: LucideIcon;
+  readonly tone: Tone;
   readonly value: ReactNode;
   readonly detail: string;
 }) {
+  const Icon = props.icon;
   return (
     <div className="flex min-w-0 flex-col gap-1 rounded-2xl border bg-card p-4">
-      <span className="text-xs text-muted-foreground">{props.label}</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-xs text-muted-foreground">{props.label}</span>
+        <span
+          aria-hidden
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-lg",
+            TONES[props.tone].tint,
+            TONES[props.tone].ink,
+          )}
+        >
+          <Icon className="size-3.5" />
+        </span>
+      </div>
       {props.value === null ? (
         <Skeleton className="h-7 w-16" />
       ) : (
@@ -312,7 +433,9 @@ function ActivityChart(props: {
   const values = props.days.map((day) => day[props.metric]);
   const format = props.metric === "tokens" ? formatTokens : formatCount;
   const scale = niceScale(Math.max(0, ...values), CHART_TICKS);
-  const label = METRICS.find((option) => option.id === props.metric)?.label ?? "";
+  const option = METRICS.find((entry) => entry.id === props.metric);
+  const label = option?.label ?? "";
+  const fill = TONES[option?.tone ?? "gray"].fill;
   const first = props.days[0];
   const middle = props.days[Math.floor(props.days.length / 2)];
   const last = props.days.at(-1);
@@ -358,7 +481,7 @@ function ActivityChart(props: {
                 }
               >
                 <div
-                  className="w-full rounded-t-xs bg-primary"
+                  className={cn("w-full rounded-t-xs", fill)}
                   style={{ height: `${(day[props.metric] / scale.max) * 100}%` }}
                 />
               </TooltipTrigger>
@@ -384,6 +507,7 @@ function BarList(props: {
     readonly label: string;
     readonly value: number;
     readonly display: string;
+    readonly fill: string;
   }>;
 }) {
   const peak = Math.max(1, ...props.rows.map((row) => row.value));
@@ -391,13 +515,16 @@ function BarList(props: {
     <div className="flex flex-col gap-2.5">
       {props.rows.map((row) => (
         <div key={row.key} className="flex flex-col gap-1">
-          <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="truncate text-foreground">{row.label}</span>
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="flex min-w-0 items-center gap-2">
+              <span aria-hidden className={cn("size-2 shrink-0 rounded-full", row.fill)} />
+              <span className="truncate text-foreground">{row.label}</span>
+            </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">{row.display}</span>
           </div>
           <div className="h-1.5 rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-primary"
+              className={cn("h-full rounded-full", row.fill)}
               style={{ width: `${(row.value / peak) * 100}%` }}
             />
           </div>
@@ -418,7 +545,7 @@ function AttentionList(props: {
     <div className="flex flex-wrap gap-1">
       {attention.pendingHires > 0 ? (
         <Button variant="outline" size="sm" className="max-w-full" onClick={props.onOpenOrgChart}>
-          <UserPlusIcon />
+          <UserPlusIcon className={TONES.indigo.ink} />
           <span className="truncate">
             {attention.pendingHires} hire {attention.pendingHires === 1 ? "request" : "requests"} to
             review
@@ -433,7 +560,7 @@ function AttentionList(props: {
           className="max-w-full"
           onClick={() => props.onOpenCard(task.id)}
         >
-          <AlertTriangleIcon />
+          <AlertTriangleIcon className={TONES.red.ink} />
           <span className="truncate">Blocked: {task.title}</span>
         </Button>
       ))}
@@ -445,13 +572,13 @@ function AttentionList(props: {
           className="max-w-full"
           onClick={() => props.onOpenCard(task.id)}
         >
-          <InboxIcon />
+          <InboxIcon className={TONES.amber.ink} />
           <span className="truncate">No assignee: {task.title}</span>
         </Button>
       ))}
       {attention.failing.map((entry) => (
         <div key={entry.agentId} className="flex items-center gap-2 px-2 py-1.5 text-sm">
-          <XCircleIcon className="size-4 shrink-0 text-muted-foreground" />
+          <XCircleIcon className={cn("size-4 shrink-0", TONES.red.ink)} />
           <span className="truncate">
             {agentById(props.agents, entry.agentId)?.name ?? "A former employee"} had {entry.failed}{" "}
             failed {entry.failed === 1 ? "run" : "runs"}
@@ -519,7 +646,7 @@ function ModelsTable(props: {
                 <span className="flex items-center gap-2">
                   <span className="h-1.5 w-24 rounded-full bg-muted">
                     <span
-                      className="block h-full rounded-full bg-primary"
+                      className={cn("block h-full rounded-full", TONES.violet.fill)}
                       style={{ width: `${share * 100}%` }}
                     />
                   </span>
@@ -538,6 +665,18 @@ function ModelsTable(props: {
 
 function ModelName(props: { readonly model: string }) {
   return <span className="font-mono text-foreground">{props.model}</span>;
+}
+
+function DepartmentName(props: { readonly name: string | null; readonly fill: string | null }) {
+  if (props.name === null) return "–";
+  return (
+    <span className="flex items-center gap-2">
+      {props.fill === null ? null : (
+        <span aria-hidden className={cn("size-2 shrink-0 rounded-full", props.fill)} />
+      )}
+      {props.name}
+    </span>
+  );
 }
 
 function ActivityBadge(props: { readonly activity: EmployeeActivity }) {
