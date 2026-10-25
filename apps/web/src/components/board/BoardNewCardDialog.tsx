@@ -1,7 +1,8 @@
 import type { BoardAgentId, BoardSnapshot, BoardTaskStatus } from "@t3tools/contracts";
-import { FileIcon, XIcon } from "lucide-react";
+import { ClipboardPlusIcon, FileIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -19,6 +20,7 @@ import type { RunBoardCommand } from "./BoardPage";
 import { mentionCandidates, type MentionCandidate } from "./boardMentions";
 import { FilePicker } from "./FilePicker";
 import { MentionField } from "./MentionField";
+import { OFFICE_CARD, OFFICE_INSET, OfficeHeading, OfficeIconTile } from "./OfficeSurface";
 
 export function BoardNewCardDialog(props: {
   readonly open: boolean;
@@ -89,45 +91,55 @@ function NewCardForm(props: {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>New task</DialogTitle>
-          <DialogDescription>
-            Describe the outcome you want. The CEO plans it and delegates the work to the team; you
-            review the result. Keep it in the backlog to start it later.
-          </DialogDescription>
+          <OfficeHeading
+            icon={<ClipboardPlusIcon />}
+            tone="indigo"
+            title={<DialogTitle>New task</DialogTitle>}
+            description={
+              <DialogDescription>
+                Describe the outcome you want. The CEO plans it and delegates the work to the team;
+                you review the result. Keep it in the backlog to start it later.
+              </DialogDescription>
+            }
+          />
         </DialogHeader>
         <DialogPanel>
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="board-card-title">Title</Label>
-              <MentionField
-                id="board-card-title"
-                value={title}
-                autoFocus
-                placeholder="Add rate limiting to the public API"
-                candidates={candidates}
-                onMention={onMention}
-                onChange={setTitle}
-              />
+            <div className={OFFICE_INSET}>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="board-card-title">Title</Label>
+                <MentionField
+                  id="board-card-title"
+                  value={title}
+                  autoFocus
+                  placeholder="Add rate limiting to the public API"
+                  candidates={candidates}
+                  onMention={onMention}
+                  onChange={setTitle}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="board-card-description">Description</Label>
+                <MentionField
+                  id="board-card-description"
+                  multiline
+                  value={description}
+                  rows={6}
+                  placeholder="What done looks like, constraints, links… Type @ to mention a role."
+                  candidates={candidates}
+                  onMention={onMention}
+                  onChange={setDescription}
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="board-card-description">Description</Label>
-              <MentionField
-                id="board-card-description"
-                multiline
-                value={description}
-                rows={6}
-                placeholder="What done looks like, constraints, links… Type @ to mention a role."
-                candidates={candidates}
-                onMention={onMention}
-                onChange={setDescription}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
+            <div className={cn(OFFICE_INSET, "gap-2")}>
               <Label>Files</Label>
               <FilePicker onAdd={(paths) => setFiles([...new Set([...files, ...paths])])}>
                 {files.map((file) => (
-                  <div key={file} className="flex min-w-0 items-center gap-2 text-sm">
-                    <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <div key={file} className={cn(OFFICE_CARD, "flex-row items-center gap-3 p-3")}>
+                    <OfficeIconTile tone="gray">
+                      <FileIcon />
+                    </OfficeIconTile>
                     <span className="min-w-0 flex-1 truncate font-mono text-xs">{file}</span>
                     <Button
                       size="icon-xs"
@@ -144,7 +156,7 @@ function NewCardForm(props: {
                 Agents use the files where they are on this computer; nothing is uploaded.
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={cn(OFFICE_INSET, "grid grid-cols-2 gap-3")}>
               <div className="flex flex-col gap-2">
                 <Label>Assignee</Label>
                 <AgentSelect
@@ -168,7 +180,7 @@ function NewCardForm(props: {
             </div>
           </div>
         </DialogPanel>
-        <DialogFooter>
+        <DialogFooter variant="bare">
           <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
           <Button
             variant="outline"

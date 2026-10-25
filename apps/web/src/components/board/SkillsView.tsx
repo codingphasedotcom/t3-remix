@@ -1,8 +1,9 @@
 import type { BoardSkill, BoardSkillId, BoardSnapshot } from "@t3tools/contracts";
-import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { PencilIcon, PlusIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
+import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -18,8 +19,18 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import { Textarea } from "../ui/textarea";
+import { AgentName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
 import { SKILL_PRESETS } from "./board.logic";
+import {
+  OFFICE_CARD,
+  OFFICE_INSET,
+  OFFICE_PANEL,
+  OfficeHeading,
+  OfficeIconTile,
+  OfficePill,
+  OfficeTitle,
+} from "./OfficeSurface";
 
 interface SkillDraft {
   readonly id: BoardSkillId | null;
@@ -58,85 +69,94 @@ export function SkillsView(props: {
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-medium">Skill library</h2>
-            <span className="text-xs text-muted-foreground">
-              A skill is a reusable playbook. Agents get the instructions of every skill you give
-              them on each task they work.
-            </span>
-          </div>
-          <div className="flex gap-2">
-            {missingPresets.length > 0 ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!props.canOperate}
-                onClick={() => void addPresets()}
-              >
-                Add starter skills
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-8">
+        <OfficeHeading
+          icon={<SparklesIcon />}
+          tone="indigo"
+          title={<OfficeTitle>Skill library</OfficeTitle>}
+          description="A skill is a reusable playbook. Agents get the instructions of every skill you give them on each task they work."
+          actions={
+            <>
+              {missingPresets.length > 0 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!props.canOperate}
+                  onClick={() => void addPresets()}
+                >
+                  Add starter skills
+                </Button>
+              ) : null}
+              <Button size="sm" disabled={!props.canOperate} onClick={() => setDraft(EMPTY_SKILL)}>
+                <PlusIcon />
+                New skill
               </Button>
-            ) : null}
-            <Button size="sm" disabled={!props.canOperate} onClick={() => setDraft(EMPTY_SKILL)}>
-              <PlusIcon />
-              New skill
-            </Button>
+            </>
+          }
+        />
+        <div className={OFFICE_PANEL}>
+          <div className="flex px-1 pt-1">
+            <OfficePill tone="indigo">Skills: {snapshot.skills.length}</OfficePill>
           </div>
-        </div>
-        {snapshot.skills.length === 0 ? (
-          <span className="text-sm text-muted-foreground">No skills yet.</span>
-        ) : null}
-        {snapshot.skills.map((skill) => {
-          const holders = snapshot.agents.filter((agent) => agent.skillIds.includes(skill.id));
-          return (
-            <div key={skill.id} className="flex items-start gap-3 rounded-lg border bg-card p-3">
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="text-sm font-medium">{skill.name}</span>
-                {skill.description ? (
-                  <span className="text-xs text-muted-foreground">{skill.description}</span>
-                ) : null}
-                <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
-                  {skill.instructions}
-                </p>
-                {holders.length > 0 ? (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {holders.map((agent) => (
-                      <Badge key={agent.id} variant="outline" size="sm">
-                        {agent.name}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
+          {snapshot.skills.length === 0 ? (
+            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No skills yet.</div>
+          ) : null}
+          {snapshot.skills.map((skill) => {
+            const holders = snapshot.agents.filter((agent) => agent.skillIds.includes(skill.id));
+            return (
+              <div key={skill.id} className={cn(OFFICE_CARD, "flex-row items-start")}>
+                <OfficeIconTile tone="indigo">
+                  <SparklesIcon />
+                </OfficeIconTile>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="text-base leading-snug font-medium">{skill.name}</span>
+                  {skill.description ? (
+                    <span className="text-xs text-muted-foreground">{skill.description}</span>
+                  ) : null}
+                  <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                    {skill.instructions}
+                  </p>
+                  {holders.length > 0 ? (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {holders.map((agent) => (
+                        <Badge key={agent.id} variant="secondary" size="sm">
+                          <AgentName agent={agent} />
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Edit ${skill.name}`}
+                    disabled={!props.canOperate}
+                    onClick={() =>
+                      setDraft({
+                        id: skill.id,
+                        name: skill.name,
+                        description: skill.description,
+                        instructions: skill.instructions,
+                      })
+                    }
+                  >
+                    <PencilIcon />
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost-destructive"
+                    aria-label={`Delete ${skill.name}`}
+                    disabled={!props.canOperate}
+                    onClick={() => void remove(skill)}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                </div>
               </div>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Edit ${skill.name}`}
-                disabled={!props.canOperate}
-                onClick={() =>
-                  setDraft({
-                    id: skill.id,
-                    name: skill.name,
-                    description: skill.description,
-                    instructions: skill.instructions,
-                  })
-                }
-              >
-                <PencilIcon />
-              </Button>
-              <Button
-                size="icon-sm"
-                variant="ghost-destructive"
-                aria-label={`Delete ${skill.name}`}
-                disabled={!props.canOperate}
-                onClick={() => void remove(skill)}
-              >
-                <Trash2Icon />
-              </Button>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
       <Dialog
         open={draft !== null}
@@ -181,44 +201,55 @@ function SkillForm(props: {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{draft.id === null ? "New skill" : "Edit skill"}</DialogTitle>
-        <DialogDescription>
-          Write it like a playbook: when it applies, how to do the work well, and how to check it.
-        </DialogDescription>
+        <OfficeHeading
+          icon={<SparklesIcon />}
+          tone="indigo"
+          title={<DialogTitle>{draft.id === null ? "New skill" : "Edit skill"}</DialogTitle>}
+          description={
+            <DialogDescription>
+              Write it like a playbook: when it applies, how to do the work well, and how to check
+              it.
+            </DialogDescription>
+          }
+        />
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-skill-name">Name</Label>
-            <Input
-              id="board-skill-name"
-              value={draft.name}
-              autoFocus
-              placeholder="Stripe payments"
-              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-            />
+          <div className={OFFICE_INSET}>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-skill-name">Name</Label>
+              <Input
+                id="board-skill-name"
+                value={draft.name}
+                autoFocus
+                placeholder="Stripe payments"
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-skill-description">Summary</Label>
+              <Input
+                id="board-skill-description"
+                value={draft.description}
+                placeholder="One line on what this skill is for"
+                onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+              />
+            </div>
           </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-skill-description">Summary</Label>
-            <Input
-              id="board-skill-description"
-              value={draft.description}
-              placeholder="One line on what this skill is for"
-              onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-skill-instructions">Instructions</Label>
-            <Textarea
-              id="board-skill-instructions"
-              value={draft.instructions}
-              rows={10}
-              onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
-            />
+          <div className={OFFICE_INSET}>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-skill-instructions">Instructions</Label>
+              <Textarea
+                id="board-skill-instructions"
+                value={draft.instructions}
+                rows={10}
+                onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
+              />
+            </div>
           </div>
         </div>
       </DialogPanel>
-      <DialogFooter>
+      <DialogFooter variant="bare">
         <Button size="sm" variant="outline" onClick={props.onCancel}>
           Cancel
         </Button>

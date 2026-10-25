@@ -12,9 +12,11 @@ import type {
   ProviderInstanceId,
   RuntimeMode,
 } from "@t3tools/contracts";
-import { useState } from "react";
+import { CrownIcon, UserRoundIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { cn } from "../../lib/utils";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
@@ -42,9 +44,11 @@ import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { AgentName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
 import { EMPLOYEE_PRESETS, departmentNamed } from "./board.logic";
 import { FACES, faceFor } from "./faces";
+import { OFFICE_CARD, OfficeFieldGroup, OfficeHeading } from "./OfficeSurface";
 import { TokenLimitField } from "./TokenLimitField";
 
 export interface AgentDraft {
@@ -286,132 +290,167 @@ function AgentForm(props: {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>
-          {isCeo ? "Edit CEO" : draft.id === null ? "Add employee" : `Edit ${props.draft.name}`}
-        </DialogTitle>
-        <DialogDescription>
-          {isCeo
-            ? "The CEO takes the board's tasks and delegates them to the company."
-            : "Employees work the tasks their manager assigns, using their skills and instructions."}
-        </DialogDescription>
+        <OfficeHeading
+          icon={isCeo ? <CrownIcon /> : <UserRoundIcon />}
+          tone="indigo"
+          title={
+            <DialogTitle>
+              {isCeo ? "Edit CEO" : draft.id === null ? "Add employee" : `Edit ${props.draft.name}`}
+            </DialogTitle>
+          }
+          description={
+            <DialogDescription>
+              {isCeo
+                ? "The CEO takes the board's tasks and delegates them to the company."
+                : "Employees work the tasks their manager assigns, using their skills and instructions."}
+            </DialogDescription>
+          }
+        />
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <FacePicker
-            value={draft.avatar}
-            name={draft.name}
-            onChange={(avatar) => setDraft({ ...draft, avatar })}
-          />
-          {draft.id === null ? (
-            <div className="flex flex-wrap gap-2">
-              {EMPLOYEE_PRESETS.map((preset) => (
-                <Button
-                  key={preset.title}
-                  size="xs"
-                  variant={draft.title === preset.title ? "secondary" : "outline"}
-                  onClick={() => applyPreset(preset.title)}
-                >
-                  {preset.title}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="board-agent-name">Name</Label>
-              <Input
-                id="board-agent-name"
-                value={draft.name}
-                autoFocus
-                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="board-agent-title">Role</Label>
-              <Input
-                id="board-agent-title"
-                value={isCeo ? "CEO" : draft.title}
-                disabled={isCeo}
-                placeholder="Backend engineer"
-                onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-              />
-            </div>
-            <div className="flex min-w-0 flex-col gap-2">
-              <Label>Department</Label>
-              <Select
-                value={draft.departmentId ?? ""}
-                onValueChange={(value) =>
-                  setDraft({ ...draft, departmentId: (value as BoardDepartmentId) || null })
-                }
-              >
-                <SelectTrigger size="sm">
-                  <SelectValue>{department?.name ?? "Choose a department"}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {departments.map((candidate) => (
-                    <SelectItem key={candidate.id} value={candidate.id} label={candidate.name}>
-                      {candidate.name}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-2">
-              <Label>Reports to</Label>
-              {isCeo ? (
-                <span className="text-sm text-muted-foreground">The board (you)</span>
-              ) : (
+          <OfficeFieldGroup label="Identity" tone="indigo">
+            {draft.id === null ? (
+              <div className="flex flex-wrap gap-2">
+                {EMPLOYEE_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.title}
+                    size="xs"
+                    variant={draft.title === preset.title ? "default" : "outline"}
+                    onClick={() => applyPreset(preset.title)}
+                  >
+                    {preset.title}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+            <FacePicker
+              value={draft.avatar}
+              name={draft.name}
+              onChange={(avatar) => setDraft({ ...draft, avatar })}
+            >
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="board-agent-name">Name</Label>
+                <Input
+                  id="board-agent-name"
+                  value={draft.name}
+                  autoFocus
+                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="board-agent-title">Role</Label>
+                <Input
+                  id="board-agent-title"
+                  value={isCeo ? "CEO" : draft.title}
+                  disabled={isCeo}
+                  placeholder="Backend engineer"
+                  onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Department</Label>
                 <Select
-                  value={draft.reportsToAgentId ?? ""}
+                  value={draft.departmentId ?? ""}
                   onValueChange={(value) =>
-                    setDraft({ ...draft, reportsToAgentId: (value as BoardAgentId) || null })
+                    setDraft({ ...draft, departmentId: (value as BoardDepartmentId) || null })
                   }
                 >
                   <SelectTrigger size="sm">
-                    <SelectValue>
-                      {manager === null
-                        ? "Choose a manager"
-                        : `${manager.name}${manager.title ? ` · ${manager.title}` : ""}`}
-                    </SelectValue>
+                    <SelectValue>{department?.name ?? "Choose a department"}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
-                    {managers.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id} label={agent.name}>
-                        {agent.name}
-                        {agent.title ? ` · ${agent.title}` : ""}
+                    {departments.map((candidate) => (
+                      <SelectItem key={candidate.id} value={candidate.id} label={candidate.name}>
+                        {candidate.name}
                       </SelectItem>
                     ))}
                   </SelectPopup>
                 </Select>
-              )}
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Reports to</Label>
+                {isCeo ? (
+                  <span className="flex min-h-8 items-center text-sm text-muted-foreground sm:min-h-7">
+                    The board (you)
+                  </span>
+                ) : (
+                  <Select
+                    value={draft.reportsToAgentId ?? ""}
+                    onValueChange={(value) =>
+                      setDraft({ ...draft, reportsToAgentId: (value as BoardAgentId) || null })
+                    }
+                  >
+                    <SelectTrigger size="sm">
+                      <SelectValue>
+                        {manager === null ? (
+                          "Choose a manager"
+                        ) : (
+                          <AgentName agent={manager}>
+                            {manager.name}
+                            {manager.title ? ` · ${manager.title}` : ""}
+                          </AgentName>
+                        )}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup>
+                      {managers.map((agent) => (
+                        <SelectItem key={agent.id} value={agent.id} label={agent.name}>
+                          <AgentName agent={agent}>
+                            {agent.name}
+                            {agent.title ? ` · ${agent.title}` : ""}
+                          </AgentName>
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                )}
+              </div>
+            </FacePicker>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Model" tone="sky">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Model</Label>
+                <ModelField
+                  environmentId={props.environmentId}
+                  projectId={company?.projectId ?? null}
+                  value={draft.modelSelection}
+                  disabled={saving}
+                  onChange={(modelSelection) => setDraft({ ...draft, modelSelection })}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Permissions</Label>
+                <PermissionsField
+                  value={draft.runtimeMode}
+                  onChange={(runtimeMode) => setDraft({ ...draft, runtimeMode })}
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              <Label>Model</Label>
-              <ModelField
-                environmentId={props.environmentId}
-                projectId={company?.projectId ?? null}
-                value={draft.modelSelection}
-                disabled={saving}
-                onChange={(modelSelection) => setDraft({ ...draft, modelSelection })}
-              />
-            </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>Skills</Label>
+            {draft.runtimeMode !== "full-access" ? (
+              <span className="text-xs text-muted-foreground">
+                Board agents run unattended. With this mode they pause in their thread until you
+                approve each prompt.
+              </span>
+            ) : null}
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Skills" tone="violet">
             {snapshot.skills.length === 0 ? (
               <span className="text-sm text-muted-foreground">
                 The company has no skills yet. Add them on the Skills tab.
               </span>
             ) : (
-              <div className="grid grid-cols-2 gap-1 rounded-lg border border-input bg-muted/25 p-1">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {snapshot.skills.map((skill) => {
                   const checked = draft.skillIds.includes(skill.id);
                   return (
                     <label
                       key={skill.id}
-                      className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-muted/40"
+                      className={cn(
+                        OFFICE_CARD,
+                        "cursor-pointer flex-row items-start gap-3 p-3 hover:shadow-md",
+                      )}
                     >
                       <Checkbox
                         className="mt-0.5"
@@ -426,12 +465,10 @@ function AgentForm(props: {
                           })
                         }
                       />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium text-foreground">
-                          {skill.name}
-                        </span>
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="text-sm font-medium text-foreground">{skill.name}</span>
                         {skill.description ? (
-                          <span className="block text-xs leading-snug text-muted-foreground">
+                          <span className="text-xs leading-snug text-muted-foreground">
                             {skill.description}
                           </span>
                         ) : null}
@@ -441,73 +478,64 @@ function AgentForm(props: {
                 })}
               </div>
             )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-2">
-              <Label>Permissions</Label>
-              <PermissionsField
-                value={draft.runtimeMode}
-                onChange={(runtimeMode) => setDraft({ ...draft, runtimeMode })}
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Limits" tone="amber">
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <TokenLimitField
+                id="board-agent-token-limit"
+                label="Monthly token limit"
+                value={draft.monthlyTokenLimit}
+                used={
+                  snapshot.usage === null || draft.id === null
+                    ? null
+                    : (snapshot.usage.agents.find((row) => row.agentId === draft.id)?.tokens ?? 0)
+                }
+                onChange={(monthlyTokenLimit) => setDraft({ ...draft, monthlyTokenLimit })}
+                onValidityChange={setLimitValid}
               />
-            </div>
-            <div className="flex items-center justify-between gap-3 pt-6">
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="board-agent-paused">Paused</Label>
-                <span className="text-xs text-muted-foreground">
-                  Paused agents keep their tasks but are not started.
-                </span>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="board-agent-paused">Paused</Label>
+                  <span className="text-xs text-muted-foreground">
+                    Paused agents keep their tasks but are not started.
+                  </span>
+                </div>
+                <Switch
+                  id="board-agent-paused"
+                  checked={draft.paused}
+                  onCheckedChange={(paused) => setDraft({ ...draft, paused })}
+                />
               </div>
-              <Switch
-                id="board-agent-paused"
-                checked={draft.paused}
-                onCheckedChange={(paused) => setDraft({ ...draft, paused })}
+            </div>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Instructions" tone="gray">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-agent-instructions">Standing instructions</Label>
+              <Textarea
+                id="board-agent-instructions"
+                value={draft.instructions}
+                rows={6}
+                placeholder="What this agent owns, how it works, what it must never do."
+                onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
               />
             </div>
-          </div>
-          <TokenLimitField
-            id="board-agent-token-limit"
-            label="Monthly token limit"
-            value={draft.monthlyTokenLimit}
-            used={
-              snapshot.usage === null || draft.id === null
-                ? null
-                : (snapshot.usage.agents.find((row) => row.agentId === draft.id)?.tokens ?? 0)
-            }
-            onChange={(monthlyTokenLimit) => setDraft({ ...draft, monthlyTokenLimit })}
-            onValidityChange={setLimitValid}
-          />
-          {draft.runtimeMode !== "full-access" ? (
-            <span className="text-xs text-muted-foreground">
-              Board agents run unattended. With this mode they pause in their thread until you
-              approve each prompt.
-            </span>
-          ) : null}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-agent-instructions">Standing instructions</Label>
-            <Textarea
-              id="board-agent-instructions"
-              value={draft.instructions}
-              rows={6}
-              placeholder="What this agent owns, how it works, what it must never do."
-              onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="board-agent-memory">Memory</Label>
-              <MemoryCount length={draft.memory.length} limit={MAX_AGENT_MEMORY_CHARS} />
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="board-agent-memory">Memory</Label>
+                <MemoryCount length={draft.memory.length} limit={MAX_AGENT_MEMORY_CHARS} />
+              </div>
+              <Textarea
+                id="board-agent-memory"
+                value={draft.memory}
+                rows={5}
+                placeholder="Lessons this agent writes down between tasks appear here. You can edit or clear them."
+                onChange={(event) => setDraft({ ...draft, memory: event.target.value })}
+              />
             </div>
-            <Textarea
-              id="board-agent-memory"
-              value={draft.memory}
-              rows={5}
-              placeholder="Lessons this agent writes down between tasks appear here. You can edit or clear them."
-              onChange={(event) => setDraft({ ...draft, memory: event.target.value })}
-            />
-          </div>
+          </OfficeFieldGroup>
         </div>
       </DialogPanel>
-      <DialogFooter>
+      <DialogFooter variant="bare">
         <Button size="sm" variant="outline" onClick={props.onClose}>
           Cancel
         </Button>
@@ -519,6 +547,7 @@ function AgentForm(props: {
   );
 }
 
+/** A soft grey block of related fields on a white dialog, led by a small pill. */
 export function MemoryCount(props: { readonly length: number; readonly limit: number }) {
   return (
     <span
@@ -533,33 +562,36 @@ export function MemoryCount(props: { readonly length: number; readonly limit: nu
   );
 }
 
+/** The face beside the fields it belongs to, so the dialog reads like a profile card. */
 function FacePicker(props: {
   readonly value: string;
   readonly name: string;
   readonly onChange: (key: string) => void;
+  readonly children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const current = FACES.find((face) => face.key === props.value) ?? FACES[0];
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-3">
-        <span className="inline-flex size-14 shrink-0 overflow-hidden rounded-full bg-muted ring-2 ring-border">
-          {current !== undefined ? (
-            <img src={current.url} alt="" className="size-full object-cover" draggable={false} />
-          ) : null}
-        </span>
-        <div className="flex flex-col gap-1">
+    <>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex shrink-0 flex-col items-start gap-2">
           <Label>Face</Label>
+          <span className="inline-flex size-20 overflow-hidden rounded-full bg-card shadow-sm">
+            {current !== undefined ? (
+              <img src={current.url} alt="" className="size-full object-cover" draggable={false} />
+            ) : null}
+          </span>
           <Button size="xs" variant="outline" onClick={() => setOpen(!open)}>
             {open ? "Done" : "Change face"}
           </Button>
         </div>
+        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2">{props.children}</div>
       </div>
       {open ? (
         <div
           role="radiogroup"
           aria-label={`Face for ${props.name || "this agent"}`}
-          className="grid grid-cols-8 gap-2 rounded-lg border border-input bg-muted/25 p-2"
+          className={cn(OFFICE_CARD, "grid grid-cols-8 gap-2 p-3")}
         >
           {FACES.map((face) => (
             <button
@@ -570,8 +602,8 @@ function FacePicker(props: {
               aria-label={face.key}
               className={
                 face.key === current?.key
-                  ? "overflow-hidden rounded-full bg-background ring-2 ring-primary"
-                  : "overflow-hidden rounded-full bg-background ring-1 ring-border hover:ring-foreground/40"
+                  ? "overflow-hidden rounded-full bg-muted ring-2 ring-primary"
+                  : "overflow-hidden rounded-full bg-muted hover:ring-2 hover:ring-foreground/20"
               }
               onClick={() => props.onChange(face.key)}
             >
@@ -580,6 +612,6 @@ function FacePicker(props: {
           ))}
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

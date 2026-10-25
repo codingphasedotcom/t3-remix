@@ -12,13 +12,20 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import type { BoardSnapshot, BoardTask, BoardTaskId, BoardTaskStatus } from "@t3tools/contracts";
-import { CircleDotIcon, ListTreeIcon, MessageSquareIcon } from "lucide-react";
-import { useState } from "react";
+import type {
+  BoardRunKind,
+  BoardSnapshot,
+  BoardTask,
+  BoardTaskId,
+  BoardTaskStatus,
+} from "@t3tools/contracts";
+import { ChevronRightIcon, ClockIcon, ListTreeIcon, MessageSquareIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
-import { AgentAvatar } from "./AgentAvatar";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { AgentAvatar, AgentName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
 import {
   BOARD_COLUMNS,
@@ -28,6 +35,14 @@ import {
   subtaskProgress,
   type BoardPlacement,
 } from "./board.logic";
+import { COLUMN_TONES } from "./boardTones";
+import { OFFICE_CARD, OFFICE_PANEL, OfficePill, statusPillVariant } from "./OfficeSurface";
+
+const RUN_LABELS: Record<BoardRunKind, string> = {
+  work: "Working now",
+  review: "Reviewing now",
+  reply: "Replying now",
+};
 
 /**
  * Columns are tall, so corner distance picks the wrong one; use what is under the pointer.
@@ -105,7 +120,7 @@ export function BoardColumns(props: {
       onDragCancel={() => setDraggingId(null)}
       onDragEnd={(event) => void onDragEnd(event)}
     >
-      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-(--workspace-gutter-start) pb-4">
+      <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-(--workspace-gutter-start) pb-4">
         {BOARD_COLUMNS.map((column) => (
           <BoardColumnView
             key={column.status}
@@ -145,19 +160,19 @@ function BoardColumnView(props: {
     <section
       ref={setNodeRef}
       aria-label={props.label}
-      className={cn(
-        "flex w-72 shrink-0 flex-col rounded-xl border bg-muted/30",
-        isOver && "border-primary/50 bg-muted/60",
-      )}
+      className={cn(OFFICE_PANEL, "w-80 shrink-0 gap-0 p-0", isOver && "ring-2 ring-primary/30")}
     >
-      <header className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
-        <div className="flex min-w-0 flex-col">
-          <span className="text-sm font-medium">{props.label}</span>
-          <span className="truncate text-xs text-muted-foreground">{props.hint}</span>
-        </div>
-        <span className="text-xs tabular-nums text-muted-foreground">{props.tasks.length}</span>
+      <header className="flex px-4 pt-4 pb-3">
+        <Tooltip>
+          <TooltipTrigger render={<span className="flex" />}>
+            <OfficePill tone={COLUMN_TONES[props.status]} variant={statusPillVariant(props.status)}>
+              {props.label}: {props.tasks.length}
+            </OfficePill>
+          </TooltipTrigger>
+          <TooltipPopup side="top">{props.hint}</TooltipPopup>
+        </Tooltip>
       </header>
-      <div className="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
+      <div className="flex min-h-24 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
         {props.tasks.map((task) => (
           <DraggableBoardCard
             key={task.id}
@@ -198,7 +213,7 @@ function DraggableBoardCard(props: {
         droppable.setNodeRef(node);
       }}
       className={cn(
-        "rounded-lg",
+        "rounded-2xl",
         draggable.isDragging && "opacity-40",
         droppable.isOver && !draggable.isDragging && "ring-2 ring-primary/40",
       )}
@@ -224,6 +239,13 @@ function BoardCardFace(props: {
     task.parentTaskId === null
       ? null
       : (snapshot.tasks.find((candidate) => candidate.id === task.parentTaskId) ?? null);
+  const live = task.activeRunKind !== null;
+  // The meta line names one person; the footer shows anyone else on the card.
+  const named = task.activeRunKind === "review" ? reviewer : assignee;
+  const others = [
+    { agent: assignee, title: "Assignee" },
+    { agent: reviewer, title: "Reviewer" },
+  ].filter((entry) => entry.agent !== null && entry.agent.id !== named?.id);
   return (
     <div
       role="button"
@@ -233,46 +255,115 @@ function BoardCardFace(props: {
         if (event.key === "Enter") props.onOpen?.();
       }}
       className={cn(
-        "flex cursor-pointer flex-col gap-2 rounded-lg border bg-card p-3 text-left text-card-foreground shadow-xs hover:border-foreground/20",
-        props.lifted && "shadow-lg",
+        "cursor-pointer text-left",
+        live
+          ? "flex flex-col gap-3 rounded-2xl bg-primary p-4 text-primary-foreground shadow-lg shadow-primary/25"
+          : cn(OFFICE_CARD, "hover:shadow-md"),
+        props.lifted && "shadow-xl",
       )}
     >
-      {parent !== null ? (
-        <span className="truncate text-xs text-muted-foreground">↳ {parent.title}</span>
-      ) : null}
-      <span className="line-clamp-3 text-sm font-medium">{task.title}</span>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {task.activeRunKind !== null ? (
-          <Badge variant="info" size="sm">
-            <CircleDotIcon />
-            {task.activeRunKind === "review"
-              ? "Reviewing"
-              : task.activeRunKind === "reply"
-                ? "Replying"
-                : "Working"}
-          </Badge>
-        ) : null}
-        {progress.total > 0 ? (
-          <Badge variant="outline" size="sm">
-            <ListTreeIcon />
-            {progress.done}/{progress.total}
-          </Badge>
-        ) : null}
-        {task.commentCount > 0 ? (
-          <Badge variant="outline" size="sm">
-            <MessageSquareIcon />
-            {task.commentCount}
-          </Badge>
-        ) : null}
-        <span className="ms-auto flex items-center gap-1">
-          {assignee !== null ? (
-            <AgentAvatar agent={assignee} name={assignee.name} title="Assignee" />
-          ) : null}
-          {reviewer !== null ? (
-            <AgentAvatar agent={reviewer} name={reviewer.name} title="Reviewer" />
-          ) : null}
+      <div
+        className={cn(
+          "flex items-center justify-between gap-3 text-xs",
+          live ? "text-primary-foreground/75" : "text-muted-foreground",
+        )}
+      >
+        {named !== null ? (
+          <AgentName agent={named}>
+            {task.activeRunKind === null
+              ? named.name
+              : `${named.name} · ${RUN_LABELS[task.activeRunKind]}`}
+          </AgentName>
+        ) : (
+          <span className="truncate">
+            {task.activeRunKind === null ? "Unassigned" : RUN_LABELS[task.activeRunKind]}
+          </span>
+        )}
+        <span className="flex shrink-0 items-center gap-1 tabular-nums">
+          {formatRelativeTimeLabel(task.updatedAt)}
+          <ClockIcon className="size-3.5" />
         </span>
       </div>
+      {parent !== null ? (
+        <span
+          className={cn(
+            "-mb-2 truncate text-xs",
+            live ? "text-primary-foreground/75" : "text-muted-foreground",
+          )}
+        >
+          ↳ {parent.title}
+        </span>
+      ) : null}
+      <span className="line-clamp-3 text-base leading-snug font-medium">{task.title}</span>
+      <div className="flex items-center gap-3">
+        {progress.total > 0 ? (
+          <CardStat
+            icon={<ListTreeIcon />}
+            value={`${progress.done}/${progress.total}`}
+            label="subtasks done"
+            live={live}
+            tileClassName={progress.done === progress.total ? "bg-success" : "bg-warning"}
+          />
+        ) : null}
+        {task.commentCount > 0 ? (
+          <CardStat
+            icon={<MessageSquareIcon />}
+            value={String(task.commentCount)}
+            label={task.commentCount === 1 ? "comment" : "comments"}
+            live={live}
+            tileClassName="bg-info"
+          />
+        ) : null}
+        <span className="ms-auto flex items-center -space-x-1.5">
+          {others.map((entry) =>
+            entry.agent === null ? null : (
+              <AgentAvatar
+                key={entry.title}
+                agent={entry.agent}
+                name={entry.agent.name}
+                title={entry.title}
+              />
+            ),
+          )}
+        </span>
+        {live ? (
+          <span
+            aria-hidden
+            className="flex size-8 items-center justify-center rounded-xl bg-primary-foreground/20"
+          >
+            <ChevronRightIcon className="size-4" />
+          </span>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function CardStat(props: {
+  readonly icon: ReactNode;
+  readonly value: string;
+  readonly label: string;
+  readonly live: boolean;
+  readonly tileClassName: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-1.5 text-xs font-medium tabular-nums",
+        props.live ? "text-primary-foreground/85" : "text-muted-foreground",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "flex size-6 items-center justify-center rounded-md text-white [&_svg]:size-3.5",
+          props.live ? "bg-primary-foreground/20" : props.tileClassName,
+        )}
+      >
+        {props.icon}
+      </span>
+      {props.value}
+      <span className="sr-only">{props.label}</span>
+    </span>
   );
 }

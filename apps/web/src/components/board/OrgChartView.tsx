@@ -1,47 +1,41 @@
 import type { BoardAgent, BoardHire, BoardSnapshot } from "@t3tools/contracts";
-import { PencilIcon, Trash2Icon, UserPlusIcon } from "lucide-react";
+import {
+  LightbulbIcon,
+  ListTodoIcon,
+  NetworkIcon,
+  PencilIcon,
+  Trash2Icon,
+  UserPlusIcon,
+} from "lucide-react";
+import type { ReactNode } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
 import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
+import { AgentName } from "./AgentAvatar";
 import { draftFromAgent, newEmployeeDraft, type AgentDraft } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
 import { agentById, departmentLabel, limitProgress } from "./board.logic";
+import { TONES, type Tone } from "./boardTones";
 import { faceFor, unusedFaceKey } from "./faces";
+import {
+  OFFICE_CARD,
+  OFFICE_PANEL,
+  OfficeHeading,
+  OfficeIconTile,
+  OfficePill,
+  OfficeTitle,
+} from "./OfficeSurface";
 
 /** Each level of the chart gets its own accent, like a printed org chart. */
-const ACCENTS = {
-  violet: {
-    ring: "ring-violet-500",
-    band: "bg-violet-500",
-    name: "text-violet-700 dark:text-violet-300",
-  },
-  orange: {
-    ring: "ring-orange-500",
-    band: "bg-orange-500",
-    name: "text-orange-700 dark:text-orange-300",
-  },
-  sky: {
-    ring: "ring-sky-500",
-    band: "bg-sky-500",
-    name: "text-sky-700 dark:text-sky-300",
-  },
-  emerald: {
-    ring: "ring-emerald-500",
-    band: "bg-emerald-500",
-    name: "text-emerald-700 dark:text-emerald-300",
-  },
-} as const;
-
-type Accent = (typeof ACCENTS)[keyof typeof ACCENTS];
-
-function accentFor(depth: number, siblingIndex: number): Accent {
-  if (depth === 0) return ACCENTS.violet;
-  if (depth === 1) return ACCENTS.orange;
-  return siblingIndex % 2 === 0 ? ACCENTS.sky : ACCENTS.emerald;
+function accentFor(depth: number, siblingIndex: number): Tone {
+  if (depth === 0) return "violet";
+  if (depth === 1) return "amber";
+  return siblingIndex % 2 === 0 ? "sky" : "emerald";
 }
+
+const CONNECTOR = "bg-foreground/15";
 
 interface OrgChartActions {
   readonly snapshot: BoardSnapshot;
@@ -98,9 +92,31 @@ export function OrgChartView(props: {
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="flex min-w-max flex-col gap-6 px-6 pb-10">
+        <div className="mx-auto w-full max-w-3xl">
+          <OfficeHeading
+            icon={<NetworkIcon />}
+            tone="violet"
+            title={<OfficeTitle>Organizational chart</OfficeTitle>}
+            description={`${snapshot.agents.length} ${snapshot.agents.length === 1 ? "person" : "people"} at ${company.name}`}
+            actions={
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!props.canOperate}
+                onClick={() => newReport(ceo)}
+              >
+                <UserPlusIcon />
+                Add employee
+              </Button>
+            }
+          />
+        </div>
+
         {pendingHires.length > 0 ? (
-          <section className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-            <h2 className="text-sm font-medium">Hire requests</h2>
+          <section className={cn(OFFICE_PANEL, "mx-auto w-full max-w-3xl")}>
+            <h2 className="flex px-1 pt-1">
+              <OfficePill tone="amber">Hire requests: {pendingHires.length}</OfficePill>
+            </h2>
             {pendingHires.map((hire) => (
               <HireRequest
                 key={hire.id}
@@ -113,26 +129,9 @@ export function OrgChartView(props: {
           </section>
         ) : null}
 
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <div className="flex flex-col">
-            <h2 className="text-lg font-semibold tracking-tight">Organizational chart</h2>
-            <span className="text-xs text-muted-foreground">
-              {snapshot.agents.length} {snapshot.agents.length === 1 ? "person" : "people"} at{" "}
-              {company.name}
-            </span>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!props.canOperate}
-            onClick={() => newReport(ceo)}
-          >
-            <UserPlusIcon />
-            Add employee
-          </Button>
-        </div>
-
-        <div className="flex items-start justify-center gap-8 pt-2">
+        <div
+          className={cn(OFFICE_PANEL, "flex-row items-start justify-center gap-8 px-8 pt-8 pb-10")}
+        >
           {roots.map((root) => (
             <OrgBranch key={root.id} agent={root} depth={0} siblingIndex={0} actions={actions} />
           ))}
@@ -161,22 +160,17 @@ function OrgBranch(props: {
       />
       {reports.length > 0 ? (
         <>
-          <div className="h-6 w-px bg-muted-foreground/40" />
+          <div className={cn("h-6 w-px", CONNECTOR)} />
           <div className="flex items-start">
             {reports.map((report, index) => (
               <div key={report.id} className="flex flex-col items-center">
                 {/* Each child draws its half of the bar that joins the siblings. */}
                 <div className="flex h-px w-full">
-                  <div className={cn("h-px flex-1", index > 0 && "bg-muted-foreground/40")} />
-                  <div
-                    className={cn(
-                      "h-px flex-1",
-                      index < reports.length - 1 && "bg-muted-foreground/40",
-                    )}
-                  />
+                  <div className={cn("h-px flex-1", index > 0 && CONNECTOR)} />
+                  <div className={cn("h-px flex-1", index < reports.length - 1 && CONNECTOR)} />
                 </div>
-                <div className="flex flex-col items-center px-3">
-                  <div className="h-6 w-px bg-muted-foreground/40" />
+                <div className="flex flex-col items-center px-4">
+                  <div className={cn("h-6 w-px", CONNECTOR)} />
                   <OrgBranch
                     agent={report}
                     depth={props.depth + 1}
@@ -195,10 +189,11 @@ function OrgBranch(props: {
 
 function OrgCard(props: {
   readonly agent: BoardAgent;
-  readonly accent: Accent;
+  readonly accent: Tone;
   readonly actions: OrgChartActions;
 }) {
-  const { agent, accent, actions } = props;
+  const { agent, actions } = props;
+  const accent = TONES[props.accent];
   const { snapshot } = actions;
   const isCeo = snapshot.company?.ceoAgentId === agent.id;
   const department = departmentLabel(snapshot.company?.departments ?? [], agent.departmentId);
@@ -222,27 +217,29 @@ function OrgCard(props: {
         : task.assigneeAgentId === agent.id),
   );
   return (
-    <div className="relative w-56 pt-9">
+    <div className="relative w-56 pt-10">
       <div
         className={cn(
-          "absolute top-0 left-1/2 z-10 size-18 -translate-x-1/2 overflow-hidden rounded-full bg-background ring-4",
-          accent.ring,
+          "absolute top-0 left-1/2 z-10 -translate-x-1/2 rounded-full p-1 shadow-sm",
+          accent.fill,
           agent.paused && "opacity-60 grayscale",
         )}
       >
-        {face !== null ? (
-          <img
-            src={face.url}
-            alt={`${agent.name}'s face`}
-            className="size-full object-cover"
-            draggable={false}
-          />
-        ) : null}
+        <div className="size-18 overflow-hidden rounded-full bg-background">
+          {face !== null ? (
+            <img
+              src={face.url}
+              alt={`${agent.name}'s face`}
+              className="size-full object-cover"
+              draggable={false}
+            />
+          ) : null}
+        </div>
       </div>
-      <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-        <div className={cn("h-2.5", accent.band)} />
-        <div className="flex flex-col items-center gap-1 px-3 pt-10 pb-3 text-center">
-          <span className={cn("max-w-full truncate text-sm font-semibold", accent.name)}>
+      <div className={cn(OFFICE_CARD, "gap-0 overflow-hidden p-0")}>
+        <div className={cn("h-12", accent.tint)} />
+        <div className="flex flex-col items-center gap-1 px-4 pt-3 pb-4 text-center">
+          <span className={cn("max-w-full truncate text-sm font-semibold", accent.ink)}>
             {agent.name}
           </span>
           <span className="max-w-full truncate text-xs font-medium text-foreground">
@@ -256,42 +253,36 @@ function OrgCard(props: {
               {skills.join(" · ")}
             </span>
           ) : null}
-          <div className="flex flex-wrap justify-center gap-1 pt-1">
-            {department !== null ? (
-              <Badge variant="secondary" size="sm">
-                {department}
-              </Badge>
-            ) : null}
+          <div className="flex flex-wrap justify-center gap-1 pt-2">
+            {department !== null ? <OfficePill tone="gray">{department}</OfficePill> : null}
             {agent.paused ? (
-              <Badge variant="warning" size="sm">
-                Paused
-              </Badge>
+              <OfficePill tone="amber">Paused</OfficePill>
             ) : working ? (
-              <Badge variant="info" size="sm">
+              <OfficePill tone="sky" variant="solid">
                 Working
-              </Badge>
+              </OfficePill>
             ) : null}
             {limit?.reached ? (
-              <Badge variant="error" size="sm">
-                Limit reached
-              </Badge>
+              <OfficePill tone="red">Limit reached</OfficePill>
             ) : limit?.nearing ? (
-              <Badge variant="warning" size="sm">
-                {Math.round(limit.share * 100)}% of limit
-              </Badge>
-            ) : null}
-            {openCards > 0 ? (
-              <Badge variant="outline" size="sm">
-                {openCards} open
-              </Badge>
-            ) : null}
-            {lessons > 0 ? (
-              <Badge variant="outline" size="sm">
-                {lessons} {lessons === 1 ? "lesson" : "lessons"}
-              </Badge>
+              <OfficePill tone="amber">{Math.round(limit.share * 100)}% of limit</OfficePill>
             ) : null}
           </div>
-          <div className="flex items-center justify-center gap-1 pt-1">
+          {openCards > 0 || lessons > 0 ? (
+            <div className="flex items-center justify-center gap-3 pt-2">
+              {openCards > 0 ? (
+                <OrgStat tone="indigo" icon={<ListTodoIcon />}>
+                  {openCards} open
+                </OrgStat>
+              ) : null}
+              {lessons > 0 ? (
+                <OrgStat tone="teal" icon={<LightbulbIcon />}>
+                  {lessons} {lessons === 1 ? "lesson" : "lessons"}
+                </OrgStat>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="flex items-center justify-center gap-1 pt-2">
             <Button
               size="icon-xs"
               variant="ghost"
@@ -328,6 +319,19 @@ function OrgCard(props: {
   );
 }
 
+function OrgStat(props: {
+  readonly tone: Tone;
+  readonly icon: ReactNode;
+  readonly children: ReactNode;
+}) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground tabular-nums">
+      <OfficeIconTile tone={props.tone}>{props.icon}</OfficeIconTile>
+      {props.children}
+    </span>
+  );
+}
+
 function HireRequest(props: {
   readonly hire: BoardHire;
   readonly snapshot: BoardSnapshot;
@@ -344,23 +348,38 @@ function HireRequest(props: {
   const decide = (approve: boolean) =>
     void props.runCommand({ type: "hire.decide", hire: { id: hire.id, approve } });
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-dashed px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">{hire.name}</span>
-        <span className="text-xs text-muted-foreground">
-          {hire.title}
-          {department !== null ? ` · ${department}` : ""}
-          {manager !== null ? ` · reports to ${manager.name}` : ""}
-          {requester !== null ? ` · requested by ${requester.name}` : ""}
-        </span>
+    <div className={OFFICE_CARD}>
+      <div className="flex items-center gap-3">
+        <OfficeIconTile tone="amber">
+          <UserPlusIcon />
+        </OfficeIconTile>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-base leading-snug font-medium">{hire.name}</span>
+          <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+            {hire.title}
+            {department !== null ? ` · ${department}` : ""}
+            {manager !== null ? (
+              <>
+                {" · reports to "}
+                <AgentName agent={manager} />
+              </>
+            ) : null}
+            {requester !== null ? (
+              <>
+                {" · requested by "}
+                <AgentName agent={requester} />
+              </>
+            ) : null}
+          </span>
+        </div>
       </div>
       {hire.reason ? <p className="text-sm">{hire.reason}</p> : null}
       {skills.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {skills.map((skill) => (
-            <Badge key={skill} variant="secondary" size="sm">
+            <OfficePill key={skill} tone="gray">
               {skill}
-            </Badge>
+            </OfficePill>
           ))}
         </div>
       ) : null}

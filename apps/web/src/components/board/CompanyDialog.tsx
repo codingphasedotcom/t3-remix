@@ -7,6 +7,7 @@ import type {
   ProjectId,
   RuntimeMode,
 } from "@t3tools/contracts";
+import { Building2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { useProjects } from "../../state/entities";
@@ -35,6 +36,7 @@ import {
   SKILL_PRESETS,
   departmentNamed,
 } from "./board.logic";
+import { OfficeFieldGroup, OfficeHeading } from "./OfficeSurface";
 
 function folderNameFor(name: string): string {
   return (
@@ -167,123 +169,137 @@ function CompanyForm(props: {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>New company</DialogTitle>
-        <DialogDescription>
-          A company has a CEO who takes your tasks and delegates them to employees. Each company has
-          its own board, org chart, and skills.
-        </DialogDescription>
+        <OfficeHeading
+          icon={<Building2Icon />}
+          tone="teal"
+          title={<DialogTitle>New company</DialogTitle>}
+          description={
+            <DialogDescription>
+              A company has a CEO who takes your tasks and delegates them to employees. Each company
+              has its own board, org chart, and skills.
+            </DialogDescription>
+          }
+        />
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="board-company-name">Company name</Label>
-              <Input
-                id="board-company-name"
-                value={name}
-                autoFocus
-                placeholder="Acme Labs"
-                onChange={(event) => setName(event.target.value)}
-              />
+          <OfficeFieldGroup label="Company" tone="teal">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="board-company-name">Company name</Label>
+                <Input
+                  id="board-company-name"
+                  value={name}
+                  autoFocus
+                  placeholder="Acme Labs"
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="board-company-ceo">CEO name</Label>
+                <Input
+                  id="board-company-ceo"
+                  value={ceoName}
+                  onChange={(event) => setCeoName(event.target.value)}
+                />
+              </div>
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="board-company-ceo">CEO name</Label>
-              <Input
-                id="board-company-ceo"
-                value={ceoName}
-                onChange={(event) => setCeoName(event.target.value)}
+              <Label htmlFor="board-company-mission">Mission</Label>
+              <Textarea
+                id="board-company-mission"
+                value={mission}
+                rows={3}
+                placeholder="Build the simplest invoicing app for freelancers."
+                onChange={(event) => setMission(event.target.value)}
               />
             </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-company-mission">Mission</Label>
-            <Textarea
-              id="board-company-mission"
-              value={mission}
-              rows={3}
-              placeholder="Build the simplest invoicing app for freelancers."
-              onChange={(event) => setMission(event.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>Where the team works</Label>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant={workspace === "new" ? "secondary" : "outline"}
-                onClick={() => setWorkspace("new")}
-              >
-                New project folder
-              </Button>
-              <Button
-                size="sm"
-                variant={workspace === "existing" ? "secondary" : "outline"}
-                disabled={projects.length === 0}
-                onClick={() => setWorkspace("existing")}
-              >
-                Existing project
-              </Button>
-            </div>
-            {workspace === "new" ? (
-              <span className="text-xs text-muted-foreground">
-                Creates a project folder named “{folderNameFor(name)}”.
-              </span>
-            ) : (
-              <Select
-                value={projectId ?? ""}
-                onValueChange={(value) => setProjectId(value as ProjectId)}
-              >
-                <SelectTrigger size="sm">
-                  <SelectValue>{project?.title ?? "Choose a project"}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {projects.map((candidate) => (
-                    <SelectItem key={candidate.id} value={candidate.id} label={candidate.title}>
-                      {candidate.title}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex min-w-0 flex-col gap-2">
-              <Label>Model for the team</Label>
-              <ModelField
-                environmentId={props.environmentId}
-                projectId={null}
-                value={model}
-                onChange={setModel}
-              />
-            </div>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Workspace" tone="emerald">
             <div className="flex flex-col gap-2">
-              <Label>Permissions</Label>
-              <PermissionsField value={runtimeMode} onChange={setRuntimeMode} />
-            </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>Starting team</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {COMPANY_TEMPLATES.map((candidate) => (
+              <Label>Where the team works</Label>
+              <div className="flex flex-wrap gap-1">
                 <Button
-                  key={candidate.id}
-                  size="sm-multiline"
-                  variant={candidate.id === templateId ? "secondary" : "outline"}
-                  onClick={() => setTemplateId(candidate.id)}
+                  size="sm"
+                  variant={workspace === "new" ? "outline" : "ghost"}
+                  onClick={() => setWorkspace("new")}
                 >
-                  <span className="flex flex-col items-start text-start">
-                    <span>{candidate.label}</span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {candidate.description}
-                    </span>
-                  </span>
+                  New project folder
                 </Button>
-              ))}
+                <Button
+                  size="sm"
+                  variant={workspace === "existing" ? "outline" : "ghost"}
+                  disabled={projects.length === 0}
+                  onClick={() => setWorkspace("existing")}
+                >
+                  Existing project
+                </Button>
+              </div>
+              {workspace === "new" ? (
+                <span className="text-xs text-muted-foreground">
+                  Creates a project folder named “{folderNameFor(name)}”.
+                </span>
+              ) : (
+                <Select
+                  value={projectId ?? ""}
+                  onValueChange={(value) => setProjectId(value as ProjectId)}
+                >
+                  <SelectTrigger size="sm">
+                    <SelectValue>{project?.title ?? "Choose a project"}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {projects.map((candidate) => (
+                      <SelectItem key={candidate.id} value={candidate.id} label={candidate.title}>
+                        {candidate.title}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              )}
             </div>
-          </div>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Model" tone="sky">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Model for the team</Label>
+                <ModelField
+                  environmentId={props.environmentId}
+                  projectId={null}
+                  value={model}
+                  onChange={setModel}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Permissions</Label>
+                <PermissionsField value={runtimeMode} onChange={setRuntimeMode} />
+              </div>
+            </div>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Team" tone="violet">
+            <div className="flex flex-col gap-2">
+              <Label>Starting team</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {COMPANY_TEMPLATES.map((candidate) => (
+                  <Button
+                    key={candidate.id}
+                    size="sm-multiline"
+                    variant={candidate.id === templateId ? "outline" : "ghost"}
+                    onClick={() => setTemplateId(candidate.id)}
+                  >
+                    <span className="flex flex-col items-start text-start">
+                      <span>{candidate.label}</span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {candidate.description}
+                      </span>
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </OfficeFieldGroup>
         </div>
       </DialogPanel>
-      <DialogFooter>
+      <DialogFooter variant="bare">
         {progress !== null ? (
           <span className="me-auto text-xs text-muted-foreground">{progress}</span>
         ) : null}

@@ -47,8 +47,9 @@ export function FilePicker(props: {
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-lg border border-dashed p-2",
-        dragging && "border-primary bg-primary/5",
+        // The padding, cancelled by the margin, gives the drop highlight room around the files.
+        "-m-2 flex flex-col gap-2 rounded-2xl p-2",
+        dragging && "bg-primary/5 ring-2 ring-primary/40 ring-inset",
       )}
       onDragOver={(event) => {
         if (!canPick) return;

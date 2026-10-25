@@ -5,10 +5,11 @@ import type {
   BoardSnapshot,
   BoardTaskId,
 } from "@t3tools/contracts";
-import { PencilIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { PencilIcon, PlayIcon, PlusIcon, RepeatIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
+import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import {
@@ -26,6 +27,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { AgentName } from "./AgentAvatar";
 import { AgentSelect } from "./AgentSelect";
 import type { RunBoardCommand } from "./BoardPage";
 import {
@@ -35,6 +37,15 @@ import {
   repeatLabel,
   ROUTINE_REPEATS,
 } from "./board.logic";
+import {
+  OFFICE_CARD,
+  OFFICE_INSET,
+  OFFICE_PANEL,
+  OfficeHeading,
+  OfficeIconTile,
+  OfficePill,
+  OfficeTitle,
+} from "./OfficeSurface";
 
 interface RoutineDraft {
   readonly id: BoardRoutineId | null;
@@ -110,96 +121,106 @@ export function RoutinesView(props: {
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-medium">Routines</h2>
-            <span className="text-xs text-muted-foreground">
-              A routine adds a task on a schedule, such as a weekly review. If the last one is still
-              open, it waits for the next turn instead of adding another.
-            </span>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-8">
+        <OfficeHeading
+          icon={<RepeatIcon />}
+          tone="teal"
+          title={<OfficeTitle>Routines</OfficeTitle>}
+          description="A routine adds a task on a schedule, such as a weekly review. If the last one is still open, it waits for the next turn instead of adding another."
+          actions={
+            <Button size="sm" disabled={!props.canOperate} onClick={() => setDraft(newDraft())}>
+              <PlusIcon />
+              New routine
+            </Button>
+          }
+        />
+        <div className={OFFICE_PANEL}>
+          <div className="flex px-1 pt-1">
+            <OfficePill tone="teal">Routines: {snapshot.routines.length}</OfficePill>
           </div>
-          <Button size="sm" disabled={!props.canOperate} onClick={() => setDraft(newDraft())}>
-            <PlusIcon />
-            New routine
-          </Button>
-        </div>
-        {snapshot.routines.length === 0 ? (
-          <span className="text-sm text-muted-foreground">No routines yet.</span>
-        ) : null}
-        {snapshot.routines.map((routine) => {
-          const assignee = agentById(snapshot.agents, routine.assigneeAgentId);
-          // The task it last created dates the last run; a routine keeps no other history.
-          const lastTask = snapshot.tasks.find((task) => task.id === routine.lastTaskId) ?? null;
-          return (
-            <div key={routine.id} className="flex items-start gap-3 rounded-lg border bg-card p-3">
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="text-sm font-medium">{routine.title}</span>
-                <span className="text-xs text-muted-foreground">
-                  {repeatLabel(routine.everyDays)} · {assignee?.name ?? "Backlog, unassigned"} ·
-                  next {new Date(routine.nextRunAt).toLocaleString()}
-                </span>
-                {routine.description ? (
-                  <p className="line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
-                    {routine.description}
-                  </p>
-                ) : null}
-                <span className="text-xs text-muted-foreground">
-                  {lastTask !== null ? (
-                    <>
-                      Last run {formatRelativeTimeLabel(lastTask.createdAt)}:{" "}
-                      <Button
-                        size="xs"
-                        variant="link"
-                        onClick={() => props.onOpenCard(lastTask.id)}
-                      >
-                        {lastTask.title}
-                      </Button>{" "}
-                      ({boardStatusLabel(lastTask.status)})
-                    </>
-                  ) : routine.lastTaskId !== null ? (
-                    "The task it last created was deleted."
-                  ) : (
-                    "Hasn't run yet."
-                  )}
-                </span>
+          {snapshot.routines.length === 0 ? (
+            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No routines yet.</div>
+          ) : null}
+          {snapshot.routines.map((routine) => {
+            const assignee = agentById(snapshot.agents, routine.assigneeAgentId);
+            // The task it last created dates the last run; a routine keeps no other history.
+            const lastTask = snapshot.tasks.find((task) => task.id === routine.lastTaskId) ?? null;
+            return (
+              <div key={routine.id} className={cn(OFFICE_CARD, "flex-row items-start")}>
+                <OfficeIconTile tone={routine.enabled ? "teal" : "gray"}>
+                  <RepeatIcon />
+                </OfficeIconTile>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="text-base leading-snug font-medium">{routine.title}</span>
+                  <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+                    {repeatLabel(routine.everyDays)} ·{" "}
+                    {assignee !== null ? <AgentName agent={assignee} /> : "Backlog, unassigned"} ·
+                    next {new Date(routine.nextRunAt).toLocaleString()}
+                  </span>
+                  {routine.description ? (
+                    <p className="line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
+                      {routine.description}
+                    </p>
+                  ) : null}
+                  <span className="text-xs text-muted-foreground">
+                    {lastTask !== null ? (
+                      <>
+                        Last run {formatRelativeTimeLabel(lastTask.createdAt)}:{" "}
+                        <Button
+                          size="xs"
+                          variant="link"
+                          onClick={() => props.onOpenCard(lastTask.id)}
+                        >
+                          {lastTask.title}
+                        </Button>{" "}
+                        ({boardStatusLabel(lastTask.status)})
+                      </>
+                    ) : routine.lastTaskId !== null ? (
+                      "The task it last created was deleted."
+                    ) : (
+                      "Hasn't run yet."
+                    )}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={!props.canOperate}
+                    onClick={() => void props.runCommand({ type: "routine.run", id: routine.id })}
+                  >
+                    <PlayIcon />
+                    Run now
+                  </Button>
+                  <Switch
+                    aria-label={`${routine.enabled ? "Pause" : "Resume"} ${routine.title}`}
+                    checked={routine.enabled}
+                    disabled={!props.canOperate}
+                    onCheckedChange={(enabled) => void save(routine, { enabled })}
+                  />
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Edit ${routine.title}`}
+                    disabled={!props.canOperate}
+                    onClick={() => setDraft(draftFromRoutine(routine))}
+                  >
+                    <PencilIcon />
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost-destructive"
+                    aria-label={`Delete ${routine.title}`}
+                    disabled={!props.canOperate}
+                    onClick={() => void remove(routine)}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                </div>
               </div>
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={!props.canOperate}
-                onClick={() => void props.runCommand({ type: "routine.run", id: routine.id })}
-              >
-                <PlayIcon />
-                Run now
-              </Button>
-              <Switch
-                aria-label={`${routine.enabled ? "Pause" : "Resume"} ${routine.title}`}
-                checked={routine.enabled}
-                disabled={!props.canOperate}
-                onCheckedChange={(enabled) => void save(routine, { enabled })}
-              />
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`Edit ${routine.title}`}
-                disabled={!props.canOperate}
-                onClick={() => setDraft(draftFromRoutine(routine))}
-              >
-                <PencilIcon />
-              </Button>
-              <Button
-                size="icon-sm"
-                variant="ghost-destructive"
-                aria-label={`Delete ${routine.title}`}
-                disabled={!props.canOperate}
-                onClick={() => void remove(routine)}
-              >
-                <Trash2Icon />
-              </Button>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
       <Dialog
         open={draft !== null}
@@ -252,83 +273,94 @@ function RoutineForm(props: {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{draft.id === null ? "New routine" : "Edit routine"}</DialogTitle>
-        <DialogDescription>
-          Each time it comes due, the routine adds this task to the board and starts its assignee.
-        </DialogDescription>
+        <OfficeHeading
+          icon={<RepeatIcon />}
+          tone="teal"
+          title={<DialogTitle>{draft.id === null ? "New routine" : "Edit routine"}</DialogTitle>}
+          description={
+            <DialogDescription>
+              Each time it comes due, the routine adds this task to the board and starts its
+              assignee.
+            </DialogDescription>
+          }
+        />
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-routine-title">Task title</Label>
-            <Input
-              id="board-routine-title"
-              value={draft.title}
-              autoFocus
-              placeholder="Weekly numbers review"
-              onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-routine-description">Description</Label>
-            <Textarea
-              id="board-routine-description"
-              value={draft.description}
-              rows={4}
-              placeholder="What to check and what to report back."
-              onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="flex min-w-0 flex-col gap-2">
-              <Label>Assignee</Label>
-              <AgentSelect
-                agents={props.snapshot.agents}
-                value={draft.assigneeAgentId}
-                noneLabel="Nobody (backlog)"
-                onChange={(assigneeAgentId) => setDraft({ ...draft, assigneeAgentId })}
-              />
-            </div>
-            <div className="flex min-w-0 flex-col gap-2">
-              <Label>Repeats</Label>
-              <Select
-                value={String(draft.everyDays)}
-                onValueChange={(value) => setDraft({ ...draft, everyDays: Number(value) })}
-              >
-                <SelectTrigger size="sm">
-                  <SelectValue>{repeatLabel(draft.everyDays)}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {repeats.map((days) => (
-                    <SelectItem key={days} value={String(days)} label={repeatLabel(days)}>
-                      {repeatLabel(days)}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </div>
-            <div className="flex min-w-0 flex-col gap-2">
-              <Label htmlFor="board-routine-next">Next run</Label>
+          <div className={OFFICE_INSET}>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-routine-title">Task title</Label>
               <Input
-                id="board-routine-next"
-                size="sm"
-                type="datetime-local"
-                value={draft.nextRun}
-                onChange={(event) => setDraft({ ...draft, nextRun: event.target.value })}
+                id="board-routine-title"
+                value={draft.title}
+                autoFocus
+                placeholder="Weekly numbers review"
+                onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-routine-description">Description</Label>
+              <Textarea
+                id="board-routine-description"
+                value={draft.description}
+                rows={4}
+                placeholder="What to check and what to report back."
+                onChange={(event) => setDraft({ ...draft, description: event.target.value })}
               />
             </div>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="board-routine-enabled">On</Label>
-            <Switch
-              id="board-routine-enabled"
-              checked={draft.enabled}
-              onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
-            />
+          <div className={OFFICE_INSET}>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Assignee</Label>
+                <AgentSelect
+                  agents={props.snapshot.agents}
+                  value={draft.assigneeAgentId}
+                  noneLabel="Nobody (backlog)"
+                  onChange={(assigneeAgentId) => setDraft({ ...draft, assigneeAgentId })}
+                />
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label>Repeats</Label>
+                <Select
+                  value={String(draft.everyDays)}
+                  onValueChange={(value) => setDraft({ ...draft, everyDays: Number(value) })}
+                >
+                  <SelectTrigger size="sm">
+                    <SelectValue>{repeatLabel(draft.everyDays)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {repeats.map((days) => (
+                      <SelectItem key={days} value={String(days)} label={repeatLabel(days)}>
+                        {repeatLabel(days)}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </div>
+              <div className="flex min-w-0 flex-col gap-2">
+                <Label htmlFor="board-routine-next">Next run</Label>
+                <Input
+                  id="board-routine-next"
+                  size="sm"
+                  type="datetime-local"
+                  value={draft.nextRun}
+                  onChange={(event) => setDraft({ ...draft, nextRun: event.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="board-routine-enabled">On</Label>
+              <Switch
+                id="board-routine-enabled"
+                checked={draft.enabled}
+                onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
+              />
+            </div>
           </div>
         </div>
       </DialogPanel>
-      <DialogFooter>
+      <DialogFooter variant="bare">
         <Button size="sm" variant="outline" onClick={props.onClose}>
           Cancel
         </Button>

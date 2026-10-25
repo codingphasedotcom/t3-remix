@@ -1,0 +1,54 @@
+/* T3 Office's markdown in board descriptions and comments. The base chat-markdown rules in
+   index.css are unlayered, so Tailwind utilities can't override them; this file stays
+   fork-owned so upstream merges never touch it. :root lifts every rule above the base ones and
+   above themed variants such as the T3 Chat theme's inline code rule. */
+
+/* Full contrast and a little more air than chat: these are documents people read, not a stream. */
+:root [data-office-markdown] .chat-markdown {
+  color: var(--foreground);
+  line-height: 1.7;
+}
+
+:root [data-office-markdown] .chat-markdown strong {
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+:root [data-office-markdown] .chat-markdown li + li {
+  margin-top: 0.4rem;
+}
+
+:root [data-office-markdown] .chat-markdown li::marker {
+  color: var(--muted-foreground);
+}
+
+/* Chat-sized headings crowd a comment card; these stay a step above body text. */
+:root [data-office-markdown] .chat-markdown :is(h1, h2, h3) {
+  margin: 1.1rem 0 0.35rem;
+  font-size: 0.9375rem;
+}
+
+:root [data-office-markdown] .chat-markdown h1 {
+  font-size: 1rem;
+}
+
+:root [data-office-markdown] .chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+:root [data-office-markdown] .chat-markdown blockquote {
+  border-inline-start: 3px solid #aefb2a;
+  color: var(--muted-foreground);
+}
+
+:root [data-office-markdown] .chat-markdown hr {
+  margin: 1rem 0;
+  border-color: var(--border);
+}
+
+:root [data-office-markdown] .chat-markdown :not(pre) > code {
+  border-color: transparent;
+  background: #aefb2a;
+  color: #000;
+  font-weight: 700;
+}

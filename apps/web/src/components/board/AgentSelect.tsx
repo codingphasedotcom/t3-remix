@@ -1,6 +1,7 @@
 import type { BoardAgent, BoardAgentId } from "@t3tools/contracts";
 
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { AgentFace, AgentName } from "./AgentAvatar";
 
 const NOBODY = "__nobody__";
 
@@ -24,11 +25,14 @@ export function AgentSelect(props: {
     >
       <SelectTrigger size="sm">
         <SelectValue>
-          <span className="truncate">
-            {current === null
-              ? noneLabel
-              : `${current.name}${current.title ? ` · ${current.title}` : ""}`}
-          </span>
+          {current === null ? (
+            <span className="truncate">{noneLabel}</span>
+          ) : (
+            <AgentName agent={current}>
+              {current.name}
+              {current.title ? ` · ${current.title}` : ""}
+            </AgentName>
+          )}
         </SelectValue>
       </SelectTrigger>
       <SelectPopup>
@@ -37,14 +41,17 @@ export function AgentSelect(props: {
         </SelectItem>
         {props.agents.map((agent) => (
           <SelectItem key={agent.id} value={agent.id} label={agent.name}>
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate">
-                {agent.name}
-                {agent.paused ? " (paused)" : ""}
+            <span className="flex min-w-0 items-center gap-2">
+              <AgentFace agent={agent} name={agent.name} muted={agent.paused} />
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">
+                  {agent.name}
+                  {agent.paused ? " (paused)" : ""}
+                </span>
+                {agent.title ? (
+                  <span className="truncate text-xs text-muted-foreground">{agent.title}</span>
+                ) : null}
               </span>
-              {agent.title ? (
-                <span className="truncate text-xs text-muted-foreground">{agent.title}</span>
-              ) : null}
             </span>
           </SelectItem>
         ))}

@@ -12,6 +12,7 @@ import type {
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ClipboardListIcon,
   ExternalLinkIcon,
   FileIcon,
   FileTextIcon,
@@ -22,6 +23,7 @@ import {
   PencilIcon,
   PlayIcon,
   Trash2Icon,
+  UserRoundIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -35,7 +37,6 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import ChatMarkdown from "../ChatMarkdown";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -46,7 +47,18 @@ import { Textarea } from "../ui/textarea";
 import { AgentSelect } from "./AgentSelect";
 import { FilePicker } from "./FilePicker";
 import type { RunBoardCommand } from "./BoardPage";
+import { AgentFace, AgentName } from "./AgentAvatar";
 import { BOARD_COLUMNS, agentById, boardStatusLabel } from "./board.logic";
+import { COLUMN_TONES, type Tone } from "./boardTones";
+import {
+  OFFICE_CARD,
+  OFFICE_INSET,
+  OfficeHeading,
+  OfficeIconTile,
+  OfficePill,
+  statusPillVariant,
+} from "./OfficeSurface";
+import "./office.css";
 
 export function BoardCardSheet(props: {
   readonly environmentId: EnvironmentId;
@@ -147,26 +159,46 @@ function BoardCardDetail(props: {
       <SheetHeader>
         <SheetTitle className="sr-only">{task.title}</SheetTitle>
         <SheetDescription className="sr-only">Board task details</SheetDescription>
-        <Input
-          value={title}
-          disabled={disabled}
-          aria-label="Task title"
-          onChange={(event) => setTitle(event.target.value)}
-          onBlur={() => {
-            const next = title.trim();
-            if (next.length > 0 && next !== task.title) void update({ title: next });
-          }}
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          {task.activeRunKind !== null ? (
-            <Badge variant="info">
-              {task.activeRunKind === "review"
-                ? "Reviewer working"
-                : task.activeRunKind === "reply"
-                  ? "Agent replying"
-                  : "Agent working"}
-            </Badge>
-          ) : null}
+        {/* Keeps the title clear of the sheet's close button in the corner. */}
+        <div className="pe-8">
+          <OfficeHeading
+            icon={<ClipboardListIcon />}
+            tone={COLUMN_TONES[task.status]}
+            title={
+              <Input
+                size="lg"
+                value={title}
+                disabled={disabled}
+                aria-label="Task title"
+                onChange={(event) => setTitle(event.target.value)}
+                onBlur={() => {
+                  const next = title.trim();
+                  if (next.length > 0 && next !== task.title) void update({ title: next });
+                }}
+              />
+            }
+            description={
+              <div className="flex flex-wrap items-center gap-2">
+                <OfficePill
+                  tone={COLUMN_TONES[task.status]}
+                  variant={statusPillVariant(task.status)}
+                >
+                  {boardStatusLabel(task.status)}
+                </OfficePill>
+                {task.activeRunKind !== null ? (
+                  <OfficePill tone="sky" variant="live">
+                    {task.activeRunKind === "review"
+                      ? "Reviewer working"
+                      : task.activeRunKind === "reply"
+                        ? "Agent replying"
+                        : "Agent working"}
+                  </OfficePill>
+                ) : null}
+              </div>
+            }
+          />
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {canStart ? (
             <Button
               size="sm"
@@ -195,8 +227,8 @@ function BoardCardDetail(props: {
         </div>
       </SheetHeader>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-5 px-6 pb-6">
-          <div className="grid grid-cols-3 gap-3">
+        <div className="flex flex-col gap-4 px-6 pb-6">
+          <div className={cn(OFFICE_INSET, "grid grid-cols-3 gap-3")}>
             <div className="flex flex-col gap-2">
               <Label>Column</Label>
               <Select
@@ -237,9 +269,9 @@ function BoardCardDetail(props: {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="board-card-detail-description">Description</Label>
+          <section className={OFFICE_INSET}>
+            <div className="flex min-h-7 items-center justify-between gap-3">
+              <SectionTitle label="Description" htmlFor="board-card-detail-description" />
               {editingDescription ? null : (
                 <Button
                   size="xs"
@@ -282,7 +314,7 @@ function BoardCardDetail(props: {
                 </div>
               </>
             ) : task.description.trim().length > 0 ? (
-              <div className="rounded-lg border px-3 py-2">
+              <div className={OFFICE_CARD} data-office-markdown>
                 <ChatMarkdown
                   text={task.description}
                   cwd={task.worktreePath ?? undefined}
@@ -292,10 +324,10 @@ function BoardCardDetail(props: {
             ) : (
               <span className="text-sm text-muted-foreground">No description.</span>
             )}
-          </div>
+          </section>
 
-          <div className="flex flex-col gap-1">
-            <Label>Files</Label>
+          <section className={OFFICE_INSET}>
+            <SectionTitle label="Files" count={files.length} />
             <FilePicker
               disabled={disabled}
               onAdd={(paths) => {
@@ -322,46 +354,61 @@ function BoardCardDetail(props: {
                 />
               ))}
             </FilePicker>
-          </div>
+          </section>
 
           {workLinks.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              <Label>Linked work</Label>
-              {workLinks.map((link) => (
-                <WorkLinkRow
-                  key={link.id}
-                  link={link}
-                  snapshot={snapshot}
-                  disabled={disabled}
-                  onRemove={() => void props.runCommand({ type: "link.delete", id: link.id })}
-                />
-              ))}
-            </div>
+            <section className={OFFICE_INSET}>
+              <SectionTitle label="Linked work" tone="violet" count={workLinks.length} />
+              <div className="flex flex-col gap-2">
+                {workLinks.map((link) => (
+                  <WorkLinkRow
+                    key={link.id}
+                    link={link}
+                    snapshot={snapshot}
+                    disabled={disabled}
+                    onRemove={() => void props.runCommand({ type: "link.delete", id: link.id })}
+                  />
+                ))}
+              </div>
+            </section>
           ) : null}
 
           {parent !== null || subtasks.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <Label>Related tasks</Label>
-              {parent !== null ? (
-                <RelatedCard
-                  prefix="Parent"
-                  task={parent}
-                  onOpen={() => props.onOpenCard(parent.id)}
-                />
-              ) : null}
-              {subtasks.map((subtask) => (
-                <RelatedCard
-                  key={subtask.id}
-                  prefix="Subtask"
-                  task={subtask}
-                  onOpen={() => props.onOpenCard(subtask.id)}
-                />
-              ))}
-            </div>
+            <section className={OFFICE_INSET}>
+              <SectionTitle
+                label="Related tasks"
+                tone="indigo"
+                count={(parent === null ? 0 : 1) + subtasks.length}
+              />
+              <div className="flex flex-col gap-2">
+                {parent !== null ? (
+                  <RelatedCard
+                    prefix="Parent"
+                    task={parent}
+                    onOpen={() => props.onOpenCard(parent.id)}
+                  />
+                ) : null}
+                {subtasks.map((subtask) => (
+                  <RelatedCard
+                    key={subtask.id}
+                    prefix="Subtask"
+                    task={subtask}
+                    onOpen={() => props.onOpenCard(subtask.id)}
+                  />
+                ))}
+              </div>
+            </section>
           ) : null}
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-card-comment">Activity</Label>
+          <section className={OFFICE_INSET}>
+            <div className="flex">
+              <SectionTitle
+                label="Activity"
+                tone="sky"
+                count={detail.data?.comments.length}
+                htmlFor="board-card-comment"
+              />
+            </div>
             <div className="flex flex-col gap-2">
               {(detail.data?.comments ?? []).map((entry) => (
                 <CommentRow
@@ -376,51 +423,79 @@ function BoardCardDetail(props: {
                 <span className="text-sm text-muted-foreground">No activity yet.</span>
               ) : null}
             </div>
-            <Textarea
-              id="board-card-comment"
-              value={comment}
-              rows={3}
-              disabled={disabled}
-              placeholder={
-                task.activeRunKind !== null
-                  ? "Comment — the working agent receives it right away"
-                  : "Comment — the task's agent answers on the board"
-              }
-              onChange={(event) => setComment(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                  event.preventDefault();
-                  void postComment();
+            <div className="flex flex-col gap-2">
+              <Textarea
+                id="board-card-comment"
+                value={comment}
+                rows={3}
+                disabled={disabled}
+                placeholder={
+                  task.activeRunKind !== null
+                    ? "Comment, and the working agent receives it right away"
+                    : "Comment, and the task's agent answers on the board"
                 }
-              }}
-            />
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                disabled={disabled || posting || comment.trim().length === 0}
-                onClick={() => void postComment()}
-              >
-                Comment
-              </Button>
+                onChange={(event) => setComment(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    void postComment();
+                  }
+                }}
+              />
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  disabled={disabled || posting || comment.trim().length === 0}
+                  onClick={() => void postComment()}
+                >
+                  Comment
+                </Button>
+              </div>
             </div>
-          </div>
+          </section>
 
           {(detail.data?.runs.length ?? 0) > 0 ? (
-            <div className="flex flex-col gap-2">
-              <Label>Agent runs</Label>
-              {(detail.data?.runs ?? []).toReversed().map((run) => (
-                <RunRow
-                  key={run.id}
-                  run={run}
-                  snapshot={snapshot}
-                  onOpenThread={() => openThread(run.threadId)}
-                />
-              ))}
-            </div>
+            <section className={OFFICE_INSET}>
+              <SectionTitle label="Agent runs" tone="teal" count={detail.data?.runs.length} />
+              <div className="flex flex-col gap-2">
+                {(detail.data?.runs ?? []).toReversed().map((run) => (
+                  <RunRow
+                    key={run.id}
+                    run={run}
+                    snapshot={snapshot}
+                    onOpenThread={() => openThread(run.threadId)}
+                  />
+                ))}
+              </div>
+            </section>
           ) : null}
         </div>
       </ScrollArea>
     </>
+  );
+}
+
+// The board's column pills, so a status reads the same in the sheet as on the board.
+/** A section's pill heading; with `htmlFor` it is the label of that field instead. */
+function SectionTitle(props: {
+  readonly label: string;
+  readonly tone?: Tone;
+  readonly count?: number | undefined;
+  readonly htmlFor?: string;
+}) {
+  const pill = (
+    <OfficePill tone={props.tone ?? "gray"} variant={props.tone === undefined ? "plain" : "tint"}>
+      {props.label}
+      {props.count === undefined ? null : (
+        // A count inside a label would rename its field every time the count changes.
+        <span aria-hidden={props.htmlFor !== undefined}>: {props.count}</span>
+      )}
+    </OfficePill>
+  );
+  return props.htmlFor === undefined ? (
+    <h3 className="flex">{pill}</h3>
+  ) : (
+    <Label htmlFor={props.htmlFor}>{pill}</Label>
   );
 }
 
@@ -430,13 +505,23 @@ function RelatedCard(props: {
   readonly onOpen: () => void;
 }) {
   return (
-    <Button size="sm" variant="ghost" onClick={props.onOpen}>
+    <button
+      type="button"
+      onClick={props.onOpen}
+      className={cn(
+        OFFICE_CARD,
+        "cursor-pointer flex-row items-center gap-3 p-3 text-start text-sm outline-none hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+      )}
+    >
       <span className="text-muted-foreground">{props.prefix}</span>
-      <span className="min-w-0 flex-1 truncate text-start">{props.task.title}</span>
-      <Badge variant="outline" size="sm">
+      <span className="min-w-0 flex-1 truncate font-medium">{props.task.title}</span>
+      <OfficePill
+        tone={COLUMN_TONES[props.task.status]}
+        variant={statusPillVariant(props.task.status)}
+      >
         {boardStatusLabel(props.task.status)}
-      </Badge>
-    </Button>
+      </OfficePill>
+    </button>
   );
 }
 
@@ -450,12 +535,22 @@ const WORK_LINK_ICONS: Record<BoardWorkLink["kind"], LucideIcon> = {
   file: FileIcon,
 };
 
-const WORK_LINK_STATUS_VARIANTS = {
-  open: "info",
-  draft: "outline",
-  merged: "success",
-  closed: "secondary",
-} as const satisfies Record<NonNullable<BoardWorkLink["status"]>, string>;
+const WORK_LINK_TONES: Record<BoardWorkLink["kind"], Tone> = {
+  pull_request: "violet",
+  branch: "teal",
+  preview: "sky",
+  commit: "teal",
+  document: "indigo",
+  other: "gray",
+  file: "gray",
+};
+
+const WORK_LINK_STATUS_TONES = {
+  open: "sky",
+  draft: "gray",
+  merged: "emerald",
+  closed: "gray",
+} as const satisfies Record<NonNullable<BoardWorkLink["status"]>, Tone>;
 
 function WorkLinkRow(props: {
   readonly link: BoardWorkLink;
@@ -468,8 +563,10 @@ function WorkLinkRow(props: {
   const agent = agentById(props.snapshot.agents, link.agentId);
   const href = /^https?:\/\//.test(link.url) ? link.url : null;
   return (
-    <div className="group/link flex min-w-0 items-center gap-2 rounded-md px-1 py-1 text-sm">
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
+    <div className={cn(OFFICE_CARD, "flex-row items-center gap-3 p-3 text-sm")}>
+      <OfficeIconTile tone={WORK_LINK_TONES[link.kind]}>
+        <Icon />
+      </OfficeIconTile>
       {href !== null ? (
         <a
           href={href}
@@ -483,13 +580,13 @@ function WorkLinkRow(props: {
         <span className="min-w-0 truncate font-mono text-xs">{link.title}</span>
       )}
       {link.status !== null ? (
-        <Badge variant={WORK_LINK_STATUS_VARIANTS[link.status]} size="sm">
-          {link.status}
-        </Badge>
+        <OfficePill tone={WORK_LINK_STATUS_TONES[link.status]}>{link.status}</OfficePill>
       ) : null}
-      <span className="ms-auto shrink-0 truncate text-xs text-muted-foreground">
-        {agent?.name ?? ""}
-      </span>
+      {agent !== null ? (
+        <AgentName agent={agent} className="ms-auto shrink-0 text-xs text-muted-foreground" />
+      ) : (
+        <span className="ms-auto" />
+      )}
       <Button
         size="icon-xs"
         variant="ghost-muted"
@@ -510,30 +607,43 @@ function CommentRow(props: {
   readonly environmentId: EnvironmentId;
 }) {
   const { comment } = props;
-  const author =
-    comment.authorKind === "user"
-      ? "You"
-      : comment.authorKind === "system"
-        ? null
-        : (agentById(props.snapshot.agents, comment.authorAgentId)?.name ?? "Agent");
+  const agent = agentById(props.snapshot.agents, comment.authorAgentId);
   const time = formatRelativeTimeLabel(comment.createdAt);
-  if (author === null) {
+  if (comment.authorKind === "system") {
+    // System events carry no author but start with who acted, such as "Grace started working."
+    const actor =
+      agent ??
+      props.snapshot.agents.find((candidate) => comment.body.startsWith(`${candidate.name} `)) ??
+      null;
     return (
-      <span className="text-xs text-muted-foreground">
-        {comment.body} · {time}
+      <span className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+        {actor !== null ? <AgentFace agent={actor} name={actor.name} size="xs" /> : null}
+        <span className="min-w-0">
+          {comment.body} · {time}
+        </span>
       </span>
     );
   }
+  const authorName = comment.authorKind === "user" ? "You" : (agent?.name ?? "Agent");
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-1 rounded-lg border px-3 py-2",
-        comment.authorKind === "agent" && "bg-muted/40",
-      )}
-    >
-      <span className="text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{author}</span> · {time}
-      </span>
+    <div className={cn(OFFICE_CARD, "gap-2.5")} data-office-markdown>
+      <div className="flex min-w-0 items-center gap-2 text-xs">
+        {comment.authorKind === "user" ? (
+          <span
+            aria-hidden
+            className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground [&_svg]:size-3.5"
+          >
+            <UserRoundIcon />
+          </span>
+        ) : (
+          <AgentFace agent={agent ?? undefined} name={authorName} />
+        )}
+        <span className="truncate text-sm font-semibold text-foreground">{authorName}</span>
+        {agent?.title ? (
+          <span className="truncate text-muted-foreground">{agent.title}</span>
+        ) : null}
+        <span className="ms-auto shrink-0 text-muted-foreground tabular-nums">{time}</span>
+      </div>
       {/* People type plain lines; agents write markdown with blank lines between paragraphs. */}
       <ChatMarkdown
         text={comment.body}
@@ -553,23 +663,26 @@ function RunRow(props: {
   const agent = agentById(props.snapshot.agents, props.run.agentId);
   const time = formatRelativeTimeLabel(props.run.startedAt);
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="min-w-0 flex-1 truncate">
-        {agent?.name ?? "Removed agent"} · {props.run.kind} ·{" "}
-        <span className="text-muted-foreground">{time}</span>
+    <div className={cn(OFFICE_CARD, "flex-row items-center gap-3 p-3 text-sm")}>
+      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        {agent !== null ? (
+          <AgentName agent={agent} className="font-medium" />
+        ) : (
+          <span className="truncate">Removed agent</span>
+        )}
+        <span className="shrink-0 truncate text-muted-foreground">
+          · {props.run.kind} · {time}
+        </span>
       </span>
-      <Badge
-        size="sm"
-        variant={
-          props.run.status === "running"
-            ? "info"
-            : props.run.status === "completed"
-              ? "success"
-              : "warning"
-        }
-      >
-        {props.run.status}
-      </Badge>
+      {props.run.status === "running" ? (
+        <OfficePill tone="sky" variant="live">
+          {props.run.status}
+        </OfficePill>
+      ) : (
+        <OfficePill tone={props.run.status === "completed" ? "emerald" : "amber"}>
+          {props.run.status}
+        </OfficePill>
+      )}
       <Button size="xs" variant="ghost" onClick={props.onOpenThread}>
         Thread
       </Button>

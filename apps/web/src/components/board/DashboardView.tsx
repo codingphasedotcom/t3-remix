@@ -5,7 +5,6 @@ import type {
   BoardDepartmentId,
   BoardSnapshot,
   BoardTaskId,
-  BoardTaskStatus,
   EnvironmentId,
 } from "@t3tools/contracts";
 import {
@@ -34,14 +33,15 @@ import { boardLive } from "../../state/board";
 import { useEnvironmentQuery } from "../../state/query";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { niceScale } from "../usage/UsageProviderChart";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AgentAvatar } from "./AgentAvatar";
+import { AgentAvatar, AgentName } from "./AgentAvatar";
 import { agentById } from "./board.logic";
+import { COLUMN_TONES, TONES, type Tone } from "./boardTones";
+import { OFFICE_CARD, OFFICE_PANEL, OfficeIconTile, OfficePill } from "./OfficeSurface";
 import {
   attentionItems,
   averageRunMs,
@@ -58,57 +58,6 @@ import {
   type AttentionItems,
   type EmployeeActivity,
 } from "./dashboard.logic";
-
-const TONES = {
-  gray: { fill: "bg-muted-foreground/40", tint: "bg-muted", ink: "text-muted-foreground" },
-  indigo: {
-    fill: "bg-indigo-500",
-    tint: "bg-indigo-500/10 dark:bg-indigo-500/15",
-    ink: "text-indigo-600 dark:text-indigo-400",
-  },
-  sky: {
-    fill: "bg-sky-500",
-    tint: "bg-sky-500/10 dark:bg-sky-500/15",
-    ink: "text-sky-600 dark:text-sky-400",
-  },
-  amber: {
-    fill: "bg-amber-500",
-    tint: "bg-amber-500/10 dark:bg-amber-500/15",
-    ink: "text-amber-600 dark:text-amber-400",
-  },
-  red: {
-    fill: "bg-red-500",
-    tint: "bg-red-500/10 dark:bg-red-500/15",
-    ink: "text-red-600 dark:text-red-400",
-  },
-  emerald: {
-    fill: "bg-emerald-500",
-    tint: "bg-emerald-500/10 dark:bg-emerald-500/15",
-    ink: "text-emerald-600 dark:text-emerald-400",
-  },
-  teal: {
-    fill: "bg-teal-500",
-    tint: "bg-teal-500/10 dark:bg-teal-500/15",
-    ink: "text-teal-600 dark:text-teal-400",
-  },
-  violet: {
-    fill: "bg-violet-500",
-    tint: "bg-violet-500/10 dark:bg-violet-500/15",
-    ink: "text-violet-600 dark:text-violet-400",
-  },
-} as const;
-
-type Tone = keyof typeof TONES;
-
-// Same hues as the sidebar's thread pills: sky is working, amber waits on a person.
-const COLUMN_TONES: Record<BoardTaskStatus, Tone> = {
-  backlog: "gray",
-  todo: "indigo",
-  in_progress: "sky",
-  review: "amber",
-  blocked: "red",
-  done: "emerald",
-};
 
 // Checked in both themes: the first six stay apart from one another and
 // neighbours stay apart under colour blindness. The ninth department starts over.
@@ -183,7 +132,7 @@ export function DashboardView(props: {
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className={cn(OFFICE_PANEL, "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6")}>
         <StatTile
           label="Open tasks"
           icon={ListTodoIcon}
@@ -231,7 +180,16 @@ export function DashboardView(props: {
       </div>
 
       {hasAttentionItems(attention) ? (
-        <Panel title="Needs attention">
+        <Panel
+          title="Needs attention"
+          tone="red"
+          count={
+            attention.blocked.length +
+            attention.unassigned.length +
+            attention.failing.length +
+            (attention.pendingHires > 0 ? 1 : 0)
+          }
+        >
           <AttentionList
             attention={attention}
             agents={snapshot.agents}
@@ -303,7 +261,7 @@ export function DashboardView(props: {
           />
         </Panel>
 
-        <Panel className="lg:col-span-3" title="Employees">
+        <Panel className="lg:col-span-3" title="Employees" count={employees.length}>
           <Table>
             <TableHeader>
               <TableRow>
@@ -374,19 +332,28 @@ export function DashboardView(props: {
 
 function Panel(props: {
   readonly title: string;
+  readonly count?: number;
+  /** Omitted for a neutral white pill. */
+  readonly tone?: Tone;
   readonly aside?: ReactNode;
   readonly className?: string;
   readonly children: ReactNode;
 }) {
   return (
-    <section
-      className={cn("flex min-w-0 flex-col gap-3 rounded-2xl border bg-card p-4", props.className)}
-    >
-      <div className="flex min-h-7 flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-foreground">{props.title}</h2>
+    <section className={cn(OFFICE_PANEL, props.className)}>
+      <div className="flex min-h-7 flex-wrap items-center justify-between gap-2 ps-1">
+        <h2 className="flex">
+          <OfficePill
+            tone={props.tone ?? "gray"}
+            variant={props.tone === undefined ? "plain" : "tint"}
+          >
+            {props.title}
+            {props.count === undefined ? null : `: ${formatCount(props.count)}`}
+          </OfficePill>
+        </h2>
         {props.aside}
       </div>
-      {props.children}
+      <div className={OFFICE_CARD}>{props.children}</div>
     </section>
   );
 }
@@ -400,19 +367,12 @@ function StatTile(props: {
 }) {
   const Icon = props.icon;
   return (
-    <div className="flex min-w-0 flex-col gap-1 rounded-2xl border bg-card p-4">
+    <div className={cn(OFFICE_CARD, "gap-1")}>
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-xs text-muted-foreground">{props.label}</span>
-        <span
-          aria-hidden
-          className={cn(
-            "flex size-6 shrink-0 items-center justify-center rounded-lg",
-            TONES[props.tone].tint,
-            TONES[props.tone].ink,
-          )}
-        >
-          <Icon className="size-3.5" />
-        </span>
+        <OfficeIconTile tone={props.tone}>
+          <Icon />
+        </OfficeIconTile>
       </div>
       {props.value === null ? (
         <Skeleton className="h-7 w-16" />
@@ -579,13 +539,21 @@ function AttentionList(props: {
       {attention.failing.map((entry) => (
         <div key={entry.agentId} className="flex items-center gap-2 px-2 py-1.5 text-sm">
           <XCircleIcon className={cn("size-4 shrink-0", TONES.red.ink)} />
-          <span className="truncate">
-            {agentById(props.agents, entry.agentId)?.name ?? "A former employee"} had {entry.failed}{" "}
-            failed {entry.failed === 1 ? "run" : "runs"}
-          </span>
+          <FailingAgent agent={agentById(props.agents, entry.agentId)} failed={entry.failed} />
         </div>
       ))}
     </div>
+  );
+}
+
+function FailingAgent(props: { readonly agent: BoardAgent | null; readonly failed: number }) {
+  const runs = `had ${props.failed} failed ${props.failed === 1 ? "run" : "runs"}`;
+  if (props.agent === null) return <span className="truncate">A former employee {runs}</span>;
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <AgentName agent={props.agent} className="font-medium" />
+      <span className="truncate">{runs}</span>
+    </span>
   );
 }
 
@@ -680,8 +648,14 @@ function DepartmentName(props: { readonly name: string | null; readonly fill: st
 }
 
 function ActivityBadge(props: { readonly activity: EmployeeActivity }) {
-  if (props.activity === "working") return <Badge variant="info">Working</Badge>;
-  if (props.activity === "paused") return <Badge variant="secondary">Paused</Badge>;
+  if (props.activity === "working") {
+    return (
+      <OfficePill tone="sky" variant="solid">
+        Working
+      </OfficePill>
+    );
+  }
+  if (props.activity === "paused") return <OfficePill tone="gray">Paused</OfficePill>;
   return <span className="text-muted-foreground">Idle</span>;
 }
 

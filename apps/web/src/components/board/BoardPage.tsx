@@ -15,20 +15,28 @@ import { Navigate, useNavigate } from "@tanstack/react-router";
 import {
   Building2Icon,
   EllipsisIcon,
+  GaugeIcon,
+  GitBranchIcon,
   KanbanSquareIcon,
   LayoutDashboardIcon,
   NetworkIcon,
+  PlayIcon,
   PlusIcon,
   RepeatIcon,
+  ServerOffIcon,
   SettingsIcon,
   SparklesIcon,
   Trash2Icon,
+  TriangleAlertIcon,
+  UsersIcon,
+  WifiOffIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
+import { cn } from "../../lib/utils";
 import { boardCommand, boardLive } from "../../state/board";
 import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -53,6 +61,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarInset } from "../ui/sidebar";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { AgentName } from "./AgentAvatar";
 import { AgentDialog, MemoryCount, type AgentDraft } from "./AgentDialog";
 import { BoardCardSheet } from "./BoardCardSheet";
 import { BoardColumns } from "./BoardColumns";
@@ -64,6 +73,18 @@ import { RoutinesView } from "./RoutinesView";
 import { SkillsView } from "./SkillsView";
 import { TokenLimitField } from "./TokenLimitField";
 import { agentById, limitProgress } from "./board.logic";
+import type { Tone } from "./boardTones";
+import {
+  OFFICE_CARD,
+  OFFICE_PANEL,
+  OFFICE_TRACK,
+  OfficeFieldGroup,
+  OfficeHeading,
+  OfficeIconTile,
+  OfficePill,
+  OfficeTab,
+  OfficeTabs,
+} from "./OfficeSurface";
 
 export type BoardTab = "board" | "dashboard" | "org" | "skills" | "routines";
 
@@ -89,7 +110,12 @@ export function BoardPage(props: BoardPageProps) {
             <WorkspacePageHeader electron={isElectron}>
               <span className="text-sm font-medium">Companies</span>
             </WorkspacePageHeader>
-            <BoardMessage title="No environment" description="Connect T3 Code to a server." />
+            <BoardMessage
+              icon={<ServerOffIcon />}
+              tone="gray"
+              title="No environment"
+              description="Connect T3 Code to a server."
+            />
           </>
         ) : (
           <CompanyWorkspace key={environmentId} {...props} environmentId={environmentId} />
@@ -150,7 +176,12 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         <WorkspacePageHeader electron={isElectron}>
           <span className="text-sm font-medium">Companies</span>
         </WorkspacePageHeader>
-        <BoardMessage title="Environment offline" description="Reconnect to see your companies." />
+        <BoardMessage
+          icon={<WifiOffIcon />}
+          tone="gray"
+          title="Environment offline"
+          description="Reconnect to see your companies."
+        />
       </>
     );
   }
@@ -161,6 +192,8 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           <span className="text-sm font-medium">Companies</span>
         </WorkspacePageHeader>
         <BoardMessage
+          icon={boardQuery.error === null ? <Building2Icon /> : <TriangleAlertIcon />}
+          tone={boardQuery.error === null ? "gray" : "red"}
           title={boardQuery.error === null ? "Loading companies" : "Could not load companies"}
           description={boardQuery.error ?? ""}
         />
@@ -189,8 +222,10 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         </WorkspacePageHeader>
         <Empty>
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Building2Icon />
+            <EmptyMedia>
+              <OfficeIconTile tone="teal" size="lg">
+                <Building2Icon />
+              </OfficeIconTile>
             </EmptyMedia>
             <EmptyTitle>Start your first company</EmptyTitle>
             <EmptyDescription>
@@ -227,107 +262,111 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   return (
     <>
       <WorkspacePageHeader electron={isElectron}>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <Select
-            value={company.id}
-            onValueChange={(value) => go({ company: value as BoardCompanyId, tab })}
-          >
-            <SelectTrigger size="sm" className="w-auto max-w-56">
-              <SelectValue>
-                <span className="flex items-center gap-2 truncate">
-                  <Building2Icon className="size-4 shrink-0" />
-                  {company.name}
-                </span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup>
-              {snapshot.companies.map((summary) => (
-                <SelectItem key={summary.id} value={summary.id} label={summary.name}>
-                  <span className="flex flex-col">
-                    <span>{summary.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {summary.agentCount} agents · {summary.openTaskCount} open tasks
-                    </span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label="New company"
-            disabled={!canOperate}
-            onClick={() => setCompanyDialogOpen(true)}
-          >
-            <PlusIcon />
-          </Button>
-          <Menu>
-            <MenuTrigger
-              render={<Button size="icon-sm" variant="ghost" aria-label="Company actions" />}
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className={cn(OFFICE_TRACK, "shrink")}>
+            <Select
+              value={company.id}
+              onValueChange={(value) => go({ company: value as BoardCompanyId, tab })}
             >
-              <EllipsisIcon />
-            </MenuTrigger>
-            <MenuPopup align="start">
-              <MenuItem disabled={!canOperate} onClick={() => setEditingCompany(true)}>
-                Edit company
-              </MenuItem>
-              <MenuItem
-                variant="destructive"
-                disabled={!canOperate}
-                onClick={() => void deleteCompany()}
-              >
-                Delete company
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-          <div className="ms-2 flex items-center gap-1">
+              <SelectTrigger size="sm" variant="ghost" className="w-auto max-w-56">
+                <SelectValue>
+                  <span className="flex items-center gap-2 truncate">
+                    <OfficeIconTile tone="teal">
+                      <Building2Icon />
+                    </OfficeIconTile>
+                    <span className="truncate font-medium text-foreground">{company.name}</span>
+                  </span>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {snapshot.companies.map((summary) => (
+                  <SelectItem key={summary.id} value={summary.id} label={summary.name}>
+                    <span className="flex flex-col">
+                      <span>{summary.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {summary.agentCount} agents · {summary.openTaskCount} open tasks
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
             <Button
-              size="sm"
-              variant={tab === "board" ? "secondary" : "ghost"}
+              size="icon-sm"
+              variant="ghost"
+              aria-label="New company"
+              disabled={!canOperate}
+              onClick={() => setCompanyDialogOpen(true)}
+            >
+              <PlusIcon />
+            </Button>
+            <Menu>
+              <MenuTrigger
+                render={<Button size="icon-sm" variant="ghost" aria-label="Company actions" />}
+              >
+                <EllipsisIcon />
+              </MenuTrigger>
+              <MenuPopup align="start">
+                <MenuItem disabled={!canOperate} onClick={() => setEditingCompany(true)}>
+                  Edit company
+                </MenuItem>
+                <MenuItem
+                  variant="destructive"
+                  disabled={!canOperate}
+                  onClick={() => void deleteCompany()}
+                >
+                  Delete company
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </div>
+          <OfficeTabs label="Company views">
+            <OfficeTab
+              active={tab === "board"}
+              icon={<KanbanSquareIcon />}
+              tone="sky"
               onClick={() => go({ company: company.id, tab: "board" })}
             >
-              <KanbanSquareIcon />
               Board
-            </Button>
-            <Button
-              size="sm"
-              variant={tab === "dashboard" ? "secondary" : "ghost"}
+            </OfficeTab>
+            <OfficeTab
+              active={tab === "dashboard"}
+              icon={<LayoutDashboardIcon />}
+              tone="emerald"
               onClick={() => go({ company: company.id, tab: "dashboard" })}
             >
-              <LayoutDashboardIcon />
               Dashboard
-            </Button>
-            <Button
-              size="sm"
-              variant={tab === "org" ? "secondary" : "ghost"}
+            </OfficeTab>
+            <OfficeTab
+              active={tab === "org"}
+              icon={<NetworkIcon />}
+              tone="violet"
               onClick={() => go({ company: company.id, tab: "org" })}
             >
-              <NetworkIcon />
               Org chart
               {pendingHires > 0 ? (
                 <Badge variant="warning" size="sm">
                   {pendingHires}
                 </Badge>
               ) : null}
-            </Button>
-            <Button
-              size="sm"
-              variant={tab === "skills" ? "secondary" : "ghost"}
+            </OfficeTab>
+            <OfficeTab
+              active={tab === "skills"}
+              icon={<SparklesIcon />}
+              tone="indigo"
               onClick={() => go({ company: company.id, tab: "skills" })}
             >
-              <SparklesIcon />
               Skills
-            </Button>
-            <Button
-              size="sm"
-              variant={tab === "routines" ? "secondary" : "ghost"}
+            </OfficeTab>
+            <OfficeTab
+              active={tab === "routines"}
+              icon={<RepeatIcon />}
+              tone="teal"
               onClick={() => go({ company: company.id, tab: "routines" })}
             >
-              <RepeatIcon />
               Routines
-            </Button>
-          </div>
+            </OfficeTab>
+          </OfficeTabs>
         </div>
         {tab === "board" ? (
           <div className="flex shrink-0 items-center gap-2">
@@ -342,7 +381,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
 
       {tab === "board" ? (
         <>
-          <MissionBanner company={company} ceoName={ceo?.name ?? null} />
+          <MissionBanner company={company} ceo={ceo ?? null} />
           <CompanyLimitBanner snapshot={snapshot} />
           <BoardColumns
             snapshot={snapshot}
@@ -418,36 +457,59 @@ function CompanyLimitBanner(props: { readonly snapshot: BoardSnapshot }) {
   );
   if (progress === null || (!progress.nearing && !progress.reached)) return null;
   return (
-    <div className="mx-(--workspace-gutter-start) mb-3 text-sm text-warning">
-      {progress.reached
-        ? "This company used its monthly token limit. Agents won't start until you raise it under Edit company or the month ends."
-        : `This company has used ${Math.round(progress.share * 100)}% of its monthly token limit.`}
+    <div className="mx-(--workspace-gutter-start) mb-3 flex items-center gap-3 rounded-2xl bg-warning-surface px-3 py-2 text-sm text-warning-foreground">
+      <OfficeIconTile tone="amber">
+        <GaugeIcon />
+      </OfficeIconTile>
+      <span className="min-w-0">
+        {progress.reached
+          ? "This company used its monthly token limit. Agents won't start until you raise it under Edit company or the month ends."
+          : `This company has used ${Math.round(progress.share * 100)}% of its monthly token limit.`}
+      </span>
     </div>
   );
 }
 
-function MissionBanner(props: { readonly company: BoardCompany; readonly ceoName: string | null }) {
-  if (props.company.mission.trim().length === 0 && props.ceoName === null) return null;
+function MissionBanner(props: { readonly company: BoardCompany; readonly ceo: BoardAgent | null }) {
+  if (props.company.mission.trim().length === 0 && props.ceo === null) return null;
   return (
-    <div className="mx-(--workspace-gutter-start) mb-3 flex items-center gap-3 text-sm">
+    <div
+      className={cn(
+        OFFICE_PANEL,
+        "mx-(--workspace-gutter-start) mb-3 flex-row items-center rounded-2xl px-3 py-2 text-sm",
+      )}
+    >
       {props.company.mission.trim().length > 0 ? (
-        <span className="min-w-0 truncate text-muted-foreground">
-          <span className="font-medium text-foreground">Mission:</span> {props.company.mission}
-        </span>
+        <>
+          <OfficePill tone="teal">Mission</OfficePill>
+          <span className="min-w-0 truncate text-foreground">{props.company.mission}</span>
+        </>
       ) : null}
-      {props.ceoName !== null ? (
-        <span className="ms-auto shrink-0 text-xs text-muted-foreground">
-          New tasks go to {props.ceoName}, the CEO
+      {props.ceo !== null ? (
+        <span className="ms-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground">
+          {"New tasks go to "}
+          <AgentName agent={props.ceo} className="font-medium text-foreground" />
+          {", the CEO"}
         </span>
       ) : null}
     </div>
   );
 }
 
-function BoardMessage(props: { readonly title: string; readonly description: string }) {
+function BoardMessage(props: {
+  readonly icon: ReactNode;
+  readonly tone: Tone;
+  readonly title: string;
+  readonly description: string;
+}) {
   return (
     <Empty>
       <EmptyHeader>
+        <EmptyMedia>
+          <OfficeIconTile tone={props.tone} size="lg">
+            {props.icon}
+          </OfficeIconTile>
+        </EmptyMedia>
         <EmptyTitle>{props.title}</EmptyTitle>
         {props.description ? <EmptyDescription>{props.description}</EmptyDescription> : null}
       </EmptyHeader>
@@ -542,42 +604,53 @@ function EditCompanyForm(props: {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Edit company</DialogTitle>
+        <OfficeHeading
+          icon={<Building2Icon />}
+          tone="teal"
+          title={<DialogTitle>Edit company</DialogTitle>}
+        />
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-edit-company-name">Name</Label>
-            <Input
-              id="board-edit-company-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="board-edit-company-mission">Mission</Label>
-            <Textarea
-              id="board-edit-company-mission"
-              value={mission}
-              rows={4}
-              onChange={(event) => setMission(event.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label>Departments</Label>
+          <OfficeFieldGroup label="Company" tone="teal">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-edit-company-name">Name</Label>
+              <Input
+                id="board-edit-company-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="board-edit-company-mission">Mission</Label>
+              <Textarea
+                id="board-edit-company-mission"
+                value={mission}
+                rows={4}
+                onChange={(event) => setMission(event.target.value)}
+              />
+            </div>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup
+            label="Departments"
+            tone="violet"
+            action={
               <Button size="xs" variant="outline" onClick={addDepartment}>
                 <PlusIcon />
                 Add department
               </Button>
-            </div>
-            <div className="flex flex-col gap-1.5">
+            }
+          >
+            <div className="flex flex-col gap-2">
               {departments.map((department) => {
                 const members = props.agents.filter(
                   (agent) => department.id !== null && agent.departmentId === department.id,
                 ).length;
                 return (
-                  <div key={department.key} className="flex items-center gap-2">
+                  <div
+                    key={department.key}
+                    className={cn(OFFICE_CARD, "flex-row items-center gap-2 rounded-xl p-2")}
+                  >
                     <Input
                       size="sm"
                       value={department.name}
@@ -586,7 +659,10 @@ function EditCompanyForm(props: {
                       autoFocus={department.id === null}
                       onChange={(event) => renameDepartment(department.key, event.target.value)}
                     />
-                    <span className="w-16 shrink-0 text-xs text-muted-foreground">
+                    <span className="flex w-24 shrink-0 items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+                      <OfficeIconTile tone="violet">
+                        <UsersIcon />
+                      </OfficeIconTile>
                       {members} {members === 1 ? "person" : "people"}
                     </span>
                     <Button
@@ -610,31 +686,35 @@ function EditCompanyForm(props: {
               Every employee belongs to one department. Move people out of a department before
               removing it.
             </span>
-          </div>
-          <TokenLimitField
-            id="board-edit-company-token-limit"
-            label="Monthly token limit for the company"
-            value={tokenLimit}
-            used={props.snapshot.usage?.companyTokens ?? null}
-            onChange={setTokenLimit}
-            onValidityChange={setLimitValid}
-          />
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="board-edit-company-memory">Company memory</Label>
-              <MemoryCount length={memory.length} limit={MAX_COMPANY_MEMORY_CHARS} />
-            </div>
-            <Textarea
-              id="board-edit-company-memory"
-              value={memory}
-              rows={6}
-              placeholder="Decisions and conventions every agent should know. Managers add to it as they learn."
-              onChange={(event) => setMemory(event.target.value)}
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Limits" tone="amber">
+            <TokenLimitField
+              id="board-edit-company-token-limit"
+              label="Monthly token limit for the company"
+              value={tokenLimit}
+              used={props.snapshot.usage?.companyTokens ?? null}
+              onChange={setTokenLimit}
+              onValidityChange={setLimitValid}
             />
-          </div>
+          </OfficeFieldGroup>
+          <OfficeFieldGroup label="Memory" tone="gray">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="board-edit-company-memory">Company memory</Label>
+                <MemoryCount length={memory.length} limit={MAX_COMPANY_MEMORY_CHARS} />
+              </div>
+              <Textarea
+                id="board-edit-company-memory"
+                value={memory}
+                rows={6}
+                placeholder="Decisions and conventions every agent should know. Managers add to it as they learn."
+                onChange={(event) => setMemory(event.target.value)}
+              />
+            </div>
+          </OfficeFieldGroup>
         </div>
       </DialogPanel>
-      <DialogFooter>
+      <DialogFooter variant="bare">
         <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
         <Button size="sm" disabled={!canSave} onClick={() => void save()}>
           Save
@@ -667,9 +747,12 @@ function BoardSettingsMenu(props: {
         {settings.autoDispatch ? "Auto-run on" : "Auto-run off"}
       </MenuTrigger>
       <MenuPopup align="end">
-        <div className="flex w-72 flex-col gap-4 p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex flex-col gap-1">
+        <div className="flex w-80 flex-col gap-4 p-4">
+          <div className="flex items-start gap-3">
+            <OfficeIconTile tone="sky">
+              <PlayIcon />
+            </OfficeIconTile>
+            <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
               <Label htmlFor="board-auto-dispatch">Auto-run agents</Label>
               <span className="text-xs text-muted-foreground">
                 Start assignees and reviewers as soon as their tasks are ready.
@@ -677,13 +760,17 @@ function BoardSettingsMenu(props: {
             </div>
             <Switch
               id="board-auto-dispatch"
+              className="mt-1"
               checked={settings.autoDispatch}
               disabled={props.disabled}
               onCheckedChange={(checked) => update({ autoDispatch: checked })}
             />
           </div>
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex flex-col gap-1">
+          <div className="flex items-start gap-3">
+            <OfficeIconTile tone="violet">
+              <GitBranchIcon />
+            </OfficeIconTile>
+            <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
               <Label htmlFor="board-worktrees">Worktree per task</Label>
               <span className="text-xs text-muted-foreground">
                 Isolate each task on its own branch from {settings.baseRef}.
@@ -691,13 +778,17 @@ function BoardSettingsMenu(props: {
             </div>
             <Switch
               id="board-worktrees"
+              className="mt-1"
               checked={settings.useWorktrees}
               disabled={props.disabled}
               onCheckedChange={(checked) => update({ useWorktrees: checked })}
             />
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <Label>Agents at once</Label>
+          <div className="flex items-center gap-3">
+            <OfficeIconTile tone="indigo">
+              <UsersIcon />
+            </OfficeIconTile>
+            <Label className="flex-1">Agents at once</Label>
             <Select
               value={String(settings.maxConcurrentRuns)}
               disabled={props.disabled}
