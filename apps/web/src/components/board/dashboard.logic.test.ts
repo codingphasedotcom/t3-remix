@@ -60,6 +60,7 @@ function card(id: string, status: BoardTask["status"], assignee: string | null):
     status,
     position: 1,
     assigneeAgentId: assignee as BoardAgentId | null,
+    assignedToUser: false,
     reviewerAgentId: null,
     parentTaskId: null,
     threadId: null,
@@ -179,6 +180,12 @@ describe("attentionItems", () => {
     expect(attention.failing).toEqual([{ agentId: engineer.id, failed: 1 }]);
     expect(hasAttentionItems(attention)).toBe(true);
     expect(hasAttentionItems(attentionItems({ ...snapshot, tasks: [] }, null))).toBe(false);
+  });
+
+  it("leaves cards you keep for yourself out of the unassigned list", () => {
+    const mine = { ...card("errand", "todo", null), assignedToUser: true };
+    const attention = attentionItems({ ...snapshot, tasks: [...snapshot.tasks, mine] }, dashboard);
+    expect(attention.unassigned.map((task) => task.id)).toEqual(["docs"]);
   });
 });
 

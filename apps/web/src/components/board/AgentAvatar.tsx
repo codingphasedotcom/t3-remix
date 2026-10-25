@@ -1,3 +1,4 @@
+import { UserIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
@@ -87,6 +88,27 @@ export function AgentAvatar(props: {
         {props.title}: {props.name}
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+/** The person using the board, where an employee's face would be. */
+export function YouFace(props: { readonly size?: FaceSize }) {
+  return (
+    <span
+      aria-hidden
+      className={faceClassName({ hasFace: false, size: props.size ?? "sm", muted: false })}
+    >
+      <UserIcon className="size-3/5" />
+    </span>
+  );
+}
+
+export function YouName(props: { readonly size?: FaceSize }) {
+  return (
+    <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 align-middle">
+      <YouFace size={props.size ?? "xs"} />
+      <span className="min-w-0 truncate">You</span>
+    </span>
   );
 }
 

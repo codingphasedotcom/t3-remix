@@ -128,7 +128,7 @@ export function departmentRows(
 
 export interface AttentionItems {
   readonly blocked: ReadonlyArray<BoardTask>;
-  /** Unassigned tasks waiting in To do, which nothing will start. */
+  /** Tasks in To do with neither an agent nor you on them, which nothing will start. */
   readonly unassigned: ReadonlyArray<BoardTask>;
   readonly pendingHires: number;
   readonly failing: ReadonlyArray<{ readonly agentId: BoardAgentId; readonly failed: number }>;
@@ -141,7 +141,7 @@ export function attentionItems(
   return {
     blocked: snapshot.tasks.filter((task) => task.status === "blocked"),
     unassigned: snapshot.tasks.filter(
-      (task) => task.status === "todo" && task.assigneeAgentId === null,
+      (task) => task.status === "todo" && task.assigneeAgentId === null && !task.assignedToUser,
     ),
     pendingHires: snapshot.hires.filter((hire) => hire.status === "pending").length,
     failing: (dashboard?.agents ?? [])

@@ -891,7 +891,8 @@ const make = Effect.gen(function* () {
           return yield* boardError("A subtask must belong to its parent task's company.");
         }
       }
-      const assigneeAgentId = input.assigneeAgentId ?? null;
+      const assignedToUser = input.assignedToUser ?? false;
+      const assigneeAgentId = assignedToUser ? null : (input.assigneeAgentId ?? null);
       // A manager reviews the work it hands down unless it names another reviewer.
       const reviewerAgentId =
         input.reviewerAgentId !== undefined
@@ -904,8 +905,9 @@ const make = Effect.gen(function* () {
         projectId: company.projectId,
         title: input.title,
         description: input.description ?? "",
-        status: input.status ?? (assigneeAgentId !== null ? "todo" : "backlog"),
+        status: input.status ?? (assigneeAgentId !== null || assignedToUser ? "todo" : "backlog"),
         assigneeAgentId,
+        assignedToUser,
         reviewerAgentId,
         parentTaskId: input.parentTaskId ?? null,
         createdByAgentId: actingAs?.id ?? null,
@@ -1050,12 +1052,18 @@ const make = Effect.gen(function* () {
           yield* assertMayAssign(company, agents, actingAs, [input.assigneeAgentId]);
         }
       }
+      // A card belongs to the person or to an agent, never both, so taking it clears the other.
+      const assignedToUser =
+        input.assignedToUser ??
+        (input.assigneeAgentId !== undefined && input.assigneeAgentId !== null ? false : undefined);
+      const assigneeAgentId = assignedToUser === true ? null : input.assigneeAgentId;
       const statusChanged = yield* store.updateTask(input.id, {
         ...(input.title === undefined ? {} : { title: input.title }),
         ...(input.description === undefined ? {} : { description: input.description }),
         ...(input.status === undefined ? {} : { status: input.status }),
         ...(input.position === undefined ? {} : { position: input.position }),
-        ...(input.assigneeAgentId === undefined ? {} : { assigneeAgentId: input.assigneeAgentId }),
+        ...(assigneeAgentId === undefined ? {} : { assigneeAgentId }),
+        ...(assignedToUser === undefined ? {} : { assignedToUser }),
         ...(input.reviewerAgentId === undefined ? {} : { reviewerAgentId: input.reviewerAgentId }),
       });
       if (statusChanged && input.status !== undefined) {
@@ -1336,7 +1344,8 @@ const make = Effect.gen(function* () {
       companyId: company.id,
       title: input.title,
       description: input.description,
-      assigneeAgentId: input.assigneeAgentId,
+      assigneeAgentId: input.assignedToUser === true ? null : input.assigneeAgentId,
+      assignedToUser: input.assignedToUser ?? false,
       everyDays: input.everyDays,
       nextRunAt: input.nextRunAt,
       enabled: input.enabled,
@@ -1365,7 +1374,7 @@ const make = Effect.gen(function* () {
         title: routine.title,
         description: routine.description,
         assigneeAgentId: routine.assigneeAgentId,
-        status: routine.assigneeAgentId === null ? "backlog" : "todo",
+        assignedToUser: routine.assignedToUser,
       },
       { kind: "user" },
     );
@@ -1821,7 +1830,8 @@ const make = Effect.gen(function* () {
   ) {
     const { manual } = options;
     const task = stored.task;
-    if (task.activeRunKind !== null) return null;
+    // A person's own card is theirs alone: comments on it are notes, not questions for the CEO.
+    if (task.activeRunKind !== null || task.assignedToUser) return null;
     const ready = (id: BoardAgentId | null) => {
       const agent = agents.find((candidate) => candidate.id === id);
       return agent === undefined || (agent.paused && !manual) || options.overLimit(agent)
@@ -1919,6 +1929,9 @@ const make = Effect.gen(function* () {
       return yield* boardError("An agent is already working on this task.");
     }
     if (task.status === "done") return yield* boardError("Move the task out of Done to rework it.");
+    if (task.assignedToUser) {
+      return yield* boardError("This task is yours. Assign an agent to have it start the work.");
+    }
     if (task.status === "review" && task.reviewerAgentId === null) {
       return yield* boardError("Set a reviewer before starting the review.");
     }

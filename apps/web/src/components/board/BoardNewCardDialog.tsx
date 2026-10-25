@@ -45,6 +45,7 @@ function NewCardForm(props: {
   const [assigneeAgentId, setAssigneeAgentId] = useState<BoardAgentId | null>(
     company?.ceoAgentId ?? null,
   );
+  const [assignedToUser, setAssignedToUser] = useState(false);
   // The first person @mentioned takes the card, unless an assignee was already picked.
   const [assigneeFollowsMention, setAssigneeFollowsMention] = useState(true);
   const [reviewerAgentId, setReviewerAgentId] = useState<BoardAgentId | null>(null);
@@ -54,6 +55,7 @@ function NewCardForm(props: {
   const onMention = (candidate: MentionCandidate) => {
     if (!assigneeFollowsMention) return;
     setAssigneeAgentId(candidate.agentId);
+    setAssignedToUser(false);
     setAssigneeFollowsMention(false);
   };
 
@@ -61,6 +63,7 @@ function NewCardForm(props: {
     setTitle("");
     setDescription("");
     setAssigneeAgentId(null);
+    setAssignedToUser(false);
     setAssigneeFollowsMention(true);
     setReviewerAgentId(null);
     setFiles([]);
@@ -76,8 +79,9 @@ function NewCardForm(props: {
         title: title.trim(),
         description,
         status,
-        assigneeAgentId,
-        reviewerAgentId,
+        assigneeAgentId: assignedToUser ? null : assigneeAgentId,
+        assignedToUser,
+        reviewerAgentId: assignedToUser ? null : reviewerAgentId,
         ...(files.length > 0 ? { files } : {}),
       },
     });
@@ -162,21 +166,32 @@ function NewCardForm(props: {
                 <AgentSelect
                   agents={agents}
                   value={assigneeAgentId}
+                  you={{
+                    selected: assignedToUser,
+                    onSelect: () => {
+                      setAssignedToUser(true);
+                      setAssigneeFollowsMention(false);
+                    },
+                  }}
                   onChange={(agentId) => {
                     setAssigneeAgentId(agentId);
+                    setAssignedToUser(false);
                     setAssigneeFollowsMention(false);
                   }}
                 />
               </div>
-              <div className="flex flex-col gap-2">
-                <Label>Reviewer</Label>
-                <AgentSelect
-                  agents={agents}
-                  value={reviewerAgentId}
-                  noneLabel="The board (you)"
-                  onChange={setReviewerAgentId}
-                />
-              </div>
+              {/* No agent touches a card you keep, so nobody reviews it but you. */}
+              {assignedToUser ? null : (
+                <div className="flex flex-col gap-2">
+                  <Label>Reviewer</Label>
+                  <AgentSelect
+                    agents={agents}
+                    value={reviewerAgentId}
+                    noneLabel="The board (you)"
+                    onChange={setReviewerAgentId}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </DialogPanel>
@@ -192,10 +207,12 @@ function NewCardForm(props: {
           </Button>
           <Button
             size="sm"
-            disabled={saving || title.trim().length === 0 || assigneeAgentId === null}
+            disabled={
+              saving || title.trim().length === 0 || (assigneeAgentId === null && !assignedToUser)
+            }
             onClick={() => void create("todo")}
           >
-            Add and start
+            {assignedToUser ? "Add to To do" : "Add and start"}
           </Button>
         </DialogFooter>
       </DialogPopup>

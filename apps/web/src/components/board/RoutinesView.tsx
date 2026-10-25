@@ -27,7 +27,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import { AgentName } from "./AgentAvatar";
+import { AgentName, YouName } from "./AgentAvatar";
 import { AgentSelect } from "./AgentSelect";
 import type { RunBoardCommand } from "./BoardPage";
 import {
@@ -52,6 +52,7 @@ interface RoutineDraft {
   readonly title: string;
   readonly description: string;
   readonly assigneeAgentId: BoardAgentId | null;
+  readonly assignedToUser: boolean;
   readonly everyDays: number;
   /** A `datetime-local` value in the viewer's time zone. */
   readonly nextRun: string;
@@ -64,6 +65,7 @@ function draftFromRoutine(routine: BoardRoutine): RoutineDraft {
     title: routine.title,
     description: routine.description,
     assigneeAgentId: routine.assigneeAgentId,
+    assignedToUser: routine.assignedToUser,
     everyDays: routine.everyDays,
     nextRun: localDateTimeInput(new Date(routine.nextRunAt)),
     enabled: routine.enabled,
@@ -90,6 +92,7 @@ export function RoutinesView(props: {
         title: routine.title,
         description: routine.description,
         assigneeAgentId: routine.assigneeAgentId,
+        assignedToUser: routine.assignedToUser,
         everyDays: routine.everyDays,
         nextRunAt: routine.nextRunAt,
         enabled: changes.enabled ?? routine.enabled,
@@ -113,6 +116,7 @@ export function RoutinesView(props: {
       title: "",
       description: "",
       assigneeAgentId: company.ceoAgentId,
+      assignedToUser: false,
       everyDays: 7,
       nextRun: localDateTimeInput(start),
       enabled: true,
@@ -154,8 +158,14 @@ export function RoutinesView(props: {
                   <span className="text-base leading-snug font-medium">{routine.title}</span>
                   <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
                     {repeatLabel(routine.everyDays)} ·{" "}
-                    {assignee !== null ? <AgentName agent={assignee} /> : "Ideas, unassigned"} ·
-                    next {new Date(routine.nextRunAt).toLocaleString()}
+                    {routine.assignedToUser ? (
+                      <YouName />
+                    ) : assignee !== null ? (
+                      <AgentName agent={assignee} />
+                    ) : (
+                      "Ideas, unassigned"
+                    )}{" "}
+                    · next {new Date(routine.nextRunAt).toLocaleString()}
                   </span>
                   {routine.description ? (
                     <p className="line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
@@ -243,6 +253,7 @@ export function RoutinesView(props: {
                     title: next.title.trim(),
                     description: next.description,
                     assigneeAgentId: next.assigneeAgentId,
+                    assignedToUser: next.assignedToUser,
                     everyDays: next.everyDays,
                     nextRunAt: new Date(next.nextRun).toISOString(),
                     enabled: next.enabled,
@@ -317,7 +328,13 @@ function RoutineForm(props: {
                   agents={props.snapshot.agents}
                   value={draft.assigneeAgentId}
                   noneLabel="Nobody (Ideas)"
-                  onChange={(assigneeAgentId) => setDraft({ ...draft, assigneeAgentId })}
+                  you={{
+                    selected: draft.assignedToUser,
+                    onSelect: () => setDraft({ ...draft, assignedToUser: true }),
+                  }}
+                  onChange={(assigneeAgentId) =>
+                    setDraft({ ...draft, assigneeAgentId, assignedToUser: false })
+                  }
                 />
               </div>
               <div className="flex min-w-0 flex-col gap-2">

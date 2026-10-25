@@ -816,6 +816,54 @@ it.effect("returns a split task to its owner once every subtask is done", () =>
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("never starts an agent on a task a person keeps for themself", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead, engineer } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 5 } },
+        user,
+      );
+      const { task: errand } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Renew the domain", assignedToUser: true },
+        },
+        user,
+      );
+      assert.equal(errand?.status, "todo");
+      assert.isTrue(errand?.assignedToUser);
+      yield* board.addComment({ taskId: errand!.id, body: "Use the company card." }, user);
+      const refused = yield* board
+        .runCommand({ type: "task.start", id: errand!.id }, user)
+        .pipe(Effect.flip);
+      assert.include(refused.message, "yours");
+
+      // A pass checks every card in board order, so once this later card starts, the person's
+      // card and its comment have been passed over.
+      const { task: work } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Fix checkout", assigneeAgentId: lead.id },
+        },
+        user,
+      );
+      yield* boardWhere(board, company.id, (snapshot) => threadOf(snapshot, work?.id) !== null);
+      assert.lengthOf(yield* Ref.get(harness.launches), 1);
+
+      // Handing the card to an employee takes it off the person's list and starts the work.
+      const handed = yield* board.updateTask(
+        { id: errand!.id, assigneeAgentId: engineer.id },
+        user,
+      );
+      assert.isFalse(handed.assignedToUser);
+      yield* boardWhere(board, company.id, (snapshot) => threadOf(snapshot, errand?.id) !== null);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect("the dashboard credits runs and tokens to each employee and the model it ran", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;

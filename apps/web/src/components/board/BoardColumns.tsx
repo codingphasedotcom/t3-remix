@@ -25,7 +25,7 @@ import { useState, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AgentAvatar, AgentName } from "./AgentAvatar";
+import { AgentAvatar, AgentName, YouName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
 import {
   BOARD_COLUMNS,
@@ -233,7 +233,8 @@ function BoardCardFace(props: {
 }) {
   const { task, snapshot } = props;
   const assignee = agentById(snapshot.agents, task.assigneeAgentId);
-  const reviewer = agentById(snapshot.agents, task.reviewerAgentId);
+  // A card you keep never goes to a reviewer, so a leftover one isn't shown.
+  const reviewer = task.assignedToUser ? null : agentById(snapshot.agents, task.reviewerAgentId);
   const progress = subtaskProgress(snapshot.tasks, task.id);
   const parent =
     task.parentTaskId === null
@@ -274,6 +275,8 @@ function BoardCardFace(props: {
               ? named.name
               : `${named.name} · ${RUN_LABELS[task.activeRunKind]}`}
           </AgentName>
+        ) : task.assignedToUser && task.activeRunKind === null ? (
+          <YouName />
         ) : (
           <span className="truncate">
             {task.activeRunKind === null ? "Unassigned" : RUN_LABELS[task.activeRunKind]}

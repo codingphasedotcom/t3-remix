@@ -87,6 +87,7 @@ export interface NewTask {
   readonly description: string;
   readonly status: BoardTaskStatus;
   readonly assigneeAgentId: BoardAgentId | null;
+  readonly assignedToUser: boolean;
   readonly reviewerAgentId: BoardAgentId | null;
   readonly parentTaskId: BoardTaskId | null;
   readonly createdByAgentId: BoardAgentId | null;
@@ -98,6 +99,7 @@ export interface TaskChanges {
   readonly status?: BoardTaskStatus;
   readonly position?: number;
   readonly assigneeAgentId?: BoardAgentId | null;
+  readonly assignedToUser?: boolean;
   readonly reviewerAgentId?: BoardAgentId | null;
 }
 
@@ -325,6 +327,7 @@ interface TaskRow {
   readonly status: string;
   readonly position: number;
   readonly assignee_agent_id: string | null;
+  readonly assigned_to_user: number;
   readonly reviewer_agent_id: string | null;
   readonly parent_task_id: string | null;
   readonly thread_id: string | null;
@@ -396,6 +399,7 @@ interface RoutineRow {
   readonly title: string;
   readonly description: string;
   readonly assignee_agent_id: string | null;
+  readonly assigned_to_user: number;
   readonly every_days: number;
   readonly next_run_at: string;
   readonly enabled: number;
@@ -411,6 +415,7 @@ const toRoutine = (row: RoutineRow) =>
     title: row.title,
     description: row.description,
     assigneeAgentId: row.assignee_agent_id,
+    assignedToUser: row.assigned_to_user === 1,
     everyDays: row.every_days,
     nextRunAt: row.next_run_at,
     enabled: row.enabled === 1,
@@ -456,6 +461,7 @@ const TASK_COLUMNS = `
   t.status,
   t.position,
   t.assignee_agent_id,
+  t.assigned_to_user,
   t.reviewer_agent_id,
   t.parent_task_id,
   t.thread_id,
@@ -594,6 +600,7 @@ const make = Effect.gen(function* () {
       status TEXT NOT NULL,
       position REAL NOT NULL,
       assignee_agent_id TEXT,
+      assigned_to_user INTEGER NOT NULL DEFAULT 0,
       reviewer_agent_id TEXT,
       parent_task_id TEXT,
       thread_id TEXT,
@@ -614,6 +621,9 @@ const make = Effect.gen(function* () {
   }
   if (!cardColumns.has("base_ref")) {
     yield* sql`ALTER TABLE board_tasks ADD COLUMN base_ref TEXT`;
+  }
+  if (!cardColumns.has("assigned_to_user")) {
+    yield* sql`ALTER TABLE board_tasks ADD COLUMN assigned_to_user INTEGER NOT NULL DEFAULT 0`;
   }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_comments (
@@ -663,6 +673,7 @@ const make = Effect.gen(function* () {
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       assignee_agent_id TEXT,
+      assigned_to_user INTEGER NOT NULL DEFAULT 0,
       every_days INTEGER NOT NULL,
       next_run_at TEXT NOT NULL,
       enabled INTEGER NOT NULL,
@@ -672,6 +683,9 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_routines_due ON board_routines(enabled, next_run_at)`;
+  if (!(yield* columns("board_routines")).has("assigned_to_user")) {
+    yield* sql`ALTER TABLE board_routines ADD COLUMN assigned_to_user INTEGER NOT NULL DEFAULT 0`;
+  }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_company_settings (
       company_id TEXT PRIMARY KEY,
@@ -799,6 +813,7 @@ const make = Effect.gen(function* () {
       status: row.status,
       position: row.position,
       assigneeAgentId: row.assignee_agent_id,
+      assignedToUser: row.assigned_to_user === 1,
       reviewerAgentId: row.reviewer_agent_id,
       parentTaskId: row.parent_task_id,
       threadId: row.thread_id,
@@ -1182,13 +1197,14 @@ const make = Effect.gen(function* () {
       yield* sql`
         INSERT INTO board_tasks (
           task_id, company_id, project_id, title, description, status, position,
-          assignee_agent_id, reviewer_agent_id, parent_task_id, thread_id, worktree_path,
-          created_by_agent_id, status_changed_at, created_at, updated_at
+          assignee_agent_id, assigned_to_user, reviewer_agent_id, parent_task_id, thread_id,
+          worktree_path, created_by_agent_id, status_changed_at, created_at, updated_at
         )
         VALUES (
           ${id}, ${task.companyId}, ${task.projectId}, ${task.title}, ${task.description},
-          ${task.status}, ${position}, ${task.assigneeAgentId}, ${task.reviewerAgentId},
-          ${task.parentTaskId}, NULL, NULL, ${task.createdByAgentId}, ${at}, ${at}, ${at}
+          ${task.status}, ${position}, ${task.assigneeAgentId}, ${task.assignedToUser ? 1 : 0},
+          ${task.reviewerAgentId}, ${task.parentTaskId}, NULL, NULL, ${task.createdByAgentId},
+          ${at}, ${at}, ${at}
         )
       `;
       return id;
@@ -1214,6 +1230,7 @@ const make = Effect.gen(function* () {
           status = ${status},
           position = ${position},
           assignee_agent_id = ${changes.assigneeAgentId === undefined ? before.assigneeAgentId : changes.assigneeAgentId},
+          assigned_to_user = ${(changes.assignedToUser ?? before.assignedToUser) ? 1 : 0},
           reviewer_agent_id = ${changes.reviewerAgentId === undefined ? before.reviewerAgentId : changes.reviewerAgentId},
           status_changed_at = ${statusChanged ? at : current.statusChangedAt},
           updated_at = ${at}
@@ -1318,18 +1335,20 @@ const make = Effect.gen(function* () {
   const upsertRoutine: BoardStore["Service"]["upsertRoutine"] = (routine) =>
     sql`
       INSERT INTO board_routines (
-        routine_id, company_id, title, description, assignee_agent_id, every_days, next_run_at,
-        enabled, last_task_id, created_at, updated_at
+        routine_id, company_id, title, description, assignee_agent_id, assigned_to_user,
+        every_days, next_run_at, enabled, last_task_id, created_at, updated_at
       )
       VALUES (
         ${routine.id}, ${routine.companyId}, ${routine.title}, ${routine.description},
-        ${routine.assigneeAgentId}, ${routine.everyDays}, ${routine.nextRunAt},
+        ${routine.assigneeAgentId}, ${routine.assignedToUser ? 1 : 0}, ${routine.everyDays},
+        ${routine.nextRunAt},
         ${routine.enabled ? 1 : 0}, ${routine.lastTaskId}, ${routine.createdAt}, ${routine.updatedAt}
       )
       ON CONFLICT (routine_id) DO UPDATE SET
         title = excluded.title,
         description = excluded.description,
         assignee_agent_id = excluded.assignee_agent_id,
+        assigned_to_user = excluded.assigned_to_user,
         every_days = excluded.every_days,
         next_run_at = excluded.next_run_at,
         enabled = excluded.enabled,

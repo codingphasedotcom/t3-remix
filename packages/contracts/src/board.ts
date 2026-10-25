@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
@@ -160,6 +161,14 @@ export type BoardRunKind = typeof BoardRunKind.Type;
 export const BoardRunStatus = Schema.Literals(["running", "completed", "failed", "cancelled"]);
 export type BoardRunStatus = typeof BoardRunStatus.Type;
 
+/** Servers from before people could take tasks send no flag; their tasks are never a person's. */
+const AssignedToUser = Schema.Boolean.pipe(
+  Schema.withDecodingDefault(Effect.succeed(false)),
+).annotate({
+  description:
+    "The person using the board owns it instead of an agent. No agent works, reviews, or replies on it.",
+});
+
 export const BoardTask = Schema.Struct({
   id: BoardTaskId,
   companyId: BoardCompanyId,
@@ -169,6 +178,7 @@ export const BoardTask = Schema.Struct({
   status: BoardTaskStatus,
   position: Schema.Number,
   assigneeAgentId: Schema.NullOr(BoardAgentId),
+  assignedToUser: AssignedToUser,
   reviewerAgentId: Schema.NullOr(BoardAgentId),
   parentTaskId: Schema.NullOr(BoardTaskId),
   threadId: Schema.NullOr(ThreadId),
@@ -238,6 +248,7 @@ export const BoardRoutine = Schema.Struct({
   title: TrimmedNonEmptyString,
   description: Schema.String,
   assigneeAgentId: Schema.NullOr(BoardAgentId),
+  assignedToUser: AssignedToUser,
   everyDays: BoardRoutineEveryDays,
   nextRunAt: IsoDateTime,
   enabled: Schema.Boolean,
@@ -538,6 +549,7 @@ export const BoardRoutineUpsertInput = Schema.Struct({
   title: TrimmedNonEmptyString,
   description: Schema.String,
   assigneeAgentId: Schema.NullOr(BoardAgentId),
+  assignedToUser: Schema.optional(Schema.Boolean),
   everyDays: BoardRoutineEveryDays,
   nextRunAt: IsoDateTime.annotate({ description: "When it next creates a task." }),
   enabled: Schema.Boolean,
@@ -553,6 +565,9 @@ export const BoardTaskCreateInput = Schema.Struct({
   }),
   status: Schema.optional(BoardTaskStatus),
   assigneeAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
+  assignedToUser: Schema.optional(Schema.Boolean).annotate({
+    description: "Give the task to the person instead of an agent; it replaces any agent assignee.",
+  }),
   reviewerAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
   parentTaskId: Schema.optional(Schema.NullOr(BoardTaskId)),
 });
@@ -565,6 +580,7 @@ export const BoardTaskUpdateInput = Schema.Struct({
   status: Schema.optional(BoardTaskStatus),
   position: Schema.optional(Schema.Number),
   assigneeAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
+  assignedToUser: Schema.optional(Schema.Boolean),
   reviewerAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
 });
 export type BoardTaskUpdateInput = typeof BoardTaskUpdateInput.Type;

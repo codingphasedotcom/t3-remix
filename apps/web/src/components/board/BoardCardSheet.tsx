@@ -123,6 +123,7 @@ function BoardCardDetail(props: {
     description?: string;
     status?: BoardTaskStatus;
     assigneeAgentId?: BoardAgentId | null;
+    assignedToUser?: boolean;
     reviewerAgentId?: BoardAgentId | null;
   }) => props.runCommand({ type: "task.update", task: { id: task.id, ...patch } });
 
@@ -158,6 +159,7 @@ function BoardCardDetail(props: {
 
   const canStart =
     task.activeRunKind === null &&
+    !task.assignedToUser &&
     (task.status === "review"
       ? task.reviewerAgentId !== null
       : task.status !== "done" && task.assigneeAgentId !== null);
@@ -236,7 +238,13 @@ function BoardCardDetail(props: {
       </SheetHeader>
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-4 px-6 pb-6">
-          <div className={cn(OFFICE_INSET, "grid grid-cols-3 gap-3")}>
+          <div
+            className={cn(
+              OFFICE_INSET,
+              "grid gap-3",
+              task.assignedToUser ? "grid-cols-2" : "grid-cols-3",
+            )}
+          >
             <div className="flex flex-col gap-2">
               <Label>Column</Label>
               <Select
@@ -262,19 +270,28 @@ function BoardCardDetail(props: {
                 agents={snapshot.agents}
                 value={task.assigneeAgentId}
                 disabled={disabled}
-                onChange={(assigneeAgentId) => void update({ assigneeAgentId })}
+                you={{
+                  selected: task.assignedToUser,
+                  onSelect: () => void update({ assignedToUser: true }),
+                }}
+                onChange={(assigneeAgentId) =>
+                  void update({ assigneeAgentId, assignedToUser: false })
+                }
               />
             </div>
-            <div className="flex flex-col gap-2">
-              <Label>Reviewer</Label>
-              <AgentSelect
-                agents={snapshot.agents}
-                noneLabel="The board (you)"
-                value={task.reviewerAgentId}
-                disabled={disabled}
-                onChange={(reviewerAgentId) => void update({ reviewerAgentId })}
-              />
-            </div>
+            {/* No agent touches a card you keep, so nobody reviews it but you. */}
+            {task.assignedToUser ? null : (
+              <div className="flex flex-col gap-2">
+                <Label>Reviewer</Label>
+                <AgentSelect
+                  agents={snapshot.agents}
+                  noneLabel="The board (you)"
+                  value={task.reviewerAgentId}
+                  disabled={disabled}
+                  onChange={(reviewerAgentId) => void update({ reviewerAgentId })}
+                />
+              </div>
+            )}
           </div>
 
           <section className={OFFICE_INSET}>
@@ -452,7 +469,9 @@ function BoardCardDetail(props: {
                 placeholder={
                   task.activeRunKind !== null
                     ? "Comment, and the working agent receives it right away"
-                    : "Comment, and the task's agent answers on the board"
+                    : task.assignedToUser
+                      ? "Add a note for yourself"
+                      : "Comment, and the task's agent answers on the board"
                 }
                 onChange={(event) => setComment(event.target.value)}
                 onKeyDown={(event) => {

@@ -82,6 +82,9 @@ the ones that apply.
   thread.
 - A task with no reviewer stops in **Review** for you. Tasks in **Ideas** never start on their
   own.
+- Pick **You** as the assignee to keep a task for yourself, like a card on your own kanban
+  board. No agent works on it, reviews it, or answers its comments; it moves only when you move
+  it. Assign an employee to hand it off.
 - When a subtask gets stuck in **Blocked**, its manager is started to unblock it: it answers the
   question, reassigns the subtask, or narrows it, and asks you on its own task when only you can
   help. A subtask that is only waiting on its own subtasks doesn't count as stuck.
@@ -135,7 +138,8 @@ When the work lands, by a merge here or once its pull request is merged, a task 
 The **Routines** tab adds a task on a schedule, such as a weekly review for the CEO: pick the
 title, what to do, who does it, how often it repeats, and when it next runs. If the last task a
 routine added is still open when it comes due, it waits for the next turn instead of adding
-another. A routine with nobody assigned adds its task to **Ideas**. Each routine shows when it
+another. A routine with nobody assigned adds its task to **Ideas**, and one assigned to **You**
+adds a recurring to-do to your **To do**. Each routine shows when it
 last ran and links to the task it created; **Run now** adds its task right away without changing
 the schedule.
 

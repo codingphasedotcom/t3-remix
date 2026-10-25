@@ -29,6 +29,7 @@ function card(id: string, status: BoardTask["status"], position: number): BoardT
     status,
     position,
     assigneeAgentId: null,
+    assignedToUser: false,
     reviewerAgentId: null,
     parentTaskId: null,
     threadId: null,

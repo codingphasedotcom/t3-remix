@@ -1,9 +1,10 @@
 import type { BoardAgent, BoardAgentId } from "@t3tools/contracts";
 
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { AgentFace, AgentName } from "./AgentAvatar";
+import { AgentFace, AgentName, YouFace, YouName } from "./AgentAvatar";
 
 const NOBODY = "__nobody__";
+const YOU = "__you__";
 
 export function AgentSelect(props: {
   readonly agents: ReadonlyArray<BoardAgent>;
@@ -12,20 +13,31 @@ export function AgentSelect(props: {
   readonly disabled?: boolean;
   /** What "no agent" means here, such as "The board (you)" for a reviewer. */
   readonly noneLabel?: string;
+  /** Offers "You", for cards a person keeps for themself instead of handing to an agent. */
+  readonly you?: { readonly selected: boolean; readonly onSelect: () => void };
 }) {
-  const current = props.agents.find((agent) => agent.id === props.value) ?? null;
+  const youSelected = props.you?.selected === true;
+  const current = youSelected
+    ? null
+    : (props.agents.find((agent) => agent.id === props.value) ?? null);
   const noneLabel = props.noneLabel ?? "Nobody";
   return (
     <Select
-      value={props.value ?? NOBODY}
+      value={youSelected ? YOU : (props.value ?? NOBODY)}
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
-      onValueChange={(value) =>
-        props.onChange(value === NOBODY || value === null ? null : (value as BoardAgentId))
-      }
+      onValueChange={(value) => {
+        if (value === YOU) {
+          props.you?.onSelect();
+          return;
+        }
+        props.onChange(value === NOBODY || value === null ? null : (value as BoardAgentId));
+      }}
     >
       <SelectTrigger size="sm">
         <SelectValue>
-          {current === null ? (
+          {youSelected ? (
+            <YouName />
+          ) : current === null ? (
             <span className="truncate">{noneLabel}</span>
           ) : (
             <AgentName agent={current}>
@@ -39,6 +51,14 @@ export function AgentSelect(props: {
         <SelectItem value={NOBODY} label={noneLabel}>
           {noneLabel}
         </SelectItem>
+        {props.you === undefined ? null : (
+          <SelectItem value={YOU} label="You">
+            <span className="flex min-w-0 items-center gap-2">
+              <YouFace />
+              <span className="truncate">You</span>
+            </span>
+          </SelectItem>
+        )}
         {props.agents.map((agent) => (
           <SelectItem key={agent.id} value={agent.id} label={agent.name}>
             <span className="flex min-w-0 items-center gap-2">
