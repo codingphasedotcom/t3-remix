@@ -112,7 +112,7 @@ const makeHarness = Effect.gen(function* () {
       }),
   });
   const projects = Layer.mock(ProjectService.ProjectService)({
-    getById: () => Effect.succeed(Option.some({ workspaceRoot: "/repo" } as Project)),
+    getById: () => Effect.succeedSome({ workspaceRoot: "/repo" } as Project),
     getShell: () => Effect.succeedNone,
   });
   const gitWorkflow = Layer.mock(GitWorkflowService.GitWorkflowService)({
@@ -1698,6 +1698,22 @@ it.effect("opens a pull request for a finished task and finishes it once that me
         detail.comments.map((comment) => comment.body),
         "Pull request #7 was merged; moved the task from Review to Done.",
       );
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("settles a run whose thread went idle while the server was down", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    const { companyId, taskId } = yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { task } = yield* startTaskFor(board, company.id, "Fix checkout", lead.id);
+      return { companyId: company.id, taskId: task.id };
+    }).pipe(Effect.provide(harness.layer));
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      yield* boardWhere(board, companyId, (snapshot) => taskStatus(snapshot, taskId) === "review");
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

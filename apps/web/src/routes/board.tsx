@@ -5,7 +5,7 @@ import { BoardPage, type BoardTab } from "../components/board/BoardPage";
 
 // Branded like every other route's ids: search types merge across routes, and a plain string
 // here would widen `environmentId` for the pages that read it.
-interface BoardSearch {
+export interface BoardSearch {
   readonly environmentId?: EnvironmentId;
   readonly company?: BoardCompanyId;
   readonly card?: BoardTaskId;

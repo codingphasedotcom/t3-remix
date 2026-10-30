@@ -5,6 +5,8 @@ import {
   type ProviderSkillSourceKind,
 } from "@t3tools/client-runtime/providerSkills";
 import {
+  type EnvironmentId,
+  type EnvironmentMachineKind,
   type ProjectEntry,
   type ProviderDriverKind,
   type PullRequestContextMetadata,
@@ -27,6 +29,7 @@ import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../compo
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { faceFor } from "../board/faces";
 import type { MentionCandidate } from "../board/boardMentions";
@@ -82,6 +85,14 @@ export type ComposerCommandItem =
     }
   | {
       id: string;
+      type: "environment";
+      environmentId: EnvironmentId;
+      machine: EnvironmentMachineKind;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
       type: "employee";
       employee: MentionCandidate;
       label: string;
@@ -101,6 +112,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the highlighted menu item's DOM node into view
   useLayoutEffect(() => {
     if (!props.activeItemId || !listRef.current) return;
     const el = listRef.current.querySelector<HTMLElement>(
@@ -210,6 +222,13 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       {props.item.type === "thread" ? (
         <MessagesSquareIcon aria-hidden="true" className="size-4 shrink-0 text-secondary-label" />
+      ) : null}
+      {props.item.type === "environment" ? (
+        <EnvironmentMachineIcon
+          kind={props.item.machine}
+          aria-hidden="true"
+          className="size-4 shrink-0 text-secondary-label"
+        />
       ) : null}
       {props.item.type === "employee" ? <EmployeeFace employee={props.item.employee} /> : null}
       {pullRequestPresentation ? (

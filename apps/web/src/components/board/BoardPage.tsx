@@ -11,7 +11,7 @@ import type {
   BoardTaskId,
   EnvironmentId,
 } from "@t3tools/contracts";
-import { Navigate, useNavigate } from "@tanstack/react-router";
+import { Navigate, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   Building2Icon,
   EllipsisIcon,
@@ -32,12 +32,12 @@ import {
   UsersIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
 import { isElectron } from "../../env";
-import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
 import { cn } from "../../lib/utils";
+import { registerCommands } from "../../shortcuts/dispatcher";
 import { boardCommand, boardLive } from "../../state/board";
 import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -107,8 +107,34 @@ export interface BoardPageProps {
 /** Runs one board change; resolves to its result, or null when it failed (already reported). */
 export type RunBoardCommand = (command: BoardCommand) => Promise<BoardCommandResult | null>;
 
+// Escape leaves the board when no scope (a dialog, a menu) claimed it.
+function useEscapeLeavesBoard() {
+  const router = useRouter();
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- holds a shortcut dispatcher observer while the board is mounted
+  useEffect(
+    () =>
+      registerCommands(
+        {},
+        {
+          observe: (event, consumed) => {
+            if (consumed || event.repeat || event.isComposing || event.key !== "Escape") return;
+            event.preventDefault();
+            const activeElement = document.activeElement;
+            if (activeElement instanceof HTMLElement) activeElement.blur();
+            if (router.state.location.state.__TSR_index !== 0) {
+              window.history.back();
+              return;
+            }
+            void router.navigate({ to: "/" });
+          },
+        },
+      ),
+    [router],
+  );
+}
+
 export function BoardPage(props: BoardPageProps) {
-  useEscapeToGoBack();
+  useEscapeLeavesBoard();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const environmentId = props.environmentId ?? primaryEnvironmentId;
   return (

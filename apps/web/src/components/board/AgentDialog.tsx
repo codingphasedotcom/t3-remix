@@ -18,11 +18,7 @@ import { useState, type ReactNode } from "react";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
+import { providerInstanceEntriesFor } from "../../providerInstances";
 import { useProjects } from "../../state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -113,9 +109,7 @@ export function useModelChoices(environmentId: EnvironmentId, projectId: Project
     useProjects().find(
       (candidate) => candidate.environmentId === environmentId && candidate.id === projectId,
     ) ?? null;
-  const instanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, projectId),
-  );
+  const instanceEntries = providerInstanceEntriesFor(providers, settings, projectId);
   return {
     settings,
     providers,

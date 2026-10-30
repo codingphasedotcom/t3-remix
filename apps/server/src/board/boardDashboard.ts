@@ -15,7 +15,7 @@ import * as DateTime from "effect/DateTime";
 
 import type { RunFact, StoredTask, ThreadTokenDay } from "./BoardStore.ts";
 
-export const DASHBOARD_DAYS = 14;
+const DASHBOARD_DAYS = 14;
 
 const DAY_MS = 86_400_000;
 
@@ -23,7 +23,7 @@ const millis = (instant: string) => DateTime.toEpochMillis(DateTime.makeUnsafe(i
 const dayAt = (epochMillis: number) => DateTime.formatIsoDateUtc(DateTime.makeUnsafe(epochMillis));
 
 /** The calendar day an instant falls on for a viewer `utcOffsetMinutes` from UTC. */
-export function localDay(instant: string, utcOffsetMinutes: number): string {
+function localDay(instant: string, utcOffsetMinutes: number): string {
   return dayAt(millis(instant) + utcOffsetMinutes * 60_000);
 }
 

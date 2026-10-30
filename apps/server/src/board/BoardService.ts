@@ -2006,12 +2006,22 @@ const make = Effect.gen(function* () {
     yield* settleRun(running, run.status);
   });
 
-  // Runs that ended while the server was down never produce a live event.
+  // Runs that ended while the server was down never produce a live event. Only runs left from
+  // before this start count: one launched since may not have reached its thread yet.
+  const leftoverRuns = yield* store.listRunningRuns();
+  const settleLeftoverRun = Effect.fn("BoardService.settleLeftoverRun")(function* (
+    leftover: BoardStore.RunningRun,
+  ) {
+    const running = yield* store.runForThread(leftover.run.threadId);
+    if (running === null || running.run.id !== leftover.run.id) return;
+    if (running.run.status !== "running") return;
+    const shell = yield* threads.getThreadShell(running.run.threadId);
+    if (shell !== null && shell.activeRunId !== null) return;
+    yield* settleRun(running, shell?.status === "failed" ? "failed" : "completed");
+  });
   const recoverRuns = Effect.fn("BoardService.recoverRuns")(function* () {
-    for (const running of yield* store.listRunningRuns()) {
-      const shell = yield* threads.getThreadShell(running.run.threadId);
-      if (shell !== null && shell.activeRunId !== null) continue;
-      yield* settleRun(running, shell?.status === "failed" ? "failed" : "completed");
+    for (const leftover of leftoverRuns) {
+      yield* dispatchLock.withPermits(1)(settleLeftoverRun(leftover));
     }
     for (const companyId of yield* store.listCompanyIds()) yield* dispatch(companyId);
   });
