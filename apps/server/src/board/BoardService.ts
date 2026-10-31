@@ -26,6 +26,7 @@ import {
   type BoardDepartment,
   type BoardHire,
   type BoardHireDecisionInput,
+  type BoardHireId,
   type BoardRunKind,
   type BoardSettings,
   type BoardSettingsUpdateInput,
@@ -105,6 +106,8 @@ export interface BoardHireRequestInput {
   readonly title: string;
   readonly departmentId: BoardDepartmentId | null;
   readonly reportsToAgentId: BoardAgentId | null;
+  /** A pending request for their manager, so a manager and their team can be proposed together. */
+  readonly reportsToHireId: BoardHireId | null;
   readonly skillIds: ReadonlyArray<BoardSkillId>;
   readonly instructions: string;
   readonly reason: string;
@@ -808,9 +811,18 @@ const make = Effect.gen(function* () {
       return yield* boardError("That hire request was already decided.");
     }
     if (!input.approve) {
-      yield* store.decideHire(hire.id, "rejected");
+      // Their proposed reports move up to whoever this request reported to.
+      yield* store.decideHire(hire.id, "rejected", {
+        agentId: hire.reportsToAgentId,
+        hireId: hire.reportsToHireId,
+      });
       yield* notify(hire.companyId);
       return null;
+    }
+    const manager =
+      hire.reportsToHireId === null ? null : yield* store.getHire(hire.reportsToHireId);
+    if (manager?.status === "pending") {
+      return yield* boardError(`Hire ${manager.name} first: ${hire.name} reports to them.`);
     }
     const company = yield* requireCompany(hire.companyId);
     const agents = yield* store.listAgents(company.id);
@@ -840,7 +852,7 @@ const make = Effect.gen(function* () {
       modelSelection,
       runtimeMode: input.runtimeMode ?? template?.runtimeMode ?? "full-access",
     });
-    yield* store.decideHire(hire.id, "approved");
+    yield* store.decideHire(hire.id, "approved", { agentId: agent.id, hireId: null });
     yield* notify(company.id);
     return agent;
   });
@@ -850,7 +862,21 @@ const make = Effect.gen(function* () {
       const company = yield* requireCompany(input.companyId);
       const agents = yield* store.listAgents(company.id);
       const actingAs = yield* actingAgent(actor, company.id);
-      const reportsToAgentId = input.reportsToAgentId ?? actingAs?.id ?? company.ceoAgentId;
+      if (input.reportsToHireId !== null) {
+        if (input.reportsToAgentId !== null) {
+          return yield* boardError("Set reportsToAgentId or reportsToHireId, not both.");
+        }
+        const manager = yield* store.getHire(input.reportsToHireId);
+        if (manager?.companyId !== company.id || manager.status !== "pending") {
+          return yield* boardError(
+            "reportsToHireId must be a pending hire request in this company; board_list_agents lists them.",
+          );
+        }
+      }
+      const reportsToAgentId =
+        input.reportsToHireId !== null
+          ? null
+          : (input.reportsToAgentId ?? actingAs?.id ?? company.ceoAgentId);
       yield* assertAgentsInCompany(agents, [reportsToAgentId]);
       yield* assertMayAssign(company, agents, actingAs, [reportsToAgentId]);
       if (
@@ -869,6 +895,7 @@ const make = Effect.gen(function* () {
         title: input.title,
         departmentId: input.departmentId,
         reportsToAgentId,
+        reportsToHireId: input.reportsToHireId,
         skillIds: input.skillIds.filter((id) => skills.some((skill) => skill.id === id)),
         instructions: input.instructions,
         reason: input.reason,

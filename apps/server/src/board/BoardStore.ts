@@ -119,9 +119,16 @@ export interface NewHire {
   readonly title: string;
   readonly departmentId: BoardDepartmentId | null;
   readonly reportsToAgentId: BoardAgentId | null;
+  readonly reportsToHireId: BoardHireId | null;
   readonly skillIds: ReadonlyArray<BoardSkillId>;
   readonly instructions: string;
   readonly reason: string;
+}
+
+/** Who a hire request reports to: an agent, or another pending request. */
+export interface HireManager {
+  readonly agentId: BoardAgentId | null;
+  readonly hireId: BoardHireId | null;
 }
 
 type StoreEffect<A> = Effect.Effect<A, BoardError>;
@@ -154,7 +161,12 @@ export class BoardStore extends Context.Service<
     readonly listHires: (companyId: BoardCompanyId) => StoreEffect<ReadonlyArray<BoardHire>>;
     readonly getHire: (id: BoardHireId) => StoreEffect<BoardHire | null>;
     readonly insertHire: (hire: NewHire) => StoreEffect<BoardHire>;
-    readonly decideHire: (id: BoardHireId, status: BoardHireStatus) => StoreEffect<void>;
+    /** Pending requests that reported to this one move to `reportsTo`. */
+    readonly decideHire: (
+      id: BoardHireId,
+      status: BoardHireStatus,
+      reportsTo: HireManager,
+    ) => StoreEffect<void>;
 
     readonly listTasks: (companyId: BoardCompanyId) => StoreEffect<ReadonlyArray<StoredTask>>;
     readonly getTask: (id: BoardTaskId) => StoreEffect<StoredTask | null>;
@@ -311,6 +323,7 @@ interface HireRow {
   readonly title: string;
   readonly department_id: string | null;
   readonly reports_to_agent_id: string | null;
+  readonly reports_to_hire_id: string | null;
   readonly skill_ids_json: string;
   readonly instructions: string;
   readonly reason: string;
@@ -578,6 +591,7 @@ const make = Effect.gen(function* () {
       title TEXT NOT NULL,
       department_id TEXT,
       reports_to_agent_id TEXT,
+      reports_to_hire_id TEXT,
       skill_ids_json TEXT NOT NULL,
       instructions TEXT NOT NULL,
       reason TEXT NOT NULL,
@@ -587,8 +601,12 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_hires_company ON board_hires(company_id, status)`;
-  if (!(yield* columns("board_hires")).has("department_id")) {
+  const hireColumns = yield* columns("board_hires");
+  if (!hireColumns.has("department_id")) {
     yield* sql`ALTER TABLE board_hires ADD COLUMN department_id TEXT`;
+  }
+  if (!hireColumns.has("reports_to_hire_id")) {
+    yield* sql`ALTER TABLE board_hires ADD COLUMN reports_to_hire_id TEXT`;
   }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_tasks (
@@ -795,6 +813,7 @@ const make = Effect.gen(function* () {
       title: row.title,
       departmentId: row.department_id,
       reportsToAgentId: row.reports_to_agent_id,
+      reportsToHireId: row.reports_to_hire_id,
       skillIds: yield* decodeSkillIds(row.skill_ids_json),
       instructions: row.instructions,
       reason: row.reason,
@@ -1136,12 +1155,13 @@ const make = Effect.gen(function* () {
       yield* sql`
         INSERT INTO board_hires (
           hire_id, company_id, requested_by_agent_id, name, title, department_id,
-          reports_to_agent_id, skill_ids_json, instructions, reason, status, created_at, decided_at
+          reports_to_agent_id, reports_to_hire_id, skill_ids_json, instructions, reason, status,
+          created_at, decided_at
         )
         VALUES (
           ${id}, ${hire.companyId}, ${hire.requestedByAgentId}, ${hire.name}, ${hire.title},
-          ${hire.departmentId}, ${hire.reportsToAgentId}, ${skillIds}, ${hire.instructions},
-          ${hire.reason}, 'pending', ${at}, NULL
+          ${hire.departmentId}, ${hire.reportsToAgentId}, ${hire.reportsToHireId}, ${skillIds},
+          ${hire.instructions}, ${hire.reason}, 'pending', ${at}, NULL
         )
       `;
       const created = yield* getHire(id);
@@ -1152,12 +1172,21 @@ const make = Effect.gen(function* () {
   );
 
   const decideHire: BoardStore["Service"]["decideHire"] = Effect.fn("BoardStore.decideHire")(
-    function* (id, status) {
+    function* (id, status, reportsTo) {
       const at = yield* now;
-      yield* sql`
-        UPDATE board_hires SET status = ${status}, decided_at = ${at}
-        WHERE hire_id = ${id} AND status = 'pending'
-      `;
+      yield* sql.withTransaction(
+        Effect.all([
+          sql`
+            UPDATE board_hires SET status = ${status}, decided_at = ${at}
+            WHERE hire_id = ${id} AND status = 'pending'
+          `,
+          sql`
+            UPDATE board_hires
+            SET reports_to_agent_id = ${reportsTo.agentId}, reports_to_hire_id = ${reportsTo.hireId}
+            WHERE reports_to_hire_id = ${id} AND status = 'pending'
+          `,
+        ]),
+      );
     },
     failWith("Could not record the hiring decision."),
   );

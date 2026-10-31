@@ -6,6 +6,7 @@ import {
   ProviderInstanceId,
   type BoardAgentId,
   type BoardCompanyId,
+  type BoardHireId,
   type BoardSnapshot,
   type BoardTaskId,
   type GitRunStackedActionInput,
@@ -749,6 +750,7 @@ it.effect("adds an agent only once a person approves its hire request", () =>
           title: "Designer",
           departmentId: design!.id,
           reportsToAgentId: null,
+          reportsToHireId: null,
           skillIds: [skill!.id],
           instructions: "Own the visual design.",
           reason: "Nobody on the team designs.",
@@ -770,6 +772,65 @@ it.effect("adds an agent only once a person approves its hire request", () =>
       assert.deepEqual(agent?.modelSelection, model);
       const after = yield* board.snapshot(company.id);
       assert.equal(after.hires.find((candidate) => candidate.id === hire.id)?.status, "approved");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("a proposed team keeps its reporting lines as each hire is decided", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId } = yield* createCompany(board);
+      const propose = (name: string, reportsToHireId: BoardHireId | null) =>
+        board.requestHire(
+          {
+            companyId: company.id,
+            name,
+            title: name,
+            departmentId: null,
+            reportsToAgentId: null,
+            reportsToHireId,
+            skillIds: [],
+            instructions: "",
+            reason: "The mission needs it.",
+          },
+          user,
+        );
+      const decide = (id: BoardHireId, approve: boolean) =>
+        board.runCommand({ type: "hire.decide", hire: { id, approve } }, user);
+      const pending = Effect.fn("test.pending")(function* (id: BoardHireId) {
+        const { hires } = yield* board.snapshot(company.id);
+        return hires.find((hire) => hire.id === id)!;
+      });
+
+      // The CEO proposes two managers, each with a report under them.
+      const vp = yield* propose("VP", null);
+      const engineer = yield* propose("Engineer", vp.id);
+      const director = yield* propose("Director", null);
+      const analyst = yield* propose("Analyst", director.id);
+      assert.equal(vp.reportsToAgentId, ceoId);
+      assert.isNull(engineer.reportsToAgentId);
+
+      const refused = yield* decide(engineer.id, true).pipe(Effect.flip);
+      assert.isTrue(isBoardError(refused));
+      assert.include(refused.message, "Hire VP first");
+
+      // Hiring a manager hands their proposed reports to the new agent.
+      const { agent: vpAgent } = yield* decide(vp.id, true);
+      assert.include(yield* pending(engineer.id), {
+        reportsToAgentId: vpAgent!.id,
+        reportsToHireId: null,
+      });
+      const { agent: engineerAgent } = yield* decide(engineer.id, true);
+      assert.equal(engineerAgent?.reportsToAgentId, vpAgent!.id);
+
+      // Declining a manager moves their proposed reports up to whoever they reported to.
+      yield* decide(director.id, false);
+      assert.include(yield* pending(analyst.id), {
+        reportsToAgentId: ceoId,
+        reportsToHireId: null,
+      });
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

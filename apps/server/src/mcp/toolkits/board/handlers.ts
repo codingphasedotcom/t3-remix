@@ -126,6 +126,15 @@ const make = Effect.gen(function* () {
             name: skill.name,
             description: skill.description,
           })),
+          pendingHires: snapshot.hires
+            .filter((hire) => hire.status === "pending")
+            .map((hire) => ({
+              id: hire.id,
+              name: hire.name,
+              title: hire.title,
+              reportsToAgentId: hire.reportsToAgentId,
+              reportsToHireId: hire.reportsToHireId,
+            })),
           you: you(assignment),
           canAssignTo: (me === undefined
             ? snapshot.agents
@@ -251,6 +260,7 @@ const make = Effect.gen(function* () {
               title: input.title,
               departmentId: input.departmentId ?? null,
               reportsToAgentId: input.reportsToAgentId ?? null,
+              reportsToHireId: input.reportsToHireId ?? null,
               skillIds: input.skillIds ?? [],
               instructions: input.instructions,
               reason: input.reason,

@@ -137,6 +137,14 @@ export type BoardAgent = typeof BoardAgent.Type;
 export const BoardHireStatus = Schema.Literals(["pending", "approved", "rejected"]);
 export type BoardHireStatus = typeof BoardHireStatus.Type;
 
+/** Servers from before hires could report to other hires send no manager request. */
+const ReportsToHireId = Schema.NullOr(BoardHireId)
+  .pipe(Schema.withDecodingDefault(Effect.succeed(null)))
+  .annotate({
+    description:
+      "A pending request for their manager, in place of reportsToAgentId. They can be hired once that manager is.",
+  });
+
 /** An agent's request to add a teammate. A person approves it before the agent exists. */
 export const BoardHire = Schema.Struct({
   id: BoardHireId,
@@ -146,6 +154,7 @@ export const BoardHire = Schema.Struct({
   title: TrimmedString,
   departmentId: Schema.NullOr(BoardDepartmentId),
   reportsToAgentId: Schema.NullOr(BoardAgentId),
+  reportsToHireId: ReportsToHireId,
   skillIds: Schema.Array(BoardSkillId),
   instructions: Schema.String,
   reason: Schema.String,

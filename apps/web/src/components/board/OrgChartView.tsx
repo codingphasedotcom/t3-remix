@@ -6,6 +6,7 @@ import {
   PencilIcon,
   Trash2Icon,
   UserPlusIcon,
+  UsersIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -16,7 +17,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { AgentName } from "./AgentAvatar";
 import { draftFromAgent, newEmployeeDraft, type AgentDraft } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
-import { agentById, departmentLabel, limitProgress } from "./board.logic";
+import { agentById, departmentLabel, limitProgress, recommendHiresTask } from "./board.logic";
 import { TONES, type Tone } from "./boardTones";
 import { faceFor, unusedFaceKey } from "./faces";
 import {
@@ -54,7 +55,13 @@ export function OrgChartView(props: {
   const { snapshot } = props;
   const company = snapshot.company;
   if (company === null) return null;
-  const pendingHires = snapshot.hires.filter((hire) => hire.status === "pending");
+  // Oldest first, so a proposed team reads in the order the CEO planned it.
+  const pendingHires = snapshot.hires
+    .filter((hire) => hire.status === "pending")
+    .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const hireRoots = pendingHires.filter(
+    (hire) => !pendingHires.some((manager) => manager.id === hire.reportsToHireId),
+  );
   const ceo = agentById(snapshot.agents, company.ceoAgentId);
   // Anyone whose manager chain is broken still shows, as an extra root beside the CEO.
   const roots = snapshot.agents.filter(
@@ -99,15 +106,33 @@ export function OrgChartView(props: {
             title={<OfficeTitle>Organizational chart</OfficeTitle>}
             description={`${snapshot.agents.length} ${snapshot.agents.length === 1 ? "person" : "people"} at ${company.name}`}
             actions={
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!props.canOperate}
-                onClick={() => newReport(ceo)}
-              >
-                <UserPlusIcon />
-                Add employee
-              </Button>
+              <>
+                {ceo !== null ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!props.canOperate}
+                    onClick={() =>
+                      void props.runCommand({
+                        type: "task.create",
+                        task: recommendHiresTask(company, ceo.id),
+                      })
+                    }
+                  >
+                    <UsersIcon />
+                    Ask {ceo.name} who to hire
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!props.canOperate}
+                  onClick={() => newReport(ceo)}
+                >
+                  <UserPlusIcon />
+                  Add employee
+                </Button>
+              </>
             }
           />
         </div>
@@ -117,10 +142,11 @@ export function OrgChartView(props: {
             <h2 className="flex px-1 pt-1">
               <OfficePill tone="amber">Hire requests: {pendingHires.length}</OfficePill>
             </h2>
-            {pendingHires.map((hire) => (
-              <HireRequest
+            {hireRoots.map((hire) => (
+              <HireBranch
                 key={hire.id}
                 hire={hire}
+                pendingHires={pendingHires}
                 snapshot={snapshot}
                 disabled={!props.canOperate}
                 runCommand={props.runCommand}
@@ -332,15 +358,38 @@ function OrgStat(props: {
   );
 }
 
-function HireRequest(props: {
+interface HireRequestProps {
   readonly hire: BoardHire;
+  readonly pendingHires: ReadonlyArray<BoardHire>;
   readonly snapshot: BoardSnapshot;
   readonly disabled: boolean;
   readonly runCommand: RunBoardCommand;
-}) {
+}
+
+/** A hire request and, indented beneath it, the proposed hires who would report to them. */
+function HireBranch(props: HireRequestProps) {
+  const reports = props.pendingHires.filter((hire) => hire.reportsToHireId === props.hire.id);
+  return (
+    <>
+      <HireRequest {...props} />
+      {reports.length > 0 ? (
+        <div className="ms-6 flex flex-col gap-3">
+          {reports.map((report) => (
+            <HireBranch key={report.id} {...props} hire={report} />
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function HireRequest(props: HireRequestProps) {
   const { hire, snapshot } = props;
   const requester = agentById(snapshot.agents, hire.requestedByAgentId);
   const manager = agentById(snapshot.agents, hire.reportsToAgentId);
+  const pendingManager = props.pendingHires.find(
+    (candidate) => candidate.id === hire.reportsToHireId,
+  );
   const department = departmentLabel(snapshot.company?.departments ?? [], hire.departmentId);
   const skills = hire.skillIds
     .map((id) => snapshot.skills.find((skill) => skill.id === id)?.name)
@@ -363,6 +412,8 @@ function HireRequest(props: {
                 {" · reports to "}
                 <AgentName agent={manager} />
               </>
+            ) : pendingManager !== undefined ? (
+              ` · reports to ${pendingManager.name} (not hired yet)`
             ) : null}
             {requester !== null ? (
               <>
@@ -374,6 +425,11 @@ function HireRequest(props: {
         </div>
       </div>
       {hire.reason ? <p className="text-sm">{hire.reason}</p> : null}
+      {hire.instructions.trim() ? (
+        <p className="line-clamp-4 text-xs whitespace-pre-wrap text-muted-foreground">
+          {hire.instructions.trim()}
+        </p>
+      ) : null}
       {skills.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {skills.map((skill) => (
@@ -383,11 +439,20 @@ function HireRequest(props: {
           ))}
         </div>
       ) : null}
-      <div className="flex justify-end gap-2">
+      <div className="flex items-center justify-end gap-2">
+        {pendingManager !== undefined ? (
+          <span className="me-auto text-xs text-muted-foreground">
+            Hire {pendingManager.name} first
+          </span>
+        ) : null}
         <Button size="sm" variant="ghost" disabled={props.disabled} onClick={() => decide(false)}>
           Decline
         </Button>
-        <Button size="sm" disabled={props.disabled} onClick={() => decide(true)}>
+        <Button
+          size="sm"
+          disabled={props.disabled || pendingManager !== undefined}
+          onClick={() => decide(true)}
+        >
           Hire {hire.name}
         </Button>
       </div>

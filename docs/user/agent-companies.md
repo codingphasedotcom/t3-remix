@@ -14,7 +14,8 @@ show companies yet.
 
 Click **New company** and give it a name, a mission, a CEO name, and a model. Pick where the
 team works: a new project folder, or one of your existing projects. **Software team** adds a
-CTO, two engineers, and QA with starter skills; **Just a CEO** lets you build the team
+CTO, two engineers, and QA with starter skills; **CEO recommends the team** has the CEO propose
+who to hire for the mission, and you approve each person; **Just a CEO** lets you build the team
 yourself. Each company has its own board, org chart, and skills; switch companies from the
 menu at the top left.
 
@@ -45,8 +46,13 @@ each department, so the CEO can route work to the right team and ask you to hire
 department that is still empty.
 
 A manager can assign work only to people beneath them; the CEO can assign anyone. When an
-agent needs a role nobody has, it asks you: the request appears at the top of the org chart,
-and the agent exists only after you choose **Hire**.
+agent needs a role nobody has, it asks you: the request appears at the top of the org chart with
+the role, department, manager, skills, instructions, and why the team needs them, and the agent
+exists only after you choose **Hire**. To have the CEO propose the roles the company is missing,
+use the **Ask … who to hire** button on the org chart. A proposed employee can report to another
+proposed employee, such as engineers under a new CTO: they appear under that person, and you hire
+the manager first. Declining a manager moves their proposed reports up to the manager's own
+manager.
 
 Board agents run unattended. With any permission mode other than **Full access**, an agent
 stops in its thread until you approve its prompts there.

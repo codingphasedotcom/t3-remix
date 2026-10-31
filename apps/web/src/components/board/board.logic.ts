@@ -1,9 +1,11 @@
 import type {
   BoardAgent,
   BoardAgentId,
+  BoardCompany,
   BoardDepartment,
   BoardDepartmentId,
   BoardTask,
+  BoardTaskCreateInput,
   BoardTaskId,
   BoardTaskStatus,
 } from "@t3tools/contracts";
@@ -266,6 +268,8 @@ export interface CompanyTemplate {
   readonly description: string;
   /** Employees by title, each with the title of its manager; "CEO" is the CEO. */
   readonly team: ReadonlyArray<{ readonly title: string; readonly reportsTo: string }>;
+  /** The CEO starts on a task to propose the team, which a person approves hire by hire. */
+  readonly recommendHires?: boolean;
 }
 
 export const COMPANY_TEMPLATES: ReadonlyArray<CompanyTemplate> = [
@@ -274,6 +278,13 @@ export const COMPANY_TEMPLATES: ReadonlyArray<CompanyTemplate> = [
     label: "Just a CEO",
     description: "Start with a CEO and add employees yourself.",
     team: [],
+  },
+  {
+    id: "ceo-recommends",
+    label: "CEO recommends the team",
+    description: "The CEO proposes who to hire for the mission; you approve each one.",
+    team: [],
+    recommendHires: true,
   },
   {
     id: "software",
@@ -290,6 +301,24 @@ export const COMPANY_TEMPLATES: ReadonlyArray<CompanyTemplate> = [
 
 export const DEFAULT_CEO_INSTRUCTIONS =
   "You run the company toward its mission. When the board gives you a task, decide what success means, split it into work for your team, and hold the result to a high bar. Do not do large pieces of work yourself when you have people for it. Keep the board informed with short comments.";
+
+/** Has the CEO propose the hires the company is missing; nobody joins until a person approves. */
+export function recommendHiresTask(
+  company: Pick<BoardCompany, "id" | "name">,
+  ceoAgentId: BoardAgentId,
+): BoardTaskCreateInput {
+  return {
+    companyId: company.id,
+    title: "Recommend who to hire",
+    description: [
+      `Propose the team ${company.name} needs for its mission. Check who is already here with board_list_agents, which also lists hire requests still waiting, and propose only the roles that are missing. Keep the team as small as the mission allows.`,
+      "Request each person with board_request_hire and fill everything in: name, job title, department, manager, skills from the library, standing instructions (what they own and how they work), and why the team needs them. Request a manager before their reports, and set each report's reportsToHireId to their manager's request.",
+      "Don't start the work itself or create subtasks. Nobody joins until I approve their request on the org chart. When you're done, comment with the org chart you proposed and move this task to review.",
+    ].join("\n\n"),
+    status: "todo",
+    assigneeAgentId: ceoAgentId,
+  };
+}
 
 /**
  * The board titles threads "Name: card" and "Review (Name): card"; under the employee's own

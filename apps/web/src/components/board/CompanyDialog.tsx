@@ -37,6 +37,7 @@ import {
   EMPLOYEE_PRESETS,
   SKILL_PRESETS,
   departmentNamed,
+  recommendHiresTask,
 } from "./board.logic";
 import { OfficeFieldGroup, OfficeHeading } from "./OfficeSurface";
 
@@ -146,6 +147,13 @@ function CompanyForm(props: {
         if (result?.agent !== undefined) agentIds.set(member.title, result.agent.id);
       }
     }
+    if (template?.recommendHires && company.ceoAgentId !== null) {
+      setProgress(`Asking ${ceoName.trim()} who to hire…`);
+      await props.runCommand({
+        type: "task.create",
+        task: recommendHiresTask(company, company.ceoAgentId),
+      });
+    }
     setProgress(null);
     props.onCreated(company.id);
     props.onOpenChange(false);
@@ -228,7 +236,7 @@ function CompanyForm(props: {
           <OfficeFieldGroup label="Team" tone="violet">
             <div className="flex flex-col gap-2">
               <Label>Starting team</Label>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-3">
                 {COMPANY_TEMPLATES.map((candidate) => (
                   <Button
                     key={candidate.id}
