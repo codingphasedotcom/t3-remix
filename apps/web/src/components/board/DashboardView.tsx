@@ -1,12 +1,18 @@
 import type {
   BoardAgent,
+  BoardAgentThread,
   BoardDashboard,
   BoardDashboardDay,
   BoardDepartmentId,
+  BoardRunKind,
   BoardSnapshot,
+  BoardTask,
   BoardTaskId,
   EnvironmentId,
+  ThreadId,
 } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useNavigate } from "@tanstack/react-router";
 import {
   formatCount,
   formatDayShort,
@@ -31,6 +37,7 @@ import { useState, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { boardLive } from "../../state/board";
 import { useEnvironmentQuery } from "../../state/query";
+import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { niceScale } from "../usage/UsageProviderChart";
 import { Button } from "../ui/button";
@@ -38,7 +45,7 @@ import { Skeleton } from "../ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AgentAvatar, AgentName } from "./AgentAvatar";
+import { AgentAvatar } from "./AgentAvatar";
 import { agentById } from "./board.logic";
 import { COLUMN_TONES, TONES, type Tone } from "./boardTones";
 import { OFFICE_CARD, OFFICE_PANEL, OfficeIconTile, OfficePill } from "./OfficeSurface";
@@ -108,7 +115,13 @@ export function DashboardView(props: {
   const dashboard = query.data?.dashboard ?? null;
   const employees = employeeRows(snapshot, dashboard);
   const columns = cardsByColumn(snapshot.tasks);
-  const attention = attentionItems(snapshot, dashboard);
+  const attention = attentionItems(snapshot);
+  const navigate = useNavigate();
+  const openThread = (threadId: ThreadId) =>
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(props.environmentId, threadId)),
+    });
   const totals = dashboard?.totals ?? null;
   const openCards = snapshot.tasks.filter((task) => task.status !== "done").length;
   const blocked = columns.find((column) => column.status === "blocked")?.count ?? 0;
@@ -186,15 +199,17 @@ export function DashboardView(props: {
           count={
             attention.blocked.length +
             attention.unassigned.length +
-            attention.failing.length +
+            attention.failed.length +
             (attention.pendingHires > 0 ? 1 : 0)
           }
         >
           <AttentionList
             attention={attention}
             agents={snapshot.agents}
+            tasks={snapshot.tasks}
             onOpenCard={props.onOpenCard}
             onOpenOrgChart={props.onOpenOrgChart}
+            onOpenThread={openThread}
           />
         </Panel>
       ) : null}
@@ -497,8 +512,10 @@ function BarList(props: {
 function AttentionList(props: {
   readonly attention: AttentionItems;
   readonly agents: ReadonlyArray<BoardAgent>;
+  readonly tasks: ReadonlyArray<BoardTask>;
   readonly onOpenCard: (cardId: BoardTaskId) => void;
   readonly onOpenOrgChart: () => void;
+  readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const { attention } = props;
   return (
@@ -536,25 +553,36 @@ function AttentionList(props: {
           <span className="truncate">No assignee: {task.title}</span>
         </Button>
       ))}
-      {attention.failing.map((entry) => (
-        <div key={entry.agentId} className="flex items-center gap-2 px-2 py-1.5 text-sm">
-          <XCircleIcon className={cn("size-4 shrink-0", TONES.red.ink)} />
-          <FailingAgent agent={agentById(props.agents, entry.agentId)} failed={entry.failed} />
-        </div>
+      {attention.failed.map((thread) => (
+        <Button
+          key={thread.threadId}
+          variant="outline"
+          size="sm"
+          className="max-w-full"
+          onClick={() => props.onOpenThread(thread.threadId)}
+        >
+          <XCircleIcon className={TONES.red.ink} />
+          <span className="truncate">{failedThreadLabel(thread, props.agents, props.tasks)}</span>
+        </Button>
       ))}
     </div>
   );
 }
 
-function FailingAgent(props: { readonly agent: BoardAgent | null; readonly failed: number }) {
-  const runs = `had ${props.failed} failed ${props.failed === 1 ? "run" : "runs"}`;
-  if (props.agent === null) return <span className="truncate">A former employee {runs}</span>;
-  return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <AgentName agent={props.agent} className="font-medium" />
-      <span className="truncate">{runs}</span>
-    </span>
-  );
+const FAILED_RUN_LABELS: Record<BoardRunKind, string> = {
+  work: "run",
+  review: "review",
+  reply: "reply",
+};
+
+function failedThreadLabel(
+  thread: BoardAgentThread,
+  agents: ReadonlyArray<BoardAgent>,
+  tasks: ReadonlyArray<BoardTask>,
+): string {
+  const who = agentById(agents, thread.agentId)?.name ?? "A former employee";
+  const task = tasks.find((candidate) => candidate.id === thread.taskId);
+  return `${who}'s ${FAILED_RUN_LABELS[thread.kind]} failed: ${task?.title ?? "a removed task"}`;
 }
 
 function ModelsTable(props: {

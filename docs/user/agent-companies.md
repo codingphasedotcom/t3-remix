@@ -173,7 +173,8 @@ until you raise it or the month ends. An agent already running finishes its run.
 often runs succeed, how long tasks take from creation to done, and the tokens spent. Below that
 are daily activity for the last 14 days, a **Needs attention** list (blocked or unassigned tasks,
 hire requests, failed runs), a breakdown by model and by department, and a row for every
-employee.
+employee. A failed run opens its thread, and leaves the list once that thread runs again, from the
+board or from the thread itself, or once it settles.
 
 Tokens are counted from each employee's board threads and credited to the model that thread ran.
 A running agent's tokens appear when its run ends. Days start at midnight in your time zone.

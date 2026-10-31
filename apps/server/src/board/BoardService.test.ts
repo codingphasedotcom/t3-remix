@@ -1138,6 +1138,52 @@ it.effect("archiving a finished task hides it with its subtasks and settles its 
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("a failed thread stays failed until it runs again, even from the thread itself", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const sql = yield* SqlClient.SqlClient;
+      const { company, engineer } = yield* createCompany(board);
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Fix login", assigneeAgentId: engineer.id },
+        },
+        user,
+      );
+      const started = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, task?.id) !== null,
+      );
+      const threadId = threadOf(started, task?.id)!;
+      const threadStatus = (snapshot: BoardSnapshot) =>
+        snapshot.threads.find((thread) => thread.threadId === threadId)?.status;
+      yield* Queue.offer(harness.events, {
+        type: "run.updated",
+        threadId,
+        payload: { id: "run-board", status: "failed" },
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* boardWhere(board, company.id, (snapshot) => threadStatus(snapshot) === "failed");
+
+      // A person continues in the thread; the board never started that run.
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_runs (
+          run_id, thread_id, ordinal, provider, status, requested_at, payload_json
+        )
+        VALUES ('run-continued', ${threadId}, 2, 'claude', 'running', '2999-01-01T00:00:00.000Z', '{}')
+      `;
+      yield* Queue.offer(harness.events, {
+        type: "run.updated",
+        threadId,
+        payload: { id: "run-continued", status: "running" },
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* boardWhere(board, company.id, (snapshot) => threadStatus(snapshot) === "completed");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect("creates a project folder for a company that asks for a new workspace", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;

@@ -115,6 +115,14 @@ const snapshot: BoardSnapshot = {
       status: "running",
       startedAt: "2026-10-20T00:00:00.000Z",
     },
+    {
+      threadId: "thread-2" as ThreadId,
+      agentId: engineer.id,
+      taskId: "signup" as BoardTaskId,
+      kind: "work",
+      status: "failed",
+      startedAt: "2026-10-19T00:00:00.000Z",
+    },
   ],
 };
 
@@ -174,18 +182,18 @@ describe("employeeRows", () => {
 });
 
 describe("attentionItems", () => {
-  it("flags blocked and unassigned cards and employees whose runs failed", () => {
-    const attention = attentionItems(snapshot, dashboard);
+  it("flags blocked and unassigned cards and threads whose latest run failed", () => {
+    const attention = attentionItems(snapshot);
     expect(attention.blocked.map((task) => task.id)).toEqual(["billing"]);
     expect(attention.unassigned.map((task) => task.id)).toEqual(["docs"]);
-    expect(attention.failing).toEqual([{ agentId: engineer.id, failed: 1 }]);
+    expect(attention.failed.map((thread) => thread.threadId)).toEqual(["thread-2"]);
     expect(hasAttentionItems(attention)).toBe(true);
-    expect(hasAttentionItems(attentionItems({ ...snapshot, tasks: [] }, null))).toBe(false);
+    expect(hasAttentionItems(attentionItems({ ...snapshot, tasks: [], threads: [] }))).toBe(false);
   });
 
   it("leaves cards you keep for yourself out of the unassigned list", () => {
     const mine = { ...card("errand", "todo", null), assignedToUser: true };
-    const attention = attentionItems({ ...snapshot, tasks: [...snapshot.tasks, mine] }, dashboard);
+    const attention = attentionItems({ ...snapshot, tasks: [...snapshot.tasks, mine] });
     expect(attention.unassigned.map((task) => task.id)).toEqual(["docs"]);
   });
 });

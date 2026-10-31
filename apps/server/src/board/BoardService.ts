@@ -2086,8 +2086,10 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     run: OrchestrationV2Run,
   ) {
-    if (!ThreadManagementService.isTerminalRunStatus(run.status)) return;
     const running = yield* store.runForThread(threadId);
+    // Running again moves a failed thread off the dashboard's list, however it was restarted.
+    if (running?.run.status === "failed") return yield* notify(running.companyId);
+    if (!ThreadManagementService.isTerminalRunStatus(run.status)) return;
     if (running === null || running.run.status !== "running") return;
     // A queued follow-up keeps the agent working; settle once the thread is idle.
     const shell = yield* threads.getThreadShell(threadId);

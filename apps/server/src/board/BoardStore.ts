@@ -1568,21 +1568,35 @@ const make = Effect.gen(function* () {
   )(function* (companyId) {
     // SQLite fills the bare columns from the row holding MAX(started_at), so each thread
     // reports its latest run. Settled, archived, and deleted threads are finished work, which
-    // the Threads view keeps.
+    // the Threads view keeps. A failed run stops counting once the thread runs again without a
+    // failure, including when a person continues it from the thread itself.
     const rows = yield* sql<RunRow>`
         SELECT
-          r.thread_id, r.agent_id, r.task_id, r.kind, r.status,
-          MAX(r.started_at) AS started_at, MAX(r.rowid) AS sequence
-        FROM board_runs r
-        JOIN board_tasks t ON t.task_id = r.task_id
-        LEFT JOIN orchestration_v2_projection_threads th ON th.thread_id = r.thread_id
-        WHERE t.company_id = ${companyId}
-          AND th.archived_at IS NULL
-          AND th.deleted_at IS NULL
-          AND json_extract(th.payload_json, '$.settledOverride') IS NOT 'settled'
-        GROUP BY r.thread_id, r.agent_id
-        ORDER BY started_at DESC, sequence DESC
-        LIMIT ${MAX_AGENT_THREADS}
+          latest.thread_id, latest.agent_id, latest.task_id, latest.kind, latest.started_at,
+          CASE
+            WHEN latest.status = 'failed' AND (
+              SELECT o.status FROM orchestration_v2_projection_runs o
+              WHERE o.thread_id = latest.thread_id AND o.requested_at > latest.ended_at
+              ORDER BY o.ordinal DESC LIMIT 1
+            ) != 'failed' THEN 'completed'
+            ELSE latest.status
+          END AS status
+        FROM (
+          SELECT
+            r.thread_id, r.agent_id, r.task_id, r.kind, r.status, r.ended_at,
+            MAX(r.started_at) AS started_at, MAX(r.rowid) AS sequence
+          FROM board_runs r
+          JOIN board_tasks t ON t.task_id = r.task_id
+          LEFT JOIN orchestration_v2_projection_threads th ON th.thread_id = r.thread_id
+          WHERE t.company_id = ${companyId}
+            AND th.archived_at IS NULL
+            AND th.deleted_at IS NULL
+            AND json_extract(th.payload_json, '$.settledOverride') IS NOT 'settled'
+          GROUP BY r.thread_id, r.agent_id
+          ORDER BY started_at DESC, sequence DESC
+          LIMIT ${MAX_AGENT_THREADS}
+        ) latest
+        ORDER BY latest.started_at DESC, latest.sequence DESC
       `;
     return yield* Effect.forEach(rows, (row) =>
       decodeAgentThread({

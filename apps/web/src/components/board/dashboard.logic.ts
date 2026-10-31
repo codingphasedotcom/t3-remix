@@ -1,6 +1,6 @@
 import type {
   BoardAgent,
-  BoardAgentId,
+  BoardAgentThread,
   BoardDashboard,
   BoardDepartmentId,
   BoardRunStats,
@@ -131,23 +131,18 @@ export interface AttentionItems {
   /** Tasks in To do with neither an agent nor you on them, which nothing will start. */
   readonly unassigned: ReadonlyArray<BoardTask>;
   readonly pendingHires: number;
-  readonly failing: ReadonlyArray<{ readonly agentId: BoardAgentId; readonly failed: number }>;
+  /** Employee threads whose latest run failed and that nothing has run again since. */
+  readonly failed: ReadonlyArray<BoardAgentThread>;
 }
 
-export function attentionItems(
-  snapshot: BoardSnapshot,
-  dashboard: BoardDashboard | null,
-): AttentionItems {
+export function attentionItems(snapshot: BoardSnapshot): AttentionItems {
   return {
     blocked: snapshot.tasks.filter((task) => task.status === "blocked"),
     unassigned: snapshot.tasks.filter(
       (task) => task.status === "todo" && task.assigneeAgentId === null && !task.assignedToUser,
     ),
     pendingHires: snapshot.hires.filter((hire) => hire.status === "pending").length,
-    failing: (dashboard?.agents ?? [])
-      .filter((entry) => entry.stats.failed > 0)
-      .map((entry) => ({ agentId: entry.agentId, failed: entry.stats.failed }))
-      .toSorted((a, b) => b.failed - a.failed),
+    failed: snapshot.threads.filter((thread) => thread.status === "failed"),
   };
 }
 
@@ -156,7 +151,7 @@ export function hasAttentionItems(attention: AttentionItems): boolean {
     attention.blocked.length > 0 ||
     attention.unassigned.length > 0 ||
     attention.pendingHires > 0 ||
-    attention.failing.length > 0
+    attention.failed.length > 0
   );
 }
 
