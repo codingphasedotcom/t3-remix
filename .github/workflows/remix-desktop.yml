@@ -77,8 +77,9 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.rust_target }}
 
+      # Windows needs these too: the JS build compiles the Linux browser secret helper on any Linux host.
       - name: Install Linux desktop build libraries
-        if: matrix.platform == 'linux'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libsecret-1-dev pkg-config imagemagick
