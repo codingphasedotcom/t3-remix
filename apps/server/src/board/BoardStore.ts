@@ -171,7 +171,16 @@ export class BoardStore extends Context.Service<
     readonly listTasks: (companyId: BoardCompanyId) => StoreEffect<ReadonlyArray<StoredTask>>;
     readonly getTask: (id: BoardTaskId) => StoreEffect<StoredTask | null>;
     readonly insertTask: (task: NewTask) => StoreEffect<BoardTaskId>;
+    /** Changing a task's status also restores it if it was archived. */
     readonly updateTask: (id: BoardTaskId, changes: TaskChanges) => StoreEffect<boolean>;
+    readonly setTasksArchived: (
+      ids: ReadonlyArray<BoardTaskId>,
+      archivedAt: string | null,
+    ) => StoreEffect<void>;
+    /** Every thread a run on these tasks used, including reviewers' threads. */
+    readonly listTaskThreadIds: (
+      ids: ReadonlyArray<BoardTaskId>,
+    ) => StoreEffect<ReadonlyArray<ThreadId>>;
     readonly setTaskThread: (
       id: BoardTaskId,
       threadId: ThreadId,
@@ -349,6 +358,7 @@ interface TaskRow {
   readonly base_ref: string | null;
   readonly created_by_agent_id: string | null;
   readonly status_changed_at: string;
+  readonly archived_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
   readonly comment_count: number;
@@ -483,6 +493,7 @@ const TASK_COLUMNS = `
   t.base_ref,
   t.created_by_agent_id,
   t.status_changed_at,
+  t.archived_at,
   t.created_at,
   t.updated_at,
   (SELECT COUNT(*) FROM board_comments c
@@ -642,6 +653,9 @@ const make = Effect.gen(function* () {
   }
   if (!cardColumns.has("assigned_to_user")) {
     yield* sql`ALTER TABLE board_tasks ADD COLUMN assigned_to_user INTEGER NOT NULL DEFAULT 0`;
+  }
+  if (!cardColumns.has("archived_at")) {
+    yield* sql`ALTER TABLE board_tasks ADD COLUMN archived_at TEXT`;
   }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_comments (
@@ -840,6 +854,7 @@ const make = Effect.gen(function* () {
       activeRunKind: row.active_run_kind,
       createdByAgentId: row.created_by_agent_id,
       commentCount: row.comment_count,
+      archivedAt: row.archived_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
@@ -1262,6 +1277,7 @@ const make = Effect.gen(function* () {
           assigned_to_user = ${(changes.assignedToUser ?? before.assignedToUser) ? 1 : 0},
           reviewer_agent_id = ${changes.reviewerAgentId === undefined ? before.reviewerAgentId : changes.reviewerAgentId},
           status_changed_at = ${statusChanged ? at : current.statusChangedAt},
+          archived_at = ${statusChanged ? null : before.archivedAt},
           updated_at = ${at}
         WHERE task_id = ${id}
       `;
@@ -1269,6 +1285,23 @@ const make = Effect.gen(function* () {
     },
     failWith("Could not update the task."),
   );
+
+  const setTasksArchived: BoardStore["Service"]["setTasksArchived"] = Effect.fn(
+    "BoardStore.setTasksArchived",
+  )(function* (ids, archivedAt) {
+    if (ids.length === 0) return;
+    yield* sql`UPDATE board_tasks SET archived_at = ${archivedAt} WHERE task_id IN ${sql.in(ids)}`;
+  }, failWith("Could not archive the task."));
+
+  const listTaskThreadIds: BoardStore["Service"]["listTaskThreadIds"] = Effect.fn(
+    "BoardStore.listTaskThreadIds",
+  )(function* (ids) {
+    if (ids.length === 0) return [];
+    const rows = yield* sql<{ readonly thread_id: string }>`
+      SELECT DISTINCT thread_id FROM board_runs WHERE task_id IN ${sql.in(ids)}
+    `;
+    return rows.map((row) => ThreadId.make(row.thread_id));
+  }, failWith("Could not list the task's threads."));
 
   const setTaskThread: BoardStore["Service"]["setTaskThread"] = Effect.fn(
     "BoardStore.setTaskThread",
@@ -1534,14 +1567,19 @@ const make = Effect.gen(function* () {
     "BoardStore.listAgentThreads",
   )(function* (companyId) {
     // SQLite fills the bare columns from the row holding MAX(started_at), so each thread
-    // reports its latest run.
+    // reports its latest run. Settled, archived, and deleted threads are finished work, which
+    // the Threads view keeps.
     const rows = yield* sql<RunRow>`
         SELECT
           r.thread_id, r.agent_id, r.task_id, r.kind, r.status,
           MAX(r.started_at) AS started_at, MAX(r.rowid) AS sequence
         FROM board_runs r
         JOIN board_tasks t ON t.task_id = r.task_id
+        LEFT JOIN orchestration_v2_projection_threads th ON th.thread_id = r.thread_id
         WHERE t.company_id = ${companyId}
+          AND th.archived_at IS NULL
+          AND th.deleted_at IS NULL
+          AND json_extract(th.payload_json, '$.settledOverride') IS NOT 'settled'
         GROUP BY r.thread_id, r.agent_id
         ORDER BY started_at DESC, sequence DESC
         LIMIT ${MAX_AGENT_THREADS}
@@ -1813,6 +1851,8 @@ const make = Effect.gen(function* () {
     getTask,
     insertTask,
     updateTask,
+    setTasksArchived,
+    listTaskThreadIds,
     setTaskThread,
     deleteTask,
     countOpenSubtasks,

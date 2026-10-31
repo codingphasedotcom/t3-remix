@@ -10,6 +10,10 @@ Open **Companies** from the sidebar footer on web and desktop, or switch the sid
 a company opens its board, and the button next to it opens its dashboard. The mobile app does not
 show companies yet.
 
+An employee's list shows only threads that are still open. Threads settle on their own after a few
+days without activity, or when you settle one from its row; settled and archived threads stay in
+the Threads view.
+
 ## Start a company
 
 Click **New company** and give it a name, a mission, a CEO name, and a model. Pick where the
@@ -138,6 +142,13 @@ is working in its worktree. Subtasks share their parent's branch, so they ship w
 
 When the work lands, by a merge here or once its pull request is merged, a task waiting in
 **Review** moves to **Done**.
+
+## Archive finished tasks
+
+Open a task in **Done** and choose **Archive**, or use **Archive all** at the top of **Done**.
+Subtasks are archived with their task, and its agents' threads settle. To bring one back, show the
+archived tasks from the top of **Done**, open the task, and choose **Restore**. A task that moves
+out of **Done** comes back on its own. The dashboard still counts archived tasks.
 
 ## Routines
 

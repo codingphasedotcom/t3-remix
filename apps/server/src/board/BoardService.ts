@@ -1113,6 +1113,59 @@ const make = Effect.gen(function* () {
     yield* notify(current.task.companyId);
   });
 
+  /** Archives a finished task with its subtasks and settles their threads, or restores it. */
+  const archiveTask = Effect.fn("BoardService.archiveTask")(function* (
+    id: BoardTaskId,
+    archived: boolean,
+  ) {
+    const { task } = yield* requireTask(id);
+    if (task.parentTaskId !== null) {
+      return yield* boardError(
+        archived
+          ? "Subtasks are archived with their parent task."
+          : "Restore its parent task to restore this subtask.",
+      );
+    }
+    const all = (yield* store.listTasks(task.companyId)).map((stored) => stored.task);
+    const tree = [task];
+    for (let index = 0; index < tree.length; index++) {
+      const parentId = tree[index]!.id;
+      tree.push(...all.filter((candidate) => candidate.parentTaskId === parentId));
+    }
+    const ids = tree.map((member) => member.id);
+    if (!archived) {
+      yield* store.setTasksArchived(ids, null);
+      yield* notify(task.companyId);
+      return (yield* requireTask(id)).task;
+    }
+    if (task.status !== "done") {
+      return yield* boardError("Only finished tasks can be archived. Move it to Done first.");
+    }
+    if (tree.some((member) => member.activeRunKind !== null)) {
+      return yield* boardError("An agent is still working on this task.");
+    }
+    yield* store.setTasksArchived(ids, yield* store.now);
+    for (const threadId of yield* store.listTaskThreadIds(ids)) {
+      yield* threads
+        .dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make(`board-archive-settle:${yield* store.newId("command")}`),
+          threadId,
+        })
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not settle an archived task's thread", {
+              taskId: task.id,
+              threadId,
+              cause,
+            }),
+          ),
+        );
+    }
+    yield* notify(task.companyId);
+    return (yield* requireTask(id)).task;
+  });
+
   const addComment: BoardService["Service"]["addComment"] = Effect.fn("BoardService.addComment")(
     function* (input, actor) {
       const current = yield* requireTask(input.taskId);
@@ -2088,6 +2141,21 @@ const make = Effect.gen(function* () {
                   }),
                 ),
               );
+            // Employees list only their unfinished threads.
+            case "thread.settled":
+            case "thread.unsettled":
+            case "thread.archived":
+            case "thread.unarchived":
+            case "thread.deleted":
+              return store.runForThread(event.threadId).pipe(
+                Effect.flatMap((run) => (run === null ? Effect.void : notify(run.companyId))),
+                Effect.catch((cause) =>
+                  Effect.logWarning("Board could not refresh an employee's threads", {
+                    threadId: event.threadId,
+                    cause,
+                  }),
+                ),
+              );
             default:
               return Effect.void;
           }
@@ -2143,6 +2211,8 @@ const make = Effect.gen(function* () {
         return deleteTask(command.id).pipe(Effect.as({}));
       case "task.start":
         return startTask(command.id).pipe(Effect.map((task) => ({ task })));
+      case "task.archive":
+        return archiveTask(command.id, command.archived).pipe(Effect.map((task) => ({ task })));
       case "task.ship":
         return shipTask(command.id, command.method);
       case "comment.add":

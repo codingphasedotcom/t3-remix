@@ -68,6 +68,7 @@ function card(id: string, status: BoardTask["status"], assignee: string | null):
     activeRunKind: null,
     createdByAgentId: null,
     commentCount: 0,
+    archivedAt: null,
     createdAt: "2026-10-20T00:00:00.000Z",
     updatedAt: "2026-10-20T00:00:00.000Z",
   };

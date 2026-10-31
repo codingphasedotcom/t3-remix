@@ -14,6 +14,8 @@ import {
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   ClipboardListIcon,
   ExternalLinkIcon,
   FileIcon,
@@ -52,7 +54,7 @@ import { AgentSelect } from "./AgentSelect";
 import { FilePicker } from "./FilePicker";
 import type { RunBoardCommand } from "./BoardPage";
 import { AgentFace, AgentName } from "./AgentAvatar";
-import { BOARD_COLUMNS, agentById, boardStatusLabel } from "./board.logic";
+import { BOARD_COLUMNS, agentById, boardStatusLabel, canArchiveTask } from "./board.logic";
 import { COLUMN_TONES, type Tone } from "./boardTones";
 import {
   OFFICE_CARD,
@@ -195,6 +197,7 @@ function BoardCardDetail(props: {
                 >
                   {boardStatusLabel(task.status)}
                 </OfficePill>
+                {task.archivedAt !== null ? <OfficePill tone="gray">Archived</OfficePill> : null}
                 {task.activeRunKind !== null ? (
                   <OfficePill tone="sky" variant="live">
                     {task.activeRunKind === "review"
@@ -223,6 +226,31 @@ function BoardCardDetail(props: {
             <Button size="sm" variant="outline" onClick={() => openThread(task.threadId ?? "")}>
               <ExternalLinkIcon />
               Open thread
+            </Button>
+          ) : null}
+          {canArchiveTask(task) ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() =>
+                void props.runCommand({ type: "task.archive", id: task.id, archived: true })
+              }
+            >
+              <ArchiveIcon />
+              Archive
+            </Button>
+          ) : task.archivedAt !== null && task.parentTaskId === null ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() =>
+                void props.runCommand({ type: "task.archive", id: task.id, archived: false })
+              }
+            >
+              <ArchiveRestoreIcon />
+              Restore
             </Button>
           ) : null}
           <Button

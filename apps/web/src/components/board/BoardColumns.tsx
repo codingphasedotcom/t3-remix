@@ -19,17 +19,25 @@ import type {
   BoardTaskId,
   BoardTaskStatus,
 } from "@t3tools/contracts";
-import { ChevronRightIcon, ClockIcon, ListTreeIcon, MessageSquareIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  ListTreeIcon,
+  MessageSquareIcon,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentAvatar, AgentName, YouName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
 import {
   BOARD_COLUMNS,
   agentById,
+  canArchiveTask,
   dropPosition,
   groupTasksByStatus,
   subtaskProgress,
@@ -71,8 +79,25 @@ export function BoardColumns(props: {
     () => new Map(),
   );
   const [draggingId, setDraggingId] = useState<BoardTaskId | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-  const columns = groupTasksByStatus(props.snapshot.tasks, placements);
+  const archivedCount = props.snapshot.tasks.filter((task) => task.archivedAt !== null).length;
+  const columns = groupTasksByStatus(
+    showArchived
+      ? props.snapshot.tasks
+      : props.snapshot.tasks.filter((task) => task.archivedAt === null),
+    placements,
+  );
+  const archivable = props.snapshot.tasks.filter(canArchiveTask);
+  const archiveAll = async () => {
+    for (const task of archivable) {
+      if (
+        (await props.runCommand({ type: "task.archive", id: task.id, archived: true })) === null
+      ) {
+        return;
+      }
+    }
+  };
   const dragging =
     draggingId === null
       ? null
@@ -131,6 +156,33 @@ export function BoardColumns(props: {
             snapshot={props.snapshot}
             canDrag={props.canOperate}
             onOpenCard={props.onOpenCard}
+            actions={
+              column.status === "done" ? (
+                <>
+                  {archivable.length > 0 ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={!props.canOperate}
+                      onClick={() => void archiveAll()}
+                    >
+                      <ArchiveIcon />
+                      Archive all
+                    </Button>
+                  ) : null}
+                  {archivedCount > 0 ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      aria-pressed={showArchived}
+                      onClick={() => setShowArchived((current) => !current)}
+                    >
+                      {showArchived ? "Hide archived" : `${archivedCount} archived`}
+                    </Button>
+                  ) : null}
+                </>
+              ) : null
+            }
           />
         ))}
       </div>
@@ -151,6 +203,7 @@ function BoardColumnView(props: {
   readonly snapshot: BoardSnapshot;
   readonly canDrag: boolean;
   readonly onOpenCard: (cardId: BoardTaskId) => void;
+  readonly actions?: ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `column:${props.status}`,
@@ -162,15 +215,16 @@ function BoardColumnView(props: {
       aria-label={props.label}
       className={cn(OFFICE_PANEL, "w-80 shrink-0 gap-0 p-0", isOver && "ring-2 ring-primary/30")}
     >
-      <header className="flex px-4 pt-4 pb-3">
+      <header className="flex items-center gap-1 px-4 pt-4 pb-3">
         <Tooltip>
-          <TooltipTrigger render={<span className="flex" />}>
+          <TooltipTrigger render={<span className="me-auto flex" />}>
             <OfficePill tone={COLUMN_TONES[props.status]} variant={statusPillVariant(props.status)}>
-              {props.label}: {props.tasks.length}
+              {props.label}: {props.tasks.filter((task) => task.archivedAt === null).length}
             </OfficePill>
           </TooltipTrigger>
           <TooltipPopup side="top">{props.hint}</TooltipPopup>
         </Tooltip>
+        {props.actions}
       </header>
       <div className="flex min-h-24 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
         {props.tasks.map((task) => (
@@ -214,6 +268,7 @@ function DraggableBoardCard(props: {
       }}
       className={cn(
         "rounded-2xl",
+        props.task.archivedAt !== null && "opacity-60",
         draggable.isDragging && "opacity-40",
         droppable.isOver && !draggable.isDragging && "ring-2 ring-primary/40",
       )}

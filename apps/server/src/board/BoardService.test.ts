@@ -1050,6 +1050,94 @@ it.effect("the dashboard credits runs and tokens to each employee and the model 
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("archiving a finished task hides it with its subtasks and settles its threads", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const sql = yield* SqlClient.SqlClient;
+      const { company, engineer } = yield* createCompany(board);
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Fix login", assigneeAgentId: engineer.id },
+        },
+        user,
+      );
+      const started = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, task?.id) !== null,
+      );
+      const threadId = threadOf(started, task?.id)!;
+      yield* Queue.offer(harness.events, {
+        type: "run.updated",
+        threadId,
+        payload: { id: "run-engineer", status: "completed" },
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* boardWhere(board, company.id, (snapshot) =>
+        snapshot.threads.some(
+          (thread) => thread.threadId === threadId && thread.status !== "running",
+        ),
+      );
+      const subtask = yield* board.createTask(
+        { companyId: company.id, title: "Add a test", parentTaskId: task!.id, status: "backlog" },
+        user,
+      );
+      const archive = (id: BoardTaskId, archived: boolean) =>
+        board.runCommand({ type: "task.archive", id, archived }, user);
+      const archivedAt = Effect.fn("test.archivedAt")(function* (id: BoardTaskId) {
+        const { tasks } = yield* board.snapshot(company.id);
+        return tasks.find((candidate) => candidate.id === id)?.archivedAt ?? null;
+      });
+
+      const unfinished = yield* archive(task!.id, true).pipe(Effect.flip);
+      assert.include(unfinished.message, "Only finished tasks");
+      yield* board.updateTask({ id: task!.id, status: "done" }, user);
+      const nested = yield* archive(subtask.id, true).pipe(Effect.flip);
+      assert.include(nested.message, "archived with their parent");
+
+      yield* archive(task!.id, true);
+      assert.isNotNull(yield* archivedAt(task!.id));
+      assert.isNotNull(yield* archivedAt(subtask.id));
+      const settled = (yield* Ref.get(harness.dispatched)).flatMap((command) =>
+        command.type === "thread.settle" ? [command.threadId] : [],
+      );
+      assert.deepEqual(settled, [threadId]);
+
+      // Once the thread settles, it leaves the employee's list.
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+          created_at, updated_at, payload_json
+        )
+        VALUES (
+          ${threadId}, ${projectId}, 'Fix login', 'claude', 'full-access', 'default',
+          ${task!.createdAt}, ${task!.createdAt}, ${JSON.stringify({ settledOverride: "settled" })}
+        )
+      `;
+      yield* Queue.offer(harness.events, {
+        type: "thread.settled",
+        threadId,
+      } as unknown as OrchestrationV2DomainEvent);
+      yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => !snapshot.threads.some((thread) => thread.threadId === threadId),
+      );
+
+      yield* archive(task!.id, false);
+      assert.isNull(yield* archivedAt(task!.id));
+      assert.isNull(yield* archivedAt(subtask.id));
+
+      // Moving an archived task out of Done brings it back to the board.
+      yield* archive(task!.id, true);
+      yield* board.updateTask({ id: task!.id, status: "review" }, user);
+      assert.isNull(yield* archivedAt(task!.id));
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect("creates a project folder for a company that asks for a new workspace", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;

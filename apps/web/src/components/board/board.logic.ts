@@ -92,6 +92,16 @@ export function agentInitials(name: string): string {
   return letters.toUpperCase();
 }
 
+/** A finished top-level task nobody is working on; its subtasks are archived with it. */
+export function canArchiveTask(task: BoardTask): boolean {
+  return (
+    task.status === "done" &&
+    task.parentTaskId === null &&
+    task.archivedAt === null &&
+    task.activeRunKind === null
+  );
+}
+
 export function subtaskProgress(
   tasks: ReadonlyArray<BoardTask>,
   taskId: BoardTaskId,

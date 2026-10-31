@@ -178,6 +178,14 @@ const AssignedToUser = Schema.Boolean.pipe(
     "The person using the board owns it instead of an agent. No agent works, reviews, or replies on it.",
 });
 
+/** Servers from before tasks could be archived send no date; their tasks are never archived. */
+const TaskArchivedAt = Schema.NullOr(IsoDateTime)
+  .pipe(Schema.withDecodingDefault(Effect.succeed(null)))
+  .annotate({
+    description:
+      "When a person archived the finished task, with its subtasks. Archived tasks leave the board until restored.",
+  });
+
 export const BoardTask = Schema.Struct({
   id: BoardTaskId,
   companyId: BoardCompanyId,
@@ -195,6 +203,7 @@ export const BoardTask = Schema.Struct({
   activeRunKind: Schema.NullOr(BoardRunKind),
   createdByAgentId: Schema.NullOr(BoardAgentId),
   commentCount: Schema.Int,
+  archivedAt: TaskArchivedAt,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -628,6 +637,11 @@ export const BoardCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("task.update"), task: BoardTaskUpdateInput }),
   Schema.Struct({ type: Schema.Literal("task.delete"), id: BoardTaskId }),
   Schema.Struct({ type: Schema.Literal("task.start"), id: BoardTaskId }),
+  Schema.Struct({
+    type: Schema.Literal("task.archive"),
+    id: BoardTaskId,
+    archived: Schema.Boolean.annotate({ description: "False restores an archived task." }),
+  }),
   Schema.Struct({ type: Schema.Literal("task.ship"), id: BoardTaskId, method: BoardShipMethod }),
   Schema.Struct({ type: Schema.Literal("comment.add"), comment: BoardCommentAddInput }),
   Schema.Struct({

@@ -7,12 +7,23 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
-import { Building2Icon, ChevronRightIcon, LayoutDashboardIcon, PlusIcon } from "lucide-react";
+import {
+  Building2Icon,
+  CheckIcon,
+  ChevronRightIcon,
+  LayoutDashboardIcon,
+  PlusIcon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { useThreadActions } from "../../hooks/useThreadActions";
 import { useThreadRouteRef } from "../../hooks/useThreadRouteTarget";
 import { cn } from "../../lib/utils";
 import { boardLive } from "../../state/board";
@@ -29,6 +40,7 @@ import { useRunBoardCommand } from "../board/useRunBoardCommand";
 import { employeeThreadTitle, orgChartRows } from "../board/board.logic";
 import { Button } from "../ui/button";
 import { SidebarGroup, SidebarMenuSubButton, useSidebar } from "../ui/sidebar";
+import { toastManager } from "../ui/toast";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -342,9 +354,22 @@ function EmployeeThread(props: {
       ? employeeThreadTitle(shell.title, props.agentName)
       : `${props.thread.kind === "review" ? "Review: " : ""}${card?.title ?? "Thread"}`;
   const pill = shell === null ? null : resolveThreadStatusPill({ thread: shell });
+  const { settleThread } = useThreadActions();
   const open = () => {
     if (isMobile) setOpenMobile(false);
     void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
+  };
+  // A settled thread leaves this list when the board refreshes; the Threads view keeps it.
+  const settle = async () => {
+    const result = await settleThread(ref);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Failed to settle thread",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    }
   };
   return (
     <div
@@ -352,13 +377,13 @@ function EmployeeThread(props: {
       aria-selected={isActive}
       // Indent follows the org chart's depth, which is data rather than a fixed step.
       style={{ paddingInlineStart: `${2.25 + props.depth * 0.875}rem` }}
-      className="min-w-0"
+      className="group/employee-thread flex min-w-0 items-center"
     >
       <SidebarMenuSubButton
         size="sm"
         isActive={isActive}
         render={<button type="button" />}
-        className="w-full"
+        className="min-w-0 flex-1"
         onClick={open}
       >
         {pill !== null ? (
@@ -371,6 +396,25 @@ function EmployeeThread(props: {
           {formatRelativeTimeLabel(props.thread.startedAt)}
         </span>
       </SidebarMenuSubButton>
+      {props.thread.status !== "running" ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Settle thread"
+                // Hidden rather than transparent, so a tap on a touch screen cannot hit it.
+                className="invisible shrink-0 group-hover/employee-thread:visible group-focus-within/employee-thread:visible"
+                onClick={() => void settle()}
+              />
+            }
+          >
+            <CheckIcon />
+          </TooltipTrigger>
+          <TooltipPopup>Settle thread</TooltipPopup>
+        </Tooltip>
+      ) : null}
     </div>
   );
 }
