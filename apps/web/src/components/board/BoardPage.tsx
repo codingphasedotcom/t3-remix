@@ -149,7 +149,7 @@ export function BoardPage(props: BoardPageProps) {
               icon={<ServerOffIcon />}
               tone="gray"
               title="No environment"
-              description="Connect T3 Code to a server."
+              description="Connect T3 Code to a server"
             />
           </>
         ) : (
@@ -213,7 +213,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           icon={<WifiOffIcon />}
           tone="gray"
           title="Environment offline"
-          description="Reconnect to see your companies."
+          description="Reconnect to see your companies"
         />
       </>
     );
@@ -506,7 +506,7 @@ function CompanyLimitBanner(props: { readonly snapshot: BoardSnapshot }) {
   );
   if (progress === null || (!progress.nearing && !progress.reached)) return null;
   return (
-    <div className="mx-(--workspace-gutter-start) mb-3 flex items-center gap-3 rounded-2xl bg-warning-surface px-3 py-2 text-sm text-warning-foreground">
+    <div className="mx-(--workspace-gutter-start) mb-3 flex items-center gap-3 rounded-xl bg-warning-surface px-3 py-2 text-sm text-warning-foreground">
       <OfficeIconTile tone="amber">
         <GaugeIcon />
       </OfficeIconTile>
@@ -531,7 +531,7 @@ function MissionBanner(props: {
     <div
       className={cn(
         OFFICE_PANEL,
-        "mx-(--workspace-gutter-start) mb-3 flex-row items-center rounded-2xl px-3 py-2 text-sm",
+        "mx-(--workspace-gutter-start) mb-3 flex-row items-center rounded-xl px-3 py-2 text-sm",
       )}
     >
       {props.company.mission.trim().length > 0 ? (
@@ -895,7 +895,7 @@ function BoardSettingsMenu(props: {
             <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
               <Label htmlFor="board-auto-dispatch">Auto-run agents</Label>
               <span className="text-xs text-muted-foreground">
-                Start assignees and reviewers as soon as their tasks are ready.
+                Start assignees and reviewers as soon as their tasks are ready
               </span>
             </div>
             <Switch

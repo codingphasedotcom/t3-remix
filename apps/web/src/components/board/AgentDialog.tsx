@@ -491,7 +491,7 @@ function AgentForm(props: {
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="board-agent-paused">Paused</Label>
                   <span className="text-xs text-muted-foreground">
-                    Paused agents keep their tasks but are not started.
+                    Paused agents keep their tasks but are not started
                   </span>
                 </div>
                 <Switch
@@ -509,7 +509,7 @@ function AgentForm(props: {
                 id="board-agent-instructions"
                 value={draft.instructions}
                 rows={6}
-                placeholder="What this agent owns, how it works, what it must never do."
+                placeholder="What this agent owns, how it works, what it must never do"
                 onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
               />
             </div>

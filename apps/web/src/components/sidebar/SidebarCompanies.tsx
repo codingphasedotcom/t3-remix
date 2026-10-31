@@ -205,7 +205,7 @@ function CompanyNode(props: {
           <Building2Icon className="size-4 shrink-0 text-sidebar-muted-foreground" />
           <span className="truncate">{props.company.name}</span>
           {props.company.pendingHireCount > 0 ? (
-            <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-3xs text-warning">
+            <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-2xs text-warning">
               {props.company.pendingHireCount} hire
             </span>
           ) : null}

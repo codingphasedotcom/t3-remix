@@ -203,7 +203,7 @@ function CompanyForm(props: {
                 id="board-company-mission"
                 value={mission}
                 rows={3}
-                placeholder="Build the simplest invoicing app for freelancers."
+                placeholder="Build the simplest invoicing app for freelancers"
                 onChange={(event) => setMission(event.target.value)}
               />
             </div>

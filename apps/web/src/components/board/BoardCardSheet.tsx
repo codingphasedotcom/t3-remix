@@ -375,7 +375,7 @@ function BoardCardDetail(props: {
                 />
               </div>
             ) : (
-              <span className="text-sm text-muted-foreground">No description.</span>
+              <span className="text-sm text-muted-foreground">No description</span>
             )}
           </section>
 
@@ -485,7 +485,7 @@ function BoardCardDetail(props: {
                 />
               ))}
               {detail.data !== null && detail.data.comments.length === 0 ? (
-                <span className="text-sm text-muted-foreground">No activity yet.</span>
+                <span className="text-sm text-muted-foreground">No activity yet</span>
               ) : null}
             </div>
             <div className="flex flex-col gap-2">
@@ -765,7 +765,7 @@ function CommentRow(props: {
         ) : (
           <AgentFace agent={agent ?? undefined} name={authorName} />
         )}
-        <span className="truncate text-sm font-semibold text-foreground">{authorName}</span>
+        <span className="truncate text-sm font-medium text-foreground">{authorName}</span>
         {agent?.title ? (
           <span className="truncate text-muted-foreground">{agent.title}</span>
         ) : null}

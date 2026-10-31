@@ -17,12 +17,12 @@ export interface BoardColumn {
 }
 
 export const BOARD_COLUMNS: ReadonlyArray<BoardColumn> = [
-  { status: "backlog", label: "Ideas", hint: "Waits for a human to schedule it." },
-  { status: "todo", label: "To do", hint: "Tasks with an assignee start automatically." },
-  { status: "in_progress", label: "In progress", hint: "An agent is working the task." },
-  { status: "review", label: "Review", hint: "The reviewer starts when one is set." },
-  { status: "blocked", label: "Blocked", hint: "Needs a decision or its subtasks." },
-  { status: "done", label: "Done", hint: "Approved work." },
+  { status: "backlog", label: "Ideas", hint: "Waits for a human to schedule it" },
+  { status: "todo", label: "To do", hint: "Tasks with an assignee start automatically" },
+  { status: "in_progress", label: "In progress", hint: "An agent is working the task" },
+  { status: "review", label: "Review", hint: "The reviewer starts when one is set" },
+  { status: "blocked", label: "Blocked", hint: "Needs a decision or its subtasks" },
+  { status: "done", label: "Done", hint: "Approved work" },
 ];
 
 export function boardStatusLabel(status: BoardTaskStatus): string {
@@ -144,37 +144,37 @@ export interface SkillPreset {
 export const SKILL_PRESETS: ReadonlyArray<SkillPreset> = [
   {
     name: "Planning and delegation",
-    description: "Turn a goal into small, assignable tasks.",
+    description: "Turn a goal into small, assignable tasks",
     instructions:
       'Read the goal and the codebase before planning. Split work into tasks that one person can finish and verify in a single sitting, each with a concrete definition of done. Assign each task to the teammate whose skills fit it best, and say what to hand back. Avoid tasks that only say "investigate" unless the answer decides what to build.',
   },
   {
     name: "Code review",
-    description: "Approve only changes you would merge.",
+    description: "Approve only changes you would merge",
     instructions:
       "Read the full diff. Check correctness, edge cases, error handling, tests that would catch a regression, and changes outside the task's scope. Run the tests. When requesting changes, list each one with the file, the problem, and what would fix it.",
   },
   {
     name: "Testing",
-    description: "Prove behavior with automated tests.",
+    description: "Prove behavior with automated tests",
     instructions:
       "Write tests for the behavior the task asks for, including the failure and edge cases. Prefer tests that exercise real behavior over mocks of the code under test. Run the whole relevant test suite before reporting done, and paste the result into your comment.",
   },
   {
     name: "Frontend",
-    description: "Build UI that matches the existing app.",
+    description: "Build UI that matches the existing app",
     instructions:
       "Follow the app's existing components, styles, and patterns before inventing new ones. Handle loading, empty, and error states. Keep the UI accessible: labels, keyboard use, and focus. Describe how you checked the result in the browser.",
   },
   {
     name: "Backend and APIs",
-    description: "Change servers, data, and APIs safely.",
+    description: "Change servers, data, and APIs safely",
     instructions:
       "Validate inputs at the boundary, keep error messages useful, and never break an existing API without saying so. When you change stored data, think about existing rows. Cover new endpoints with tests.",
   },
   {
     name: "Writing",
-    description: "Clear docs, copy, and release notes.",
+    description: "Clear docs, copy, and release notes",
     instructions:
       "Write for the reader's task: lead with what they need to do, keep sentences short, and cut anything that does not help. Match the project's existing voice and terminology.",
   },
@@ -286,20 +286,20 @@ export const COMPANY_TEMPLATES: ReadonlyArray<CompanyTemplate> = [
   {
     id: "ceo-only",
     label: "Just a CEO",
-    description: "Start with a CEO and add employees yourself.",
+    description: "Start with a CEO and add employees yourself",
     team: [],
   },
   {
     id: "ceo-recommends",
     label: "CEO recommends the team",
-    description: "The CEO proposes who to hire for the mission; you approve each one.",
+    description: "The CEO proposes who to hire for the mission; you approve each one",
     team: [],
     recommendHires: true,
   },
   {
     id: "software",
     label: "Software team",
-    description: "CTO, two engineers, and QA, with starter skills.",
+    description: "CTO, two engineers, and QA, with starter skills",
     team: [
       { title: "CTO", reportsTo: "CEO" },
       { title: "Software engineer", reportsTo: "CTO" },

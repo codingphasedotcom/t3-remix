@@ -143,7 +143,7 @@ export function RoutinesView(props: {
             <OfficePill tone="teal">Routines: {snapshot.routines.length}</OfficePill>
           </div>
           {snapshot.routines.length === 0 ? (
-            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No routines yet.</div>
+            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No routines yet</div>
           ) : null}
           {snapshot.routines.map((routine) => {
             const assignee = agentById(snapshot.agents, routine.assigneeAgentId);
@@ -315,7 +315,7 @@ function RoutineForm(props: {
                 id="board-routine-description"
                 value={draft.description}
                 rows={4}
-                placeholder="What to check and what to report back."
+                placeholder="What to check and what to report back"
                 onChange={(event) => setDraft({ ...draft, description: event.target.value })}
               />
             </div>

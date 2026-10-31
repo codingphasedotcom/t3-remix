@@ -5,7 +5,7 @@ import { cn } from "../../lib/utils";
 import { TONES, type Tone } from "./boardTones";
 
 // T3 Office's look, after the board: soft grey panels hold borderless white cards, panels are
-// headed by uppercase pills, and colored icon tiles carry meaning at a glance. These live
+// headed by pills, and colored icon tiles carry meaning at a glance. These live
 // here, not in components/ui, so upstream T3 Code merges never touch them.
 
 /** A soft grey area that holds white cards, like a board column. */
@@ -14,11 +14,11 @@ export const OFFICE_PANEL =
 
 /** A borderless white card. Sits on a panel or directly on the page. */
 export const OFFICE_CARD =
-  "flex min-w-0 flex-col gap-3 rounded-2xl bg-card p-4 text-card-foreground shadow-xs dark:bg-foreground/6";
+  "flex min-w-0 flex-col gap-3 rounded-xl bg-card p-4 text-card-foreground shadow-xs dark:bg-foreground/6";
 
 /** A soft grey block inside a white surface, such as a group of fields in a dialog. */
 export const OFFICE_INSET =
-  "flex min-w-0 flex-col gap-4 rounded-2xl bg-foreground/4 p-4 dark:bg-foreground/4";
+  "flex min-w-0 flex-col gap-4 rounded-xl bg-foreground/4 p-4 dark:bg-foreground/4";
 
 type OfficePillVariant = "tint" | "solid" | "plain" | "live";
 
@@ -36,7 +36,7 @@ export function OfficePill(props: {
   return (
     <span
       className={cn(
-        "inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2.5 text-2xs font-semibold tracking-wide whitespace-nowrap uppercase tabular-nums",
+        "inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2.5 text-xs font-medium whitespace-nowrap tabular-nums",
         variant === "plain"
           ? "bg-card text-muted-foreground shadow-xs dark:bg-foreground/6"
           : variant === "solid"
@@ -170,5 +170,5 @@ export function OfficeTab(props: {
 
 /** Large page title used with OfficeHeading outside dialogs. */
 export function OfficeTitle(props: { readonly children: ReactNode }) {
-  return <h2 className="text-xl font-semibold tracking-tight text-foreground">{props.children}</h2>;
+  return <h2 className="text-xl font-medium text-foreground">{props.children}</h2>;
 }

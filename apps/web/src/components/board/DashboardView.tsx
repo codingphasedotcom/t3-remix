@@ -392,7 +392,7 @@ function StatTile(props: {
       {props.value === null ? (
         <Skeleton className="h-7 w-16" />
       ) : (
-        <span className="text-2xl font-semibold tabular-nums text-foreground">{props.value}</span>
+        <span className="text-2xl font-medium tabular-nums text-foreground">{props.value}</span>
       )}
       <span className="truncate text-xs text-muted-foreground">{props.detail}</span>
     </div>
@@ -417,7 +417,7 @@ function ActivityChart(props: {
   if (scale.max === 0) {
     return (
       <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-        No {label.toLowerCase()} in the last 14 days.
+        No {label.toLowerCase()} in the last 14 days
       </div>
     );
   }
@@ -428,7 +428,7 @@ function ActivityChart(props: {
           {scale.ticks.map((tick) => (
             <span
               key={tick}
-              className="absolute right-0 -translate-y-1/2 text-3xs tabular-nums text-muted-foreground"
+              className="absolute right-0 -translate-y-1/2 text-2xs tabular-nums text-muted-foreground"
               style={{ top: `${100 - (tick / scale.max) * 100}%` }}
             >
               {tick === 0 ? "0" : format(tick)}
@@ -467,7 +467,7 @@ function ActivityChart(props: {
           ))}
         </div>
       </div>
-      <div className="flex justify-between ps-12 text-3xs uppercase text-muted-foreground">
+      <div className="flex justify-between ps-12 text-2xs text-muted-foreground">
         <span>{first === undefined ? "" : formatDayShort(first.day)}</span>
         <span>{middle === undefined ? "" : formatDayShort(middle.day)}</span>
         <span>{last === undefined ? "" : formatDayShort(last.day)}</span>
@@ -591,7 +591,7 @@ function ModelsTable(props: {
 }) {
   const { models, totals } = props.dashboard;
   if (models.length === 0) {
-    return <p className="text-sm text-muted-foreground">No runs yet.</p>;
+    return <p className="text-sm text-muted-foreground">No runs yet</p>;
   }
   const allTokens = totalTokens(totals.tokens);
   return (

@@ -99,7 +99,7 @@ export function SkillsView(props: {
             <OfficePill tone="indigo">Skills: {snapshot.skills.length}</OfficePill>
           </div>
           {snapshot.skills.length === 0 ? (
-            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No skills yet.</div>
+            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No skills yet</div>
           ) : null}
           {snapshot.skills.map((skill) => {
             const holders = snapshot.agents.filter((agent) => agent.skillIds.includes(skill.id));

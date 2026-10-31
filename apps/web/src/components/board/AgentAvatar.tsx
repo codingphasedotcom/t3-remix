@@ -15,7 +15,7 @@ function faceClassName(input: {
   readonly muted: boolean;
 }) {
   return cn(
-    "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold",
+    "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-medium",
     input.size === "lg"
       ? "size-9 text-xs"
       : input.size === "xs"

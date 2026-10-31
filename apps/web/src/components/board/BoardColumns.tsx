@@ -267,7 +267,7 @@ function DraggableBoardCard(props: {
         droppable.setNodeRef(node);
       }}
       className={cn(
-        "rounded-2xl",
+        "rounded-xl",
         props.task.archivedAt !== null && "opacity-60",
         draggable.isDragging && "opacity-40",
         droppable.isOver && !draggable.isDragging && "ring-2 ring-primary/40",
@@ -313,7 +313,7 @@ function BoardCardFace(props: {
       className={cn(
         "cursor-pointer text-left",
         live
-          ? "flex flex-col gap-3 rounded-2xl bg-primary p-4 text-primary-foreground shadow-lg shadow-primary/25"
+          ? "flex flex-col gap-3 rounded-xl bg-primary p-4 text-primary-foreground shadow-lg shadow-primary/25"
           : cn(OFFICE_CARD, "hover:shadow-md"),
         props.lifted && "shadow-xl",
       )}

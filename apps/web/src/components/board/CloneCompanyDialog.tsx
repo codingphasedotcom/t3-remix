@@ -91,7 +91,7 @@ function CloneForm(props: {
           tone="teal"
           title={<DialogTitle>Clone {source.name}</DialogTitle>}
           description={
-            <DialogDescription>Start a new company with the same team.</DialogDescription>
+            <DialogDescription>Start a new company with the same team</DialogDescription>
           }
         />
       </DialogHeader>

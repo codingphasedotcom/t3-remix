@@ -265,7 +265,7 @@ function OrgCard(props: {
       <div className={cn(OFFICE_CARD, "gap-0 overflow-hidden p-0")}>
         <div className={cn("h-12", accent.tint)} />
         <div className="flex flex-col items-center gap-1 px-4 pt-3 pb-4 text-center">
-          <span className={cn("max-w-full truncate text-sm font-semibold", accent.ink)}>
+          <span className={cn("max-w-full truncate text-sm font-medium", accent.ink)}>
             {agent.name}
           </span>
           <span className="max-w-full truncate text-xs font-medium text-foreground">
