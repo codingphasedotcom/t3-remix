@@ -1531,8 +1531,17 @@ const make = Effect.gen(function* () {
     settings: BoardSettings,
   ) {
     if (!settings.useWorktrees) return false;
-    // A project that is not a git repository, or a base ref that no longer resolves, still
-    // gets its agent; it just shares the project checkout.
+    // A project that is not a git repository, has no commit yet, or whose base ref no longer
+    // resolves still gets its agent; it just shares the project checkout. checkWorktreeBase
+    // lets the first two through, since it only checks base refs in a repository with commits.
+    const project = yield* projects
+      .getById(task.projectId)
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    if (Option.isNone(project)) return false;
+    const hasCommit = yield* git
+      .hasCommit({ cwd: project.value.workspaceRoot, refName: "HEAD" })
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!hasCommit) return false;
     return yield* threadLaunch
       .checkWorktreeBase({
         projectId: task.projectId,

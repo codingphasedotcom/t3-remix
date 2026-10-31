@@ -70,6 +70,8 @@ const makeHarness = Effect.gen(function* () {
   const gitActions = yield* Ref.make<ReadonlyArray<GitRunStackedActionInput>>([]);
   const gitCommands = yield* Ref.make<ReadonlyArray<ReadonlyArray<string>>>([]);
   const gitScript = yield* Ref.make<(args: ReadonlyArray<string>) => GitReply>(() => ({}));
+  // False for a project folder that is not a git repository or has no commit yet.
+  const headCommit = yield* Ref.make(true);
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
   // Messages to existing threads, in order; taking one waits until it has been sent.
@@ -117,6 +119,7 @@ const makeHarness = Effect.gen(function* () {
     getShell: () => Effect.succeedNone,
   });
   const gitWorkflow = Layer.mock(GitWorkflowService.GitWorkflowService)({
+    hasCommit: () => Ref.get(headCommit),
     runStackedAction: (input) =>
       Ref.update(gitActions, (all) => [...all, input]).pipe(
         Effect.as(
@@ -155,7 +158,17 @@ const makeHarness = Effect.gen(function* () {
       ),
     ),
   );
-  return { launches, events, sent, gitActions, gitCommands, gitScript, dispatched, layer };
+  return {
+    launches,
+    events,
+    sent,
+    gitActions,
+    gitCommands,
+    gitScript,
+    headCommit,
+    dispatched,
+    layer,
+  };
 });
 
 /** Creates a company whose CEO, CTO, and engineer form a three-level chain. */
@@ -407,6 +420,17 @@ it.effect("tells every agent which folder, branch, and base it works in", () =>
         '- Shared: yes, with your parent task and its other subtasks: "Receipts" (Engineer, Ideas).',
       );
       assert.include(subtaskPrompt, "merged into main");
+
+      // A project with no commit to branch from, such as a plain folder, shares its checkout too.
+      yield* Ref.set(harness.headCommit, false);
+      const { task: unversioned } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Draft the plan", assigneeAgentId: ceoId },
+        },
+        user,
+      );
+      assert.deepEqual((yield* launchFor(unversioned?.id)).workspaceStrategy, { type: "root" });
 
       // Without worktrees, agents share the project's own checkout.
       yield* board.runCommand(
