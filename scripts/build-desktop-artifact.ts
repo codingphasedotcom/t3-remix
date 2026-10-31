@@ -67,8 +67,9 @@ const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const desktopIdentityEnv = loadRepoEnv();
 const DESKTOP_APP_ID = desktopIdentityEnv.T3CODE_DESKTOP_APP_ID?.trim() || "com.t3tools.t3code";
 const DESKTOP_PRODUCT_NAME = desktopIdentityEnv.T3CODE_DESKTOP_PRODUCT_NAME?.trim() || null;
-// A fork's own 1024px icon, relative to the repository root; Windows keeps T3 Code's .ico.
+// A fork's own 1024px icon and Windows .ico, relative to the repository root.
 const DESKTOP_ICON_PNG = desktopIdentityEnv.T3CODE_DESKTOP_ICON_PNG?.trim() || null;
+const DESKTOP_ICON_ICO = desktopIdentityEnv.T3CODE_DESKTOP_ICON_ICO?.trim() || null;
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -2744,7 +2745,7 @@ export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIcon
     return {
       macIconPng: DESKTOP_ICON_PNG,
       linuxIconPng: DESKTOP_ICON_PNG,
-      windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
+      windowsIconIco: DESKTOP_ICON_ICO ?? BRAND_ASSET_PATHS.productionWindowsIconIco,
     };
   }
   if (resolveDesktopUpdateChannel(version) === "nightly") {

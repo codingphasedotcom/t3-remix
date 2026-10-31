@@ -1,0 +1,112 @@
+name: T3 Remix desktop builds
+
+# Unsigned T3 Remix installers for every desktop platform, kept as run
+# artifacts. Windows cross-builds on Linux the way release-desktop.yml does.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remix-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  T3CODE_DESKTOP_APP_ID: com.codingphase.t3office
+  T3CODE_DESKTOP_PRODUCT_NAME: T3 Remix
+  T3CODE_DESKTOP_ICON_PNG: assets/fork/t3-remix-macos-1024.png
+  T3CODE_DESKTOP_ICON_ICO: assets/fork/t3-remix-windows.ico
+  T3CODE_DESKTOP_HOME_DIR: .t3-remix
+  T3CODE_DESKTOP_USER_DATA_DIR: t3remix
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-15
+            platform: mac
+            target: dmg
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+          - label: macOS x64
+            runner: macos-15
+            platform: mac
+            target: dmg
+            arch: x64
+            rust_target: x86_64-apple-darwin
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            target: AppImage
+            arch: x64
+            rust_target: x86_64-unknown-linux-gnu
+          - label: Windows x64
+            runner: ubuntu-24.04
+            platform: win
+            target: nsis
+            arch: x64
+            rust_target: x86_64-pc-windows-msvc
+    steps:
+      # actions/checkout's submodule cleanup fails on the vendored .repos gitlinks.
+      - name: Checkout
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c checkout.workers=0 checkout --detach FETCH_HEAD
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install Linux desktop build libraries
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev pkg-config imagemagick
+
+      - name: Install cargo-xwin
+        if: matrix.platform == 'win'
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+        with:
+          tool: cargo-xwin@0.23.1
+
+      # The desktop build runs plain `cargo build`, which cannot link MSVC on Linux.
+      - name: Build Windows resource monitor
+        if: matrix.platform == 'win'
+        run: cargo xwin build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ matrix.rust_target }}"
+
+      - name: Build desktop artifact
+        shell: bash
+        env:
+          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ matrix.platform == 'win' }}
+        run: vp run dist:desktop:artifact --platform "${{ matrix.platform }}" --target "${{ matrix.target }}" --arch "${{ matrix.arch }}" --verbose
+
+      - name: Upload installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: t3-remix-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.AppImage
+            release/*.exe
+          if-no-files-found: error
+          compression-level: 0
