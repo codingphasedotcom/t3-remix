@@ -39,7 +39,7 @@ import {
   departmentNamed,
   recommendHiresTask,
 } from "./board.logic";
-import { OfficeFieldGroup, OfficeHeading } from "./OfficeSurface";
+import { RemixFieldGroup, RemixHeading, RemixButton } from "./RemixSurface";
 
 export function CompanyDialog(props: {
   readonly open: boolean;
@@ -162,7 +162,7 @@ function CompanyForm(props: {
   return (
     <>
       <DialogHeader>
-        <OfficeHeading
+        <RemixHeading
           icon={<Building2Icon />}
           tone="teal"
           title={<DialogTitle>New company</DialogTitle>}
@@ -176,7 +176,7 @@ function CompanyForm(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <OfficeFieldGroup label="Company" tone="teal">
+          <RemixFieldGroup label="Company" tone="teal">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="board-company-name">Company name</Label>
@@ -207,16 +207,16 @@ function CompanyForm(props: {
                 onChange={(event) => setMission(event.target.value)}
               />
             </div>
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Workspace" tone="emerald">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Workspace" tone="green">
             <CompanyWorkspaceField
               environmentId={props.environmentId}
               value={workspace}
               onChange={setWorkspace}
               companyName={name}
             />
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Model" tone="sky">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Model" tone="blue">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="flex min-w-0 flex-col gap-2">
                 <Label>Model for the team</Label>
@@ -232,8 +232,8 @@ function CompanyForm(props: {
                 <PermissionsField value={runtimeMode} onChange={setRuntimeMode} />
               </div>
             </div>
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Team" tone="violet">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Team" tone="purple">
             <div className="flex flex-col gap-2">
               <Label>Starting team</Label>
               <div className="grid gap-2 sm:grid-cols-3">
@@ -254,17 +254,17 @@ function CompanyForm(props: {
                 ))}
               </div>
             </div>
-          </OfficeFieldGroup>
+          </RemixFieldGroup>
         </div>
       </DialogPanel>
       <DialogFooter variant="bare">
         {progress !== null ? (
           <span className="me-auto text-xs text-muted-foreground">{progress}</span>
         ) : null}
-        <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-        <Button size="sm" disabled={!canCreate} onClick={() => void create()}>
+        <DialogClose render={<RemixButton />}>Cancel</DialogClose>
+        <RemixButton variant="go" disabled={!canCreate} onClick={() => void create()}>
           Create company
-        </Button>
+        </RemixButton>
       </DialogFooter>
     </>
   );

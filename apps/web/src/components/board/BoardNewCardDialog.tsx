@@ -20,7 +20,7 @@ import type { RunBoardCommand } from "./BoardPage";
 import { mentionCandidates, type MentionCandidate } from "./boardMentions";
 import { FilePicker } from "./FilePicker";
 import { MentionField } from "./MentionField";
-import { OFFICE_CARD, OFFICE_INSET, OfficeHeading, OfficeIconTile } from "./OfficeSurface";
+import { REMIX_CARD, REMIX_INSET, RemixHeading, RemixIconTile, RemixButton } from "./RemixSurface";
 
 export function BoardNewCardDialog(props: {
   readonly open: boolean;
@@ -95,9 +95,9 @@ function NewCardForm(props: {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <OfficeHeading
+          <RemixHeading
             icon={<ClipboardPlusIcon />}
-            tone="indigo"
+            tone="purple"
             title={<DialogTitle>New task</DialogTitle>}
             description={
               <DialogDescription>
@@ -109,7 +109,7 @@ function NewCardForm(props: {
         </DialogHeader>
         <DialogPanel>
           <div className="flex flex-col gap-4">
-            <div className={OFFICE_INSET}>
+            <div className={REMIX_INSET}>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="board-card-title">Title</Label>
                 <MentionField
@@ -136,14 +136,14 @@ function NewCardForm(props: {
                 />
               </div>
             </div>
-            <div className={cn(OFFICE_INSET, "gap-2")}>
+            <div className={cn(REMIX_INSET, "gap-2")}>
               <Label>Files</Label>
               <FilePicker onAdd={(paths) => setFiles([...new Set([...files, ...paths])])}>
                 {files.map((file) => (
-                  <div key={file} className={cn(OFFICE_CARD, "flex-row items-center gap-3 p-3")}>
-                    <OfficeIconTile tone="gray">
+                  <div key={file} className={cn(REMIX_CARD, "flex-row items-center gap-3 p-3")}>
+                    <RemixIconTile tone="gray">
                       <FileIcon />
-                    </OfficeIconTile>
+                    </RemixIconTile>
                     <span className="min-w-0 flex-1 truncate font-mono text-xs">{file}</span>
                     <Button
                       size="icon-xs"
@@ -160,7 +160,7 @@ function NewCardForm(props: {
                 Agents use the files where they are on this computer; nothing is uploaded.
               </span>
             </div>
-            <div className={cn(OFFICE_INSET, "grid grid-cols-2 gap-3")}>
+            <div className={cn(REMIX_INSET, "grid grid-cols-2 gap-3")}>
               <div className="flex flex-col gap-2">
                 <Label>Assignee</Label>
                 <AgentSelect
@@ -196,24 +196,22 @@ function NewCardForm(props: {
           </div>
         </DialogPanel>
         <DialogFooter variant="bare">
-          <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-          <Button
-            variant="outline"
-            size="sm"
+          <DialogClose render={<RemixButton />}>Cancel</DialogClose>
+          <RemixButton
             disabled={saving || title.trim().length === 0}
             onClick={() => void create("backlog")}
           >
             Save as idea
-          </Button>
-          <Button
-            size="sm"
+          </RemixButton>
+          <RemixButton
+            variant="go"
             disabled={
               saving || title.trim().length === 0 || (assigneeAgentId === null && !assignedToUser)
             }
             onClick={() => void create("todo")}
           >
             {assignedToUser ? "Add to To do" : "Add and start"}
-          </Button>
+          </RemixButton>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

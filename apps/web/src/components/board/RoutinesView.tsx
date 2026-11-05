@@ -38,14 +38,15 @@ import {
   ROUTINE_REPEATS,
 } from "./board.logic";
 import {
-  OFFICE_CARD,
-  OFFICE_INSET,
-  OFFICE_PANEL,
-  OfficeHeading,
-  OfficeIconTile,
-  OfficePill,
-  OfficeTitle,
-} from "./OfficeSurface";
+  REMIX_CARD,
+  REMIX_INSET,
+  REMIX_SHELL,
+  RemixBubble,
+  RemixButton,
+  RemixHeading,
+  RemixIconTile,
+  RemixTitle,
+} from "./RemixSurface";
 
 interface RoutineDraft {
   readonly id: BoardRoutineId | null;
@@ -125,38 +126,54 @@ export function RoutinesView(props: {
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-8">
-        <OfficeHeading
-          icon={<RepeatIcon />}
-          tone="teal"
-          title={<OfficeTitle>Routines</OfficeTitle>}
-          description="A routine adds a task on a schedule, such as a weekly review. If the last one is still open, it waits for the next turn instead of adding another."
-          actions={
-            <Button size="sm" disabled={!props.canOperate} onClick={() => setDraft(newDraft())}>
-              <PlusIcon />
-              New routine
-            </Button>
-          }
-        />
-        <div className={OFFICE_PANEL}>
-          <div className="flex px-1 pt-1">
-            <OfficePill tone="teal">Routines: {snapshot.routines.length}</OfficePill>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-1 pb-14">
+        <div className={cn(REMIX_CARD, "p-3 shadow-(--remix-lift)")}>
+          <RemixHeading
+            icon={<RepeatIcon />}
+            tone="teal"
+            title={<RemixTitle>Routines</RemixTitle>}
+            description="A routine adds a task on a schedule, such as a weekly review. If the last one is still open, it waits for the next turn instead of adding another."
+            actions={
+              <RemixButton
+                variant="go"
+                disabled={!props.canOperate}
+                onClick={() => setDraft(newDraft())}
+              >
+                <PlusIcon />
+                New routine
+              </RemixButton>
+            }
+          />
+        </div>
+        <div data-remix-tone="teal" className={cn(REMIX_SHELL, "gap-2.5 p-2.5 pb-3")}>
+          <div className="flex pb-1">
+            <RemixBubble tone="teal" size="sm">
+              Routines: {snapshot.routines.length}
+            </RemixBubble>
           </div>
           {snapshot.routines.length === 0 ? (
-            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No routines yet</div>
+            <div className={cn(REMIX_CARD, "text-sm text-(--remix-text-muted)")}>
+              No routines yet
+            </div>
           ) : null}
           {snapshot.routines.map((routine) => {
             const assignee = agentById(snapshot.agents, routine.assigneeAgentId);
             // The task it last created dates the last run; a routine keeps no other history.
             const lastTask = snapshot.tasks.find((task) => task.id === routine.lastTaskId) ?? null;
             return (
-              <div key={routine.id} className={cn(OFFICE_CARD, "flex-row items-start")}>
-                <OfficeIconTile tone={routine.enabled ? "teal" : "gray"}>
+              <div
+                key={routine.id}
+                className={cn(
+                  REMIX_CARD,
+                  "flex-row items-start border-(--tone) shadow-(--tone-lift)",
+                )}
+              >
+                <RemixIconTile tone={routine.enabled ? "teal" : "gray"}>
                   <RepeatIcon />
-                </OfficeIconTile>
+                </RemixIconTile>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <span className="text-base leading-snug font-medium">{routine.title}</span>
-                  <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+                  <span className="text-sm leading-snug font-semibold">{routine.title}</span>
+                  <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-(--remix-text-muted)">
                     {repeatLabel(routine.everyDays)} ·{" "}
                     {routine.assignedToUser ? (
                       <YouName />
@@ -168,11 +185,11 @@ export function RoutinesView(props: {
                     · next {new Date(routine.nextRunAt).toLocaleString()}
                   </span>
                   {routine.description ? (
-                    <p className="line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
+                    <p className="line-clamp-2 whitespace-pre-wrap text-xs text-(--remix-text-muted)">
                       {routine.description}
                     </p>
                   ) : null}
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-(--remix-text-muted)">
                     {lastTask !== null ? (
                       <>
                         Last run {formatRelativeTimeLabel(lastTask.createdAt)}:{" "}
@@ -193,15 +210,14 @@ export function RoutinesView(props: {
                   </span>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    size="xs"
-                    variant="outline"
+                  <RemixButton
+                    size="sm"
                     disabled={!props.canOperate}
                     onClick={() => void props.runCommand({ type: "routine.run", id: routine.id })}
                   >
                     <PlayIcon />
                     Run now
-                  </Button>
+                  </RemixButton>
                   <Switch
                     aria-label={`${routine.enabled ? "Pause" : "Resume"} ${routine.title}`}
                     checked={routine.enabled}
@@ -284,7 +300,7 @@ function RoutineForm(props: {
   return (
     <>
       <DialogHeader>
-        <OfficeHeading
+        <RemixHeading
           icon={<RepeatIcon />}
           tone="teal"
           title={<DialogTitle>{draft.id === null ? "New routine" : "Edit routine"}</DialogTitle>}
@@ -298,7 +314,7 @@ function RoutineForm(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <div className={OFFICE_INSET}>
+          <div className={REMIX_INSET}>
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-routine-title">Task title</Label>
               <Input
@@ -320,7 +336,7 @@ function RoutineForm(props: {
               />
             </div>
           </div>
-          <div className={OFFICE_INSET}>
+          <div className={REMIX_INSET}>
             <div className="grid grid-cols-3 gap-3">
               <div className="flex min-w-0 flex-col gap-2">
                 <Label>Assignee</Label>
@@ -378,11 +394,9 @@ function RoutineForm(props: {
         </div>
       </DialogPanel>
       <DialogFooter variant="bare">
-        <Button size="sm" variant="outline" onClick={props.onClose}>
-          Cancel
-        </Button>
-        <Button
-          size="sm"
+        <RemixButton onClick={props.onClose}>Cancel</RemixButton>
+        <RemixButton
+          variant="go"
           disabled={saving || draft.title.trim().length === 0 || !validTime}
           onClick={async () => {
             setSaving(true);
@@ -391,7 +405,7 @@ function RoutineForm(props: {
           }}
         >
           {draft.id === null ? "Add routine" : "Save"}
-        </Button>
+        </RemixButton>
       </DialogFooter>
     </>
   );

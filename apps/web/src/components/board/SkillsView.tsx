@@ -23,14 +23,15 @@ import { AgentName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
 import { SKILL_PRESETS } from "./board.logic";
 import {
-  OFFICE_CARD,
-  OFFICE_INSET,
-  OFFICE_PANEL,
-  OfficeHeading,
-  OfficeIconTile,
-  OfficePill,
-  OfficeTitle,
-} from "./OfficeSurface";
+  REMIX_CARD,
+  REMIX_INSET,
+  REMIX_SHELL,
+  RemixBubble,
+  RemixButton,
+  RemixHeading,
+  RemixIconTile,
+  RemixTitle,
+} from "./RemixSurface";
 
 interface SkillDraft {
   readonly id: BoardSkillId | null;
@@ -69,51 +70,60 @@ export function SkillsView(props: {
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-8">
-        <OfficeHeading
-          icon={<SparklesIcon />}
-          tone="indigo"
-          title={<OfficeTitle>Skill library</OfficeTitle>}
-          description="A skill is a reusable playbook. Agents get the instructions of every skill you give them on each task they work."
-          actions={
-            <>
-              {missingPresets.length > 0 ? (
-                <Button
-                  size="sm"
-                  variant="outline"
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-1 pb-14">
+        <div className={cn(REMIX_CARD, "p-3 shadow-(--remix-lift)")}>
+          <RemixHeading
+            icon={<SparklesIcon />}
+            tone="purple"
+            title={<RemixTitle>Skill library</RemixTitle>}
+            description="A skill is a reusable playbook. Agents get the instructions of every skill you give them on each task they work."
+            actions={
+              <>
+                {missingPresets.length > 0 ? (
+                  <RemixButton disabled={!props.canOperate} onClick={() => void addPresets()}>
+                    Add starter skills
+                  </RemixButton>
+                ) : null}
+                <RemixButton
+                  variant="go"
                   disabled={!props.canOperate}
-                  onClick={() => void addPresets()}
+                  onClick={() => setDraft(EMPTY_SKILL)}
                 >
-                  Add starter skills
-                </Button>
-              ) : null}
-              <Button size="sm" disabled={!props.canOperate} onClick={() => setDraft(EMPTY_SKILL)}>
-                <PlusIcon />
-                New skill
-              </Button>
-            </>
-          }
-        />
-        <div className={OFFICE_PANEL}>
-          <div className="flex px-1 pt-1">
-            <OfficePill tone="indigo">Skills: {snapshot.skills.length}</OfficePill>
+                  <PlusIcon />
+                  New skill
+                </RemixButton>
+              </>
+            }
+          />
+        </div>
+        <div data-remix-tone="purple" className={cn(REMIX_SHELL, "gap-2.5 p-2.5 pb-3")}>
+          <div className="flex pb-1">
+            <RemixBubble tone="purple" size="sm">
+              Skills: {snapshot.skills.length}
+            </RemixBubble>
           </div>
           {snapshot.skills.length === 0 ? (
-            <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>No skills yet</div>
+            <div className={cn(REMIX_CARD, "text-sm text-(--remix-text-muted)")}>No skills yet</div>
           ) : null}
           {snapshot.skills.map((skill) => {
             const holders = snapshot.agents.filter((agent) => agent.skillIds.includes(skill.id));
             return (
-              <div key={skill.id} className={cn(OFFICE_CARD, "flex-row items-start")}>
-                <OfficeIconTile tone="indigo">
+              <div
+                key={skill.id}
+                className={cn(
+                  REMIX_CARD,
+                  "flex-row items-start border-(--tone) shadow-(--tone-lift)",
+                )}
+              >
+                <RemixIconTile tone="purple">
                   <SparklesIcon />
-                </OfficeIconTile>
+                </RemixIconTile>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <span className="text-base leading-snug font-medium">{skill.name}</span>
+                  <span className="text-sm leading-snug font-semibold">{skill.name}</span>
                   {skill.description ? (
-                    <span className="text-xs text-muted-foreground">{skill.description}</span>
+                    <span className="text-xs text-(--remix-text-muted)">{skill.description}</span>
                   ) : null}
-                  <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                  <p className="line-clamp-3 whitespace-pre-wrap text-xs text-(--remix-text-muted)">
                     {skill.instructions}
                   </p>
                   {holders.length > 0 ? (
@@ -201,9 +211,9 @@ function SkillForm(props: {
   return (
     <>
       <DialogHeader>
-        <OfficeHeading
+        <RemixHeading
           icon={<SparklesIcon />}
-          tone="indigo"
+          tone="purple"
           title={<DialogTitle>{draft.id === null ? "New skill" : "Edit skill"}</DialogTitle>}
           description={
             <DialogDescription>
@@ -215,7 +225,7 @@ function SkillForm(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <div className={OFFICE_INSET}>
+          <div className={REMIX_INSET}>
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-skill-name">Name</Label>
               <Input
@@ -236,7 +246,7 @@ function SkillForm(props: {
               />
             </div>
           </div>
-          <div className={OFFICE_INSET}>
+          <div className={REMIX_INSET}>
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-skill-instructions">Instructions</Label>
               <Textarea
@@ -250,11 +260,9 @@ function SkillForm(props: {
         </div>
       </DialogPanel>
       <DialogFooter variant="bare">
-        <Button size="sm" variant="outline" onClick={props.onCancel}>
-          Cancel
-        </Button>
-        <Button
-          size="sm"
+        <RemixButton onClick={props.onCancel}>Cancel</RemixButton>
+        <RemixButton
+          variant="go"
           disabled={saving || draft.name.trim().length === 0}
           onClick={async () => {
             setSaving(true);
@@ -263,7 +271,7 @@ function SkillForm(props: {
           }}
         >
           Save skill
-        </Button>
+        </RemixButton>
       </DialogFooter>
     </>
   );

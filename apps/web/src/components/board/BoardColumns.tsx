@@ -30,7 +30,6 @@ import { useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentAvatar, AgentName, YouName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
@@ -43,8 +42,26 @@ import {
   subtaskProgress,
   type BoardPlacement,
 } from "./board.logic";
-import { COLUMN_TONES } from "./boardTones";
-import { OFFICE_CARD, OFFICE_PANEL, OfficePill, statusPillVariant } from "./OfficeSurface";
+import { ColumnArt, RocketArt } from "./RemixArt";
+import {
+  REMIX_CARD,
+  REMIX_COLUMN_TONES,
+  REMIX_SHELL,
+  REMIX_WELL,
+  RemixBubble,
+  RemixButton,
+  RemixIconTile,
+  type RemixTone,
+} from "./RemixSurface";
+
+const EMPTY_TITLES: Record<BoardTaskStatus, string> = {
+  backlog: "No ideas yet",
+  todo: "Nothing to do",
+  in_progress: "No tasks in progress",
+  review: "Nothing to review",
+  blocked: "Nothing blocked",
+  done: "Nothing done yet",
+};
 
 const RUN_LABELS: Record<BoardRunKind, string> = {
   work: "Working now",
@@ -145,7 +162,7 @@ export function BoardColumns(props: {
       onDragCancel={() => setDraggingId(null)}
       onDragEnd={(event) => void onDragEnd(event)}
     >
-      <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-(--workspace-gutter-start) pb-4">
+      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-(--workspace-gutter-start) pt-1 pb-8">
         {BOARD_COLUMNS.map((column) => (
           <BoardColumnView
             key={column.status}
@@ -157,28 +174,27 @@ export function BoardColumns(props: {
             canDrag={props.canOperate}
             onOpenCard={props.onOpenCard}
             actions={
-              column.status === "done" ? (
+              column.status === "done" && (archivable.length > 0 || archivedCount > 0) ? (
                 <>
                   {archivable.length > 0 ? (
-                    <Button
-                      size="xs"
-                      variant="ghost"
+                    <RemixButton
+                      size="sm"
                       disabled={!props.canOperate}
                       onClick={() => void archiveAll()}
                     >
                       <ArchiveIcon />
                       Archive all
-                    </Button>
+                    </RemixButton>
                   ) : null}
                   {archivedCount > 0 ? (
-                    <Button
-                      size="xs"
-                      variant="ghost"
+                    <RemixButton
+                      size="sm"
+                      variant={showArchived ? "active" : "paper"}
                       aria-pressed={showArchived}
                       onClick={() => setShowArchived((current) => !current)}
                     >
                       {showArchived ? "Hide archived" : `${archivedCount} archived`}
-                    </Button>
+                    </RemixButton>
                   ) : null}
                 </>
               ) : null
@@ -209,33 +225,52 @@ function BoardColumnView(props: {
     id: `column:${props.status}`,
     data: { status: props.status },
   });
+  const tone = REMIX_COLUMN_TONES[props.status];
   return (
     <section
       ref={setNodeRef}
       aria-label={props.label}
-      className={cn(OFFICE_PANEL, "w-80 shrink-0 gap-0 p-0", isOver && "ring-2 ring-primary/30")}
+      data-remix-tone={tone}
+      className={cn(REMIX_SHELL, "w-72 shrink-0", isOver && "ring-3 ring-white/80")}
     >
-      <header className="flex items-center gap-1 px-4 pt-4 pb-3">
+      <header className="flex items-center gap-2 px-2.5 pt-2.5 pb-3">
         <Tooltip>
           <TooltipTrigger render={<span className="me-auto flex" />}>
-            <OfficePill tone={COLUMN_TONES[props.status]} variant={statusPillVariant(props.status)}>
+            <RemixBubble tone={tone}>
               {props.label}: {props.tasks.filter((task) => task.archivedAt === null).length}
-            </OfficePill>
+            </RemixBubble>
           </TooltipTrigger>
           <TooltipPopup side="top">{props.hint}</TooltipPopup>
         </Tooltip>
-        {props.actions}
+        <ColumnArt status={props.status} className="size-7" />
       </header>
-      <div className="flex min-h-24 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
-        {props.tasks.map((task) => (
-          <DraggableBoardCard
-            key={task.id}
-            task={task}
-            snapshot={props.snapshot}
-            canDrag={props.canDrag}
-            onOpen={() => props.onOpenCard(task.id)}
-          />
-        ))}
+      {props.actions ? (
+        <div className="flex justify-end gap-1.5 px-2.5 pb-2.5">{props.actions}</div>
+      ) : null}
+      <div className={cn(REMIX_WELL, "mx-1.5 mb-1.5 min-h-24 flex-1 gap-2 overflow-y-auto p-1.5")}>
+        {props.tasks.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-4 py-4 text-center">
+            {props.status === "in_progress" ? (
+              <RocketArt className="mb-2 w-32" />
+            ) : (
+              <ColumnArt status={props.status} className="mb-2 size-9 opacity-70" />
+            )}
+            <span className="text-sm font-semibold">{EMPTY_TITLES[props.status]}</span>
+            <span className="text-xs text-(--remix-text-muted)">
+              {props.status === "in_progress" ? "Drag a task here to get started." : props.hint}
+            </span>
+          </div>
+        ) : (
+          props.tasks.map((task) => (
+            <DraggableBoardCard
+              key={task.id}
+              task={task}
+              snapshot={props.snapshot}
+              canDrag={props.canDrag}
+              onOpen={() => props.onOpenCard(task.id)}
+            />
+          ))
+        )}
       </div>
     </section>
   );
@@ -267,10 +302,10 @@ function DraggableBoardCard(props: {
         droppable.setNodeRef(node);
       }}
       className={cn(
-        "rounded-xl",
+        "rounded-2xl",
         props.task.archivedAt !== null && "opacity-60",
         draggable.isDragging && "opacity-40",
-        droppable.isOver && !draggable.isDragging && "ring-2 ring-primary/40",
+        droppable.isOver && !draggable.isDragging && "ring-2 ring-(--remix-ink)/30",
       )}
       {...draggable.attributes}
       {...draggable.listeners}
@@ -302,6 +337,7 @@ function BoardCardFace(props: {
     { agent: assignee, title: "Assignee" },
     { agent: reviewer, title: "Reviewer" },
   ].filter((entry) => entry.agent !== null && entry.agent.id !== named?.id);
+  const muted = live ? "text-(--tone-on)/80" : "text-(--remix-text-muted)";
   return (
     <div
       role="button"
@@ -310,22 +346,23 @@ function BoardCardFace(props: {
       onKeyDown={(event) => {
         if (event.key === "Enter") props.onOpen?.();
       }}
+      data-remix-tone={live ? "blue" : REMIX_COLUMN_TONES[task.status]}
       className={cn(
-        "cursor-pointer text-left",
+        REMIX_CARD,
+        "cursor-pointer gap-1.5 p-2.5 text-left outline-none transition-transform duration-150 focus-visible:ring-2 focus-visible:ring-(--remix-ink)/40 focus-visible:ring-inset",
         live
-          ? "flex flex-col gap-3 rounded-xl bg-primary p-4 text-primary-foreground shadow-lg shadow-primary/25"
-          : cn(OFFICE_CARD, "hover:shadow-md"),
-        props.lifted && "shadow-xl",
+          ? "bg-(--tone) text-(--tone-on) shadow-(--remix-lift)"
+          : "border-(--tone) shadow-(--tone-lift) hover:-translate-y-0.5",
+        props.lifted && "rotate-1 shadow-(--remix-lift-lg)",
       )}
     >
-      <div
-        className={cn(
-          "flex items-center justify-between gap-3 text-xs",
-          live ? "text-primary-foreground/75" : "text-muted-foreground",
-        )}
-      >
+      <div className={cn("flex items-center justify-between gap-3 text-xs font-medium", muted)}>
         {named !== null ? (
-          <AgentName agent={named}>
+          <AgentName
+            agent={named}
+            size="xs"
+            className={cn("text-xs", live ? "text-(--tone-on)" : "text-(--remix-text)")}
+          >
             {task.activeRunKind === null
               ? named.name
               : `${named.name} · ${RUN_LABELS[task.activeRunKind]}`}
@@ -339,28 +376,21 @@ function BoardCardFace(props: {
         )}
         <span className="flex shrink-0 items-center gap-1 tabular-nums">
           {formatRelativeTimeLabel(task.updatedAt)}
-          <ClockIcon className="size-3.5" />
+          <ClockIcon className="size-3" />
         </span>
       </div>
       {parent !== null ? (
-        <span
-          className={cn(
-            "-mb-2 truncate text-xs",
-            live ? "text-primary-foreground/75" : "text-muted-foreground",
-          )}
-        >
-          ↳ {parent.title}
-        </span>
+        <span className={cn("-mb-0.5 truncate text-xs", muted)}>↳ {parent.title}</span>
       ) : null}
-      <span className="line-clamp-3 text-base leading-snug font-medium">{task.title}</span>
-      <div className="flex items-center gap-3">
+      <span className="line-clamp-3 text-sm leading-snug font-semibold">{task.title}</span>
+      <div className="flex items-center gap-2.5">
         {progress.total > 0 ? (
           <CardStat
             icon={<ListTreeIcon />}
             value={`${progress.done}/${progress.total}`}
             label="subtasks done"
             live={live}
-            tileClassName={progress.done === progress.total ? "bg-success" : "bg-warning"}
+            tone={progress.done === progress.total ? "green" : "orange"}
           />
         ) : null}
         {task.commentCount > 0 ? (
@@ -369,7 +399,7 @@ function BoardCardFace(props: {
             value={String(task.commentCount)}
             label={task.commentCount === 1 ? "comment" : "comments"}
             live={live}
-            tileClassName="bg-info"
+            tone="blue"
           />
         ) : null}
         <span className="ms-auto flex items-center -space-x-1.5">
@@ -380,6 +410,7 @@ function BoardCardFace(props: {
                 agent={entry.agent}
                 name={entry.agent.name}
                 title={entry.title}
+                size="xs"
               />
             ),
           )}
@@ -387,9 +418,9 @@ function BoardCardFace(props: {
         {live ? (
           <span
             aria-hidden
-            className="flex size-8 items-center justify-center rounded-xl bg-primary-foreground/20"
+            className="flex size-6 items-center justify-center rounded-lg border-(length:--remix-line-thin) border-(--remix-ink) bg-white/25"
           >
-            <ChevronRightIcon className="size-4" />
+            <ChevronRightIcon className="size-3.5" />
           </span>
         ) : null}
       </div>
@@ -402,24 +433,20 @@ function CardStat(props: {
   readonly value: string;
   readonly label: string;
   readonly live: boolean;
-  readonly tileClassName: string;
+  readonly tone: RemixTone;
 }) {
   return (
-    <span
-      className={cn(
-        "flex items-center gap-1.5 text-xs font-medium tabular-nums",
-        props.live ? "text-primary-foreground/85" : "text-muted-foreground",
+    <span className="flex items-center gap-1 text-xs font-semibold tabular-nums">
+      {props.live ? (
+        <span
+          aria-hidden
+          className="flex size-5 items-center justify-center rounded-md bg-white/25 [&_svg]:size-3"
+        >
+          {props.icon}
+        </span>
+      ) : (
+        <RemixIconTile tone={props.tone}>{props.icon}</RemixIconTile>
       )}
-    >
-      <span
-        aria-hidden
-        className={cn(
-          "flex size-6 items-center justify-center rounded-md text-white [&_svg]:size-3.5",
-          props.live ? "bg-primary-foreground/20" : props.tileClassName,
-        )}
-      >
-        {props.icon}
-      </span>
       {props.value}
       <span className="sr-only">{props.label}</span>
     </span>

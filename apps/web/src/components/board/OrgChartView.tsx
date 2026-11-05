@@ -18,25 +18,27 @@ import { AgentName } from "./AgentAvatar";
 import { draftFromAgent, newEmployeeDraft, type AgentDraft } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
 import { agentById, departmentLabel, limitProgress, recommendHiresTask } from "./board.logic";
-import { TONES, type Tone } from "./boardTones";
 import { faceFor, unusedFaceKey } from "./faces";
 import {
-  OFFICE_CARD,
-  OFFICE_PANEL,
-  OfficeHeading,
-  OfficeIconTile,
-  OfficePill,
-  OfficeTitle,
-} from "./OfficeSurface";
+  REMIX_CARD,
+  REMIX_SHELL,
+  RemixBubble,
+  RemixButton,
+  RemixChip,
+  RemixHeading,
+  RemixIconTile,
+  RemixTitle,
+  type RemixTone,
+} from "./RemixSurface";
 
 /** Each level of the chart gets its own accent, like a printed org chart. */
-function accentFor(depth: number, siblingIndex: number): Tone {
-  if (depth === 0) return "violet";
-  if (depth === 1) return "amber";
-  return siblingIndex % 2 === 0 ? "sky" : "emerald";
+function accentFor(depth: number, siblingIndex: number): RemixTone {
+  if (depth === 0) return "purple";
+  if (depth === 1) return "orange";
+  return siblingIndex % 2 === 0 ? "blue" : "green";
 }
 
-const CONNECTOR = "bg-foreground/15";
+const CONNECTOR = "bg-(--remix-ink)/40";
 
 interface OrgChartActions {
   readonly snapshot: BoardSnapshot;
@@ -98,19 +100,17 @@ export function OrgChartView(props: {
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="flex min-w-max flex-col gap-6 px-6 pb-10">
-        <div className="mx-auto w-full max-w-3xl">
-          <OfficeHeading
+      <div className="flex min-w-max flex-col gap-4 px-6 pt-1 pb-14">
+        <div className={cn(REMIX_CARD, "mx-auto w-full max-w-3xl p-3 shadow-(--remix-lift)")}>
+          <RemixHeading
             icon={<NetworkIcon />}
-            tone="violet"
-            title={<OfficeTitle>Organizational chart</OfficeTitle>}
+            tone="purple"
+            title={<RemixTitle>Organizational chart</RemixTitle>}
             description={`${snapshot.agents.length} ${snapshot.agents.length === 1 ? "person" : "people"} at ${company.name}`}
             actions={
               <>
                 {ceo !== null ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
+                  <RemixButton
                     disabled={!props.canOperate}
                     onClick={() =>
                       void props.runCommand({
@@ -121,26 +121,30 @@ export function OrgChartView(props: {
                   >
                     <UsersIcon />
                     Ask {ceo.name} who to hire
-                  </Button>
+                  </RemixButton>
                 ) : null}
-                <Button
-                  size="sm"
-                  variant="outline"
+                <RemixButton
+                  variant="go"
                   disabled={!props.canOperate}
                   onClick={() => newReport(ceo)}
                 >
                   <UserPlusIcon />
                   Add employee
-                </Button>
+                </RemixButton>
               </>
             }
           />
         </div>
 
         {pendingHires.length > 0 ? (
-          <section className={cn(OFFICE_PANEL, "mx-auto w-full max-w-3xl")}>
-            <h2 className="flex px-1 pt-1">
-              <OfficePill tone="amber">Hire requests: {pendingHires.length}</OfficePill>
+          <section
+            data-remix-tone="yellow"
+            className={cn(REMIX_SHELL, "mx-auto w-full max-w-3xl gap-3 p-2.5 pb-3")}
+          >
+            <h2 className="flex pb-1">
+              <RemixBubble tone="yellow" size="sm">
+                Hire requests: {pendingHires.length}
+              </RemixBubble>
             </h2>
             {hireRoots.map((hire) => (
               <HireBranch
@@ -156,7 +160,11 @@ export function OrgChartView(props: {
         ) : null}
 
         <div
-          className={cn(OFFICE_PANEL, "flex-row items-start justify-center gap-8 px-8 pt-8 pb-10")}
+          data-remix-tone="blue"
+          className={cn(
+            REMIX_SHELL,
+            "flex-row items-start justify-center gap-8 bg-(--tone-wash) px-8 pt-8 pb-10",
+          )}
         >
           {roots.map((root) => (
             <OrgBranch key={root.id} agent={root} depth={0} siblingIndex={0} actions={actions} />
@@ -186,17 +194,17 @@ function OrgBranch(props: {
       />
       {reports.length > 0 ? (
         <>
-          <div className={cn("h-6 w-px", CONNECTOR)} />
+          <div className={cn("h-6 w-0.5", CONNECTOR)} />
           <div className="flex items-start">
             {reports.map((report, index) => (
               <div key={report.id} className="flex flex-col items-center">
                 {/* Each child draws its half of the bar that joins the siblings. */}
-                <div className="flex h-px w-full">
-                  <div className={cn("h-px flex-1", index > 0 && CONNECTOR)} />
-                  <div className={cn("h-px flex-1", index < reports.length - 1 && CONNECTOR)} />
+                <div className="flex h-0.5 w-full">
+                  <div className={cn("h-0.5 flex-1", index > 0 && CONNECTOR)} />
+                  <div className={cn("h-0.5 flex-1", index < reports.length - 1 && CONNECTOR)} />
                 </div>
                 <div className="flex flex-col items-center px-4">
-                  <div className={cn("h-6 w-px", CONNECTOR)} />
+                  <div className={cn("h-6 w-0.5", CONNECTOR)} />
                   <OrgBranch
                     agent={report}
                     depth={props.depth + 1}
@@ -215,11 +223,10 @@ function OrgBranch(props: {
 
 function OrgCard(props: {
   readonly agent: BoardAgent;
-  readonly accent: Tone;
+  readonly accent: RemixTone;
   readonly actions: OrgChartActions;
 }) {
   const { agent, actions } = props;
-  const accent = TONES[props.accent];
   const { snapshot } = actions;
   const isCeo = snapshot.company?.ceoAgentId === agent.id;
   const department = departmentLabel(snapshot.company?.departments ?? [], agent.departmentId);
@@ -243,15 +250,14 @@ function OrgCard(props: {
         : task.assigneeAgentId === agent.id),
   );
   return (
-    <div className="relative w-56 pt-10">
+    <div data-remix-tone={props.accent} className="relative w-56 pt-10">
       <div
         className={cn(
-          "absolute top-0 left-1/2 z-10 -translate-x-1/2 rounded-full p-1 shadow-sm",
-          accent.fill,
+          "absolute top-0 left-1/2 z-10 -translate-x-1/2 rounded-full border-2 border-(--remix-ink) bg-(--tone) p-1 shadow-(--remix-lift)",
           agent.paused && "opacity-60 grayscale",
         )}
       >
-        <div className="size-18 overflow-hidden rounded-full bg-background">
+        <div className="size-18 overflow-hidden rounded-full border-2 border-(--remix-ink) bg-(--remix-surface)">
           {face !== null ? (
             <img
               src={face.url}
@@ -262,42 +268,48 @@ function OrgCard(props: {
           ) : null}
         </div>
       </div>
-      <div className={cn(OFFICE_CARD, "gap-0 overflow-hidden p-0")}>
-        <div className={cn("h-12", accent.tint)} />
+      <div className={cn(REMIX_CARD, "gap-0 overflow-hidden p-0 shadow-(--remix-lift)")}>
+        <div className="h-12 border-b-2 border-(--remix-ink) bg-(--tone-shell)" />
         <div className="flex flex-col items-center gap-1 px-4 pt-3 pb-4 text-center">
-          <span className={cn("max-w-full truncate text-sm font-medium", accent.ink)}>
-            {agent.name}
-          </span>
-          <span className="max-w-full truncate text-xs font-medium text-foreground">
+          <span className="max-w-full truncate text-sm font-semibold">{agent.name}</span>
+          <span className="max-w-full truncate text-xs font-medium">
             {isCeo ? "Chief Executive Officer" : agent.title || "Employee"}
           </span>
-          <span className="max-w-full truncate text-2xs text-muted-foreground">
+          <span className="max-w-full truncate text-2xs text-(--remix-text-muted)">
             {agent.modelSelection.model}
           </span>
           {skills.length > 0 ? (
-            <span className="line-clamp-2 text-2xs leading-snug text-muted-foreground">
+            <span className="line-clamp-2 text-2xs leading-snug text-(--remix-text-muted)">
               {skills.join(" · ")}
             </span>
           ) : null}
           <div className="flex flex-wrap justify-center gap-1 pt-2">
-            {department !== null ? <OfficePill tone="gray">{department}</OfficePill> : null}
+            {department !== null ? (
+              <RemixChip tone="gray" variant="wash">
+                {department}
+              </RemixChip>
+            ) : null}
             {agent.paused ? (
-              <OfficePill tone="amber">Paused</OfficePill>
+              <RemixChip tone="yellow" variant="wash">
+                Paused
+              </RemixChip>
             ) : working ? (
-              <OfficePill tone="sky" variant="solid">
-                Working
-              </OfficePill>
+              <RemixChip tone="blue">Working</RemixChip>
             ) : null}
             {limit?.reached ? (
-              <OfficePill tone="red">Limit reached</OfficePill>
+              <RemixChip tone="red" variant="wash">
+                Limit reached
+              </RemixChip>
             ) : limit?.nearing ? (
-              <OfficePill tone="amber">{Math.round(limit.share * 100)}% of limit</OfficePill>
+              <RemixChip tone="yellow" variant="wash">
+                {Math.round(limit.share * 100)}% of limit
+              </RemixChip>
             ) : null}
           </div>
           {openCards > 0 || lessons > 0 ? (
             <div className="flex items-center justify-center gap-3 pt-2">
               {openCards > 0 ? (
-                <OrgStat tone="indigo" icon={<ListTodoIcon />}>
+                <OrgStat tone="purple" icon={<ListTodoIcon />}>
                   {openCards} open
                 </OrgStat>
               ) : null}
@@ -346,13 +358,13 @@ function OrgCard(props: {
 }
 
 function OrgStat(props: {
-  readonly tone: Tone;
+  readonly tone: RemixTone;
   readonly icon: ReactNode;
   readonly children: ReactNode;
 }) {
   return (
-    <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground tabular-nums">
-      <OfficeIconTile tone={props.tone}>{props.icon}</OfficeIconTile>
+    <span className="flex items-center gap-1.5 text-xs font-medium text-(--remix-text-muted) tabular-nums">
+      <RemixIconTile tone={props.tone}>{props.icon}</RemixIconTile>
       {props.children}
     </span>
   );
@@ -397,14 +409,14 @@ function HireRequest(props: HireRequestProps) {
   const decide = (approve: boolean) =>
     void props.runCommand({ type: "hire.decide", hire: { id: hire.id, approve } });
   return (
-    <div className={OFFICE_CARD}>
+    <div className={REMIX_CARD}>
       <div className="flex items-center gap-3">
-        <OfficeIconTile tone="amber">
+        <RemixIconTile tone="yellow">
           <UserPlusIcon />
-        </OfficeIconTile>
+        </RemixIconTile>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-base leading-snug font-medium">{hire.name}</span>
-          <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-muted-foreground">
+          <span className="text-sm leading-snug font-semibold">{hire.name}</span>
+          <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-(--remix-text-muted)">
             {hire.title}
             {department !== null ? ` · ${department}` : ""}
             {manager !== null ? (
@@ -426,35 +438,36 @@ function HireRequest(props: HireRequestProps) {
       </div>
       {hire.reason ? <p className="text-sm">{hire.reason}</p> : null}
       {hire.instructions.trim() ? (
-        <p className="line-clamp-4 text-xs whitespace-pre-wrap text-muted-foreground">
+        <p className="line-clamp-4 text-xs whitespace-pre-wrap text-(--remix-text-muted)">
           {hire.instructions.trim()}
         </p>
       ) : null}
       {skills.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {skills.map((skill) => (
-            <OfficePill key={skill} tone="gray">
+            <RemixChip key={skill} tone="gray" variant="wash">
               {skill}
-            </OfficePill>
+            </RemixChip>
           ))}
         </div>
       ) : null}
       <div className="flex items-center justify-end gap-2">
         {pendingManager !== undefined ? (
-          <span className="me-auto text-xs text-muted-foreground">
+          <span className="me-auto text-xs text-(--remix-text-muted)">
             Hire {pendingManager.name} first
           </span>
         ) : null}
-        <Button size="sm" variant="ghost" disabled={props.disabled} onClick={() => decide(false)}>
+        <RemixButton size="sm" disabled={props.disabled} onClick={() => decide(false)}>
           Decline
-        </Button>
-        <Button
+        </RemixButton>
+        <RemixButton
           size="sm"
+          variant="go"
           disabled={props.disabled || pendingManager !== undefined}
           onClick={() => decide(true)}
         >
           Hire {hire.name}
-        </Button>
+        </RemixButton>
       </div>
     </div>
   );

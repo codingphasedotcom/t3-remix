@@ -44,7 +44,7 @@ import { AgentName } from "./AgentAvatar";
 import type { RunBoardCommand } from "./BoardPage";
 import { EMPLOYEE_PRESETS, departmentNamed } from "./board.logic";
 import { FACES, faceFor } from "./faces";
-import { OFFICE_CARD, OfficeFieldGroup, OfficeHeading } from "./OfficeSurface";
+import { REMIX_CARD, RemixFieldGroup, RemixHeading, RemixButton } from "./RemixSurface";
 import { TokenLimitField } from "./TokenLimitField";
 
 export interface AgentDraft {
@@ -284,9 +284,9 @@ function AgentForm(props: {
   return (
     <>
       <DialogHeader>
-        <OfficeHeading
+        <RemixHeading
           icon={isCeo ? <CrownIcon /> : <UserRoundIcon />}
-          tone="indigo"
+          tone="purple"
           title={
             <DialogTitle>
               {isCeo ? "Edit CEO" : draft.id === null ? "Add employee" : `Edit ${props.draft.name}`}
@@ -303,7 +303,7 @@ function AgentForm(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <OfficeFieldGroup label="Identity" tone="indigo">
+          <RemixFieldGroup label="Identity" tone="purple">
             {draft.id === null ? (
               <div className="flex flex-wrap gap-2">
                 {EMPLOYEE_PRESETS.map((preset) => (
@@ -401,8 +401,8 @@ function AgentForm(props: {
                 )}
               </div>
             </FacePicker>
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Model" tone="sky">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Model" tone="blue">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="flex min-w-0 flex-col gap-2">
                 <Label>Model</Label>
@@ -428,8 +428,8 @@ function AgentForm(props: {
                 approve each prompt.
               </span>
             ) : null}
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Skills" tone="violet">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Skills" tone="purple">
             {snapshot.skills.length === 0 ? (
               <span className="text-sm text-muted-foreground">
                 The company has no skills yet. Add them on the Skills tab.
@@ -442,7 +442,7 @@ function AgentForm(props: {
                     <label
                       key={skill.id}
                       className={cn(
-                        OFFICE_CARD,
+                        REMIX_CARD,
                         "cursor-pointer flex-row items-start gap-3 p-3 hover:shadow-md",
                       )}
                     >
@@ -472,8 +472,8 @@ function AgentForm(props: {
                 })}
               </div>
             )}
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Limits" tone="amber">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Limits" tone="yellow">
             <div className="grid items-start gap-4 sm:grid-cols-2">
               <TokenLimitField
                 id="board-agent-token-limit"
@@ -501,8 +501,8 @@ function AgentForm(props: {
                 />
               </div>
             </div>
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Instructions" tone="gray">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Instructions" tone="gray">
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-agent-instructions">Standing instructions</Label>
               <Textarea
@@ -526,16 +526,14 @@ function AgentForm(props: {
                 onChange={(event) => setDraft({ ...draft, memory: event.target.value })}
               />
             </div>
-          </OfficeFieldGroup>
+          </RemixFieldGroup>
         </div>
       </DialogPanel>
       <DialogFooter variant="bare">
-        <Button size="sm" variant="outline" onClick={props.onClose}>
-          Cancel
-        </Button>
-        <Button size="sm" disabled={!canSave} onClick={() => void save()}>
+        <RemixButton onClick={props.onClose}>Cancel</RemixButton>
+        <RemixButton variant="go" disabled={!canSave} onClick={() => void save()}>
           {draft.id === null ? "Add to company" : "Save"}
-        </Button>
+        </RemixButton>
       </DialogFooter>
     </>
   );
@@ -585,7 +583,7 @@ function FacePicker(props: {
         <div
           role="radiogroup"
           aria-label={`Face for ${props.name || "this agent"}`}
-          className={cn(OFFICE_CARD, "grid grid-cols-8 gap-2 p-3")}
+          className={cn(REMIX_CARD, "grid grid-cols-8 gap-2 p-3")}
         >
           {FACES.map((face) => (
             <button

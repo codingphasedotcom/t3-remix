@@ -7,7 +7,6 @@ import type {
 import { CopyIcon } from "lucide-react";
 import { useState } from "react";
 
-import { Button } from "../ui/button";
 import {
   Dialog,
   DialogClose,
@@ -28,7 +27,7 @@ import {
   workspaceInput,
   type WorkspaceChoice,
 } from "./CompanyWorkspaceField";
-import { OfficeFieldGroup, OfficeHeading } from "./OfficeSurface";
+import { RemixFieldGroup, RemixHeading, RemixButton } from "./RemixSurface";
 
 export function CloneCompanyDialog(props: {
   readonly open: boolean;
@@ -86,7 +85,7 @@ function CloneForm(props: {
   return (
     <>
       <DialogHeader>
-        <OfficeHeading
+        <RemixHeading
           icon={<CopyIcon />}
           tone="teal"
           title={<DialogTitle>Clone {source.name}</DialogTitle>}
@@ -97,7 +96,7 @@ function CloneForm(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <OfficeFieldGroup label="Company" tone="teal">
+          <RemixFieldGroup label="Company" tone="teal">
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-clone-company-name">Name</Label>
               <Input
@@ -116,16 +115,16 @@ function CloneForm(props: {
                 onChange={(event) => setMission(event.target.value)}
               />
             </div>
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Workspace" tone="emerald">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Workspace" tone="green">
             <CompanyWorkspaceField
               environmentId={props.environmentId}
               value={workspace}
               onChange={setWorkspace}
               companyName={name}
             />
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="What comes along" tone="violet">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="What comes along" tone="purple">
             <p className="text-sm text-foreground">
               {people} {people === 1 ? "employee" : "employees"}, {source.departments.length}{" "}
               {source.departments.length === 1 ? "department" : "departments"}, {skills}{" "}
@@ -147,15 +146,15 @@ function CloneForm(props: {
                 onCheckedChange={setIncludeMemory}
               />
             </div>
-          </OfficeFieldGroup>
+          </RemixFieldGroup>
         </div>
       </DialogPanel>
       <DialogFooter variant="bare">
-        <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-        <Button size="sm" disabled={!canClone} onClick={() => void clone()}>
+        <DialogClose render={<RemixButton />}>Cancel</DialogClose>
+        <RemixButton variant="go" disabled={!canClone} onClick={() => void clone()}>
           <CopyIcon />
           {busy ? "Cloning…" : "Clone company"}
-        </Button>
+        </RemixButton>
       </DialogFooter>
     </>
   );

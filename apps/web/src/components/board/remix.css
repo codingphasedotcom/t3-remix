@@ -1,0 +1,90 @@
+/* T3 Remix's cartoon look: a sky-blue page, thick ink outlines, and bright fills. These are
+   runtime theme variables, kept fork-owned so upstream merges never touch them. They sit on
+   :root so dialogs and menus, which portal out of the page, can use them too. */
+@reference "../../index.css";
+
+:root {
+  --remix-page: #5b8def;
+  --remix-cloud: #80aaf8;
+  --remix-cloud-far: #6d9cf4;
+  --remix-ink: #1d2a5c;
+  --remix-text: #1d2a5c;
+  --remix-text-muted: #5a6593;
+  --remix-surface: #ffffff;
+  --remix-blue: #3580f6;
+  --remix-yellow: #ffcf3a;
+  --remix-pink: #ff5c9d;
+  --remix-green: #34c965;
+  --remix-purple: #9a6cff;
+  --remix-orange: #ff9838;
+  --remix-teal: #1fc2b4;
+  --remix-red: #ff5a5a;
+  --remix-gray: #a3acc9;
+  --remix-glass: #d8ecff;
+  --remix-shell-radius: 20px;
+  --remix-well-radius: 14px;
+  --remix-paper-hover: color-mix(in oklab, var(--remix-blue) 10%, var(--remix-surface));
+  --remix-tile-shade: inset 0 -2px 0 rgb(0 0 0 / 0.18);
+  --remix-inset: color-mix(in oklab, var(--remix-blue) 7%, var(--remix-surface));
+  /* A hard drop under outlined shapes, like a sticker. */
+  --remix-lift: 0 2px 0 var(--remix-ink);
+  --remix-lift-lg: 0 3px 0 var(--remix-ink);
+  --remix-line-thin: 1.5px;
+
+  @variant dark {
+    --remix-page: #18214a;
+    --remix-cloud: #24306a;
+    --remix-cloud-far: #1e295b;
+    --remix-ink: #080c24;
+    --remix-text: #eef1ff;
+    --remix-text-muted: #a5afd8;
+    --remix-surface: #222c5c;
+    --remix-gray: #6b76a3;
+  }
+}
+
+/* A tone names one fill; the shell and wash are that fill mixed into the surface, so they follow
+   light and dark without a second palette. `on` is the text that sits on the fill. */
+[data-remix-tone] {
+  --tone-shell: color-mix(in oklab, var(--tone) 30%, var(--remix-surface));
+  --tone-wash: color-mix(in oklab, var(--tone) 12%, var(--remix-surface));
+  --tone-on: #ffffff;
+  --tone-lift: 0 2px 0 var(--tone-shell);
+}
+
+[data-remix-tone="blue"] {
+  --tone: var(--remix-blue);
+}
+
+[data-remix-tone="yellow"] {
+  --tone: var(--remix-yellow);
+  --tone-on: #1d2a5c;
+}
+
+[data-remix-tone="pink"] {
+  --tone: var(--remix-pink);
+}
+
+[data-remix-tone="green"] {
+  --tone: var(--remix-green);
+}
+
+[data-remix-tone="purple"] {
+  --tone: var(--remix-purple);
+}
+
+[data-remix-tone="orange"] {
+  --tone: var(--remix-orange);
+}
+
+[data-remix-tone="teal"] {
+  --tone: var(--remix-teal);
+}
+
+[data-remix-tone="red"] {
+  --tone: var(--remix-red);
+}
+
+[data-remix-tone="gray"] {
+  --tone: var(--remix-gray);
+}

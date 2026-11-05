@@ -42,7 +42,6 @@ import { boardCommand, boardLive } from "../../state/board";
 import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -82,18 +81,17 @@ import { RoutinesView } from "./RoutinesView";
 import { SkillsView } from "./SkillsView";
 import { TokenLimitField } from "./TokenLimitField";
 import { agentById, limitProgress } from "./board.logic";
-import type { Tone } from "./boardTones";
 import {
-  OFFICE_CARD,
-  OFFICE_PANEL,
-  OFFICE_TRACK,
-  OfficeFieldGroup,
-  OfficeHeading,
-  OfficeIconTile,
-  OfficePill,
-  OfficeTab,
-  OfficeTabs,
-} from "./OfficeSurface";
+  REMIX_CARD,
+  RemixButton,
+  RemixChip,
+  RemixFieldGroup,
+  RemixHeading,
+  RemixIconTile,
+  RemixPage,
+  RemixTab,
+  type RemixTone,
+} from "./RemixSurface";
 
 export type BoardTab = "board" | "dashboard" | "org" | "skills" | "routines";
 
@@ -139,7 +137,7 @@ export function BoardPage(props: BoardPageProps) {
   const environmentId = props.environmentId ?? primaryEnvironmentId;
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <RemixPage>
         {environmentId === null ? (
           <>
             <WorkspacePageHeader electron={isElectron}>
@@ -155,7 +153,7 @@ export function BoardPage(props: BoardPageProps) {
         ) : (
           <CompanyWorkspace key={environmentId} {...props} environmentId={environmentId} />
         )}
-      </div>
+      </RemixPage>
     </SidebarInset>
   );
 }
@@ -256,9 +254,9 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         <Empty>
           <EmptyHeader>
             <EmptyMedia>
-              <OfficeIconTile tone="teal" size="lg">
+              <RemixIconTile tone="teal" size="lg">
                 <Building2Icon />
-              </OfficeIconTile>
+              </RemixIconTile>
             </EmptyMedia>
             <EmptyTitle>Start your first company</EmptyTitle>
             <EmptyDescription>
@@ -296,8 +294,8 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   return (
     <>
       <WorkspacePageHeader electron={isElectron}>
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <div className={cn(OFFICE_TRACK, "shrink")}>
+        <div className="@container flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-0.5 pt-1 pb-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex min-w-0 shrink items-center gap-0.5 rounded-full border-2 border-(--remix-ink) bg-(--remix-surface) p-0.5 shadow-(--remix-lift)">
             <Select
               value={company.id}
               onValueChange={(value) => go({ company: value as BoardCompanyId, tab })}
@@ -305,10 +303,12 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               <SelectTrigger size="sm" variant="ghost" className="w-auto max-w-56">
                 <SelectValue>
                   <span className="flex items-center gap-2 truncate">
-                    <OfficeIconTile tone="teal">
+                    <RemixIconTile tone="blue">
                       <Building2Icon />
-                    </OfficeIconTile>
-                    <span className="truncate font-medium text-foreground">{company.name}</span>
+                    </RemixIconTile>
+                    <span className="truncate font-semibold text-(--remix-text)">
+                      {company.name}
+                    </span>
                   </span>
                 </SelectValue>
               </SelectTrigger>
@@ -357,61 +357,47 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               </MenuPopup>
             </Menu>
           </div>
-          <OfficeTabs label="Company views">
-            <OfficeTab
+          <nav aria-label="Company views" className="flex min-w-0 items-center gap-1.5">
+            <RemixTab
               active={tab === "dashboard"}
               icon={<LayoutDashboardIcon />}
-              tone="emerald"
+              label="Dashboard"
               onClick={() => go({ company: company.id, tab: "dashboard" })}
-            >
-              Dashboard
-            </OfficeTab>
-            <OfficeTab
+            />
+            <RemixTab
               active={tab === "board"}
               icon={<KanbanSquareIcon />}
-              tone="sky"
+              label="Board"
               onClick={() => go({ company: company.id, tab: "board" })}
-            >
-              Board
-            </OfficeTab>
-            <OfficeTab
+            />
+            <RemixTab
               active={tab === "org"}
               icon={<NetworkIcon />}
-              tone="violet"
+              label="Org chart"
+              badge={pendingHires > 0 ? <RemixChip tone="yellow">{pendingHires}</RemixChip> : null}
               onClick={() => go({ company: company.id, tab: "org" })}
-            >
-              Org chart
-              {pendingHires > 0 ? (
-                <Badge variant="warning" size="sm">
-                  {pendingHires}
-                </Badge>
-              ) : null}
-            </OfficeTab>
-            <OfficeTab
+            />
+            <RemixTab
               active={tab === "skills"}
               icon={<SparklesIcon />}
-              tone="indigo"
+              label="Skills"
               onClick={() => go({ company: company.id, tab: "skills" })}
-            >
-              Skills
-            </OfficeTab>
-            <OfficeTab
+            />
+            <RemixTab
               active={tab === "routines"}
               icon={<RepeatIcon />}
-              tone="teal"
+              label="Routines"
               onClick={() => go({ company: company.id, tab: "routines" })}
-            >
-              Routines
-            </OfficeTab>
-          </OfficeTabs>
+            />
+          </nav>
         </div>
         {tab === "board" ? (
           <div className="flex shrink-0 items-center gap-2">
             <BoardSettingsMenu snapshot={snapshot} disabled={!canOperate} runCommand={runCommand} />
-            <Button size="sm" disabled={!canOperate} onClick={() => setNewCardOpen(true)}>
+            <RemixButton variant="go" disabled={!canOperate} onClick={() => setNewCardOpen(true)}>
               <PlusIcon />
               New task
-            </Button>
+            </RemixButton>
           </div>
         ) : null}
       </WorkspacePageHeader>
@@ -506,10 +492,16 @@ function CompanyLimitBanner(props: { readonly snapshot: BoardSnapshot }) {
   );
   if (progress === null || (!progress.nearing && !progress.reached)) return null;
   return (
-    <div className="mx-(--workspace-gutter-start) mb-3 flex items-center gap-3 rounded-xl bg-warning-surface px-3 py-2 text-sm text-warning-foreground">
-      <OfficeIconTile tone="amber">
+    <div
+      data-remix-tone="yellow"
+      className={cn(
+        REMIX_CARD,
+        "mx-(--workspace-gutter-start) mb-3 flex-row items-center gap-2.5 bg-(--tone-wash) px-2.5 py-1.5 text-sm font-medium shadow-(--remix-lift)",
+      )}
+    >
+      <RemixIconTile tone="yellow">
         <GaugeIcon />
-      </OfficeIconTile>
+      </RemixIconTile>
       <span className="min-w-0">
         {progress.reached
           ? "This company used its monthly token limit. Agents won't start until you raise it under Edit company or the month ends."
@@ -530,27 +522,27 @@ function MissionBanner(props: {
   return (
     <div
       className={cn(
-        OFFICE_PANEL,
-        "mx-(--workspace-gutter-start) mb-3 flex-row items-center rounded-xl px-3 py-2 text-sm",
+        REMIX_CARD,
+        "mx-(--workspace-gutter-start) mb-3 flex-row items-center gap-2.5 px-2 py-1.5 text-sm shadow-(--remix-lift)",
       )}
     >
       {props.company.mission.trim().length > 0 ? (
         <>
-          <OfficePill tone="teal">Mission</OfficePill>
-          <span className="min-w-0 truncate text-foreground">{props.company.mission}</span>
+          <RemixChip tone="green">Mission</RemixChip>
+          <span className="min-w-0 truncate font-medium">{props.company.mission}</span>
         </>
       ) : null}
       {props.home !== null ? (
         <Tooltip>
           <TooltipTrigger
             render={
-              <span className="ms-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" />
+              <span className="ms-auto flex shrink-0 items-center gap-1.5 text-xs font-semibold" />
             }
           >
-            <OfficeIconTile tone="emerald">
+            <RemixIconTile tone="green">
               <FolderIcon />
-            </OfficeIconTile>
-            <span className="font-medium text-foreground">{props.home.title}</span>
+            </RemixIconTile>
+            {props.home.title}
           </TooltipTrigger>
           <TooltipPopup side="bottom">{props.home.workspaceRoot}</TooltipPopup>
         </Tooltip>
@@ -558,12 +550,12 @@ function MissionBanner(props: {
       {props.ceo !== null ? (
         <span
           className={cn(
-            "shrink-0 text-xs whitespace-nowrap text-muted-foreground",
+            "shrink-0 text-xs whitespace-nowrap text-(--remix-text-muted)",
             props.home === null && "ms-auto",
           )}
         >
           {"New tasks go to "}
-          <AgentName agent={props.ceo} className="font-medium text-foreground" />
+          <AgentName agent={props.ceo} className="font-semibold text-(--remix-text)" />
           {", the CEO"}
         </span>
       ) : null}
@@ -573,7 +565,7 @@ function MissionBanner(props: {
 
 function BoardMessage(props: {
   readonly icon: ReactNode;
-  readonly tone: Tone;
+  readonly tone: RemixTone;
   readonly title: string;
   readonly description: string;
 }) {
@@ -581,9 +573,9 @@ function BoardMessage(props: {
     <Empty>
       <EmptyHeader>
         <EmptyMedia>
-          <OfficeIconTile tone={props.tone} size="lg">
+          <RemixIconTile tone={props.tone} size="lg">
             {props.icon}
-          </OfficeIconTile>
+          </RemixIconTile>
         </EmptyMedia>
         <EmptyTitle>{props.title}</EmptyTitle>
         {props.description ? <EmptyDescription>{props.description}</EmptyDescription> : null}
@@ -694,7 +686,7 @@ function EditCompanyForm(props: {
   return (
     <>
       <DialogHeader>
-        <OfficeHeading
+        <RemixHeading
           icon={<Building2Icon />}
           tone="teal"
           title={<DialogTitle>Edit company</DialogTitle>}
@@ -702,7 +694,7 @@ function EditCompanyForm(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
-          <OfficeFieldGroup label="Company" tone="teal">
+          <RemixFieldGroup label="Company" tone="teal">
             <div className="flex flex-col gap-2">
               <Label htmlFor="board-edit-company-name">Name</Label>
               <Input
@@ -720,10 +712,10 @@ function EditCompanyForm(props: {
                 onChange={(event) => setMission(event.target.value)}
               />
             </div>
-          </OfficeFieldGroup>
-          <OfficeFieldGroup
+          </RemixFieldGroup>
+          <RemixFieldGroup
             label="Workspace"
-            tone="emerald"
+            tone="green"
             action={
               workspace === null ? (
                 <Button
@@ -743,10 +735,10 @@ function EditCompanyForm(props: {
             }
           >
             {workspace === null ? (
-              <div className={cn(OFFICE_CARD, "flex-row items-center gap-3 rounded-xl p-3")}>
-                <OfficeIconTile tone="emerald">
+              <div className={cn(REMIX_CARD, "flex-row items-center gap-3 rounded-xl p-3")}>
+                <RemixIconTile tone="green">
                   <FolderIcon />
-                </OfficeIconTile>
+                </RemixIconTile>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-sm font-medium">
                     {home?.title ?? "Project not found"}
@@ -770,10 +762,10 @@ function EditCompanyForm(props: {
                 </span>
               </>
             )}
-          </OfficeFieldGroup>
-          <OfficeFieldGroup
+          </RemixFieldGroup>
+          <RemixFieldGroup
             label="Departments"
-            tone="violet"
+            tone="purple"
             action={
               <Button size="xs" variant="outline" onClick={addDepartment}>
                 <PlusIcon />
@@ -789,7 +781,7 @@ function EditCompanyForm(props: {
                 return (
                   <div
                     key={department.key}
-                    className={cn(OFFICE_CARD, "flex-row items-center gap-2 rounded-xl p-2")}
+                    className={cn(REMIX_CARD, "flex-row items-center gap-2 rounded-xl p-2")}
                   >
                     <Input
                       size="sm"
@@ -800,9 +792,9 @@ function EditCompanyForm(props: {
                       onChange={(event) => renameDepartment(department.key, event.target.value)}
                     />
                     <span className="flex w-24 shrink-0 items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
-                      <OfficeIconTile tone="violet">
+                      <RemixIconTile tone="purple">
                         <UsersIcon />
-                      </OfficeIconTile>
+                      </RemixIconTile>
                       {members} {members === 1 ? "person" : "people"}
                     </span>
                     <Button
@@ -826,8 +818,8 @@ function EditCompanyForm(props: {
               Every employee belongs to one department. Move people out of a department before
               removing it.
             </span>
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Limits" tone="amber">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Limits" tone="yellow">
             <TokenLimitField
               id="board-edit-company-token-limit"
               label="Monthly token limit for the company"
@@ -836,8 +828,8 @@ function EditCompanyForm(props: {
               onChange={setTokenLimit}
               onValidityChange={setLimitValid}
             />
-          </OfficeFieldGroup>
-          <OfficeFieldGroup label="Memory" tone="gray">
+          </RemixFieldGroup>
+          <RemixFieldGroup label="Memory" tone="gray">
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="board-edit-company-memory">Company memory</Label>
@@ -851,14 +843,14 @@ function EditCompanyForm(props: {
                 onChange={(event) => setMemory(event.target.value)}
               />
             </div>
-          </OfficeFieldGroup>
+          </RemixFieldGroup>
         </div>
       </DialogPanel>
       <DialogFooter variant="bare">
-        <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-        <Button size="sm" disabled={!canSave} onClick={() => void save()}>
+        <DialogClose render={<RemixButton />}>Cancel</DialogClose>
+        <RemixButton variant="go" disabled={!canSave} onClick={() => void save()}>
           Save
-        </Button>
+        </RemixButton>
       </DialogFooter>
     </>
   );
@@ -882,16 +874,16 @@ function BoardSettingsMenu(props: {
     });
   return (
     <Menu>
-      <MenuTrigger render={<Button size="sm" variant="outline" aria-label="Board settings" />}>
+      <MenuTrigger render={<RemixButton aria-label="Board settings" />}>
         <SettingsIcon />
         {settings.autoDispatch ? "Auto-run on" : "Auto-run off"}
       </MenuTrigger>
       <MenuPopup align="end">
         <div className="flex w-80 flex-col gap-4 p-4">
           <div className="flex items-start gap-3">
-            <OfficeIconTile tone="sky">
+            <RemixIconTile tone="blue">
               <PlayIcon />
-            </OfficeIconTile>
+            </RemixIconTile>
             <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
               <Label htmlFor="board-auto-dispatch">Auto-run agents</Label>
               <span className="text-xs text-muted-foreground">
@@ -907,9 +899,9 @@ function BoardSettingsMenu(props: {
             />
           </div>
           <div className="flex items-start gap-3">
-            <OfficeIconTile tone="violet">
+            <RemixIconTile tone="purple">
               <GitBranchIcon />
-            </OfficeIconTile>
+            </RemixIconTile>
             <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
               <Label htmlFor="board-worktrees">Worktree per task</Label>
               <span className="text-xs text-muted-foreground">
@@ -925,9 +917,9 @@ function BoardSettingsMenu(props: {
             />
           </div>
           <div className="flex items-center gap-3">
-            <OfficeIconTile tone="indigo">
+            <RemixIconTile tone="purple">
               <UsersIcon />
-            </OfficeIconTile>
+            </RemixIconTile>
             <Label className="flex-1">Agents at once</Label>
             <Select
               value={String(settings.maxConcurrentRuns)}

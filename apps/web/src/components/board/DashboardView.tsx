@@ -40,15 +40,21 @@ import { useEnvironmentQuery } from "../../state/query";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { niceScale } from "../usage/UsageProviderChart";
-import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentAvatar } from "./AgentAvatar";
 import { agentById } from "./board.logic";
-import { COLUMN_TONES, TONES, type Tone } from "./boardTones";
-import { OFFICE_CARD, OFFICE_PANEL, OfficeIconTile, OfficePill } from "./OfficeSurface";
+import {
+  REMIX_CARD,
+  REMIX_COLUMN_TONES,
+  REMIX_SHELL,
+  RemixBubble,
+  RemixButton,
+  RemixChip,
+  RemixIconTile,
+  type RemixTone,
+} from "./RemixSurface";
 import {
   attentionItems,
   averageRunMs,
@@ -66,27 +72,27 @@ import {
   type EmployeeActivity,
 } from "./dashboard.logic";
 
-// Checked in both themes: the first six stay apart from one another and
-// neighbours stay apart under colour blindness. The ninth department starts over.
-const DEPARTMENT_FILLS = [
-  "bg-blue-500",
-  "bg-teal-500 dark:bg-teal-600",
-  "bg-orange-500 dark:bg-orange-600",
-  "bg-pink-500",
-  "bg-lime-600",
-  "bg-fuchsia-500",
-  "bg-amber-600",
-  "bg-violet-500",
-] as const;
+// Neighbours alternate warm and cool so they stay apart under colour blindness. The ninth
+// department starts over.
+const DEPARTMENT_TONES: ReadonlyArray<RemixTone> = [
+  "blue",
+  "orange",
+  "purple",
+  "green",
+  "pink",
+  "yellow",
+  "teal",
+  "red",
+];
 
 const METRICS: ReadonlyArray<{
   readonly id: ActivityMetric;
   readonly label: string;
-  readonly tone: Tone;
+  readonly tone: RemixTone;
 }> = [
-  { id: "runs", label: "Runs", tone: "sky" },
-  { id: "tasksFinished", label: "Tasks finished", tone: "emerald" },
-  { id: "tokens", label: "Tokens", tone: "violet" },
+  { id: "runs", label: "Runs", tone: "blue" },
+  { id: "tasksFinished", label: "Tasks finished", tone: "green" },
+  { id: "tokens", label: "Tokens", tone: "purple" },
 ];
 
 const percentOrDash = (share: number | null) => (share === null ? "–" : formatPercent(share, 0));
@@ -131,39 +137,42 @@ export function DashboardView(props: {
     dashboard?.days.reduce((total, day) => total + day.tasksFinished, 0) ?? null;
   const paused = snapshot.agents.filter((agent) => agent.paused).length;
   const departments = snapshot.company?.departments ?? [];
-  const departmentFill = (departmentId: BoardDepartmentId | null) => {
+  const departmentTone = (departmentId: BoardDepartmentId | null) => {
     const index = departments.findIndex((department) => department.id === departmentId);
-    return index === -1 ? null : (DEPARTMENT_FILLS[index % DEPARTMENT_FILLS.length] ?? null);
+    return index === -1 ? null : (DEPARTMENT_TONES[index % DEPARTMENT_TONES.length] ?? null);
   };
   const loading = (value: ReactNode) => (dashboard === null ? null : value);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-(--workspace-gutter-start) pb-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-(--workspace-gutter-start) pt-1 pb-14">
       {query.error !== null ? (
-        <p className="text-sm text-destructive-foreground">
+        <p
+          data-remix-tone="pink"
+          className={cn(REMIX_CARD, "bg-(--tone-wash) px-3 py-2 text-sm font-medium")}
+        >
           Could not load run history: {query.error}
         </p>
       ) : null}
 
-      <div className={cn(OFFICE_PANEL, "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6")}>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatTile
           label="Open tasks"
           icon={ListTodoIcon}
-          tone="indigo"
+          tone="orange"
           value={formatCount(openCards)}
           detail={`${blocked} blocked · ${inReview} in review`}
         />
         <StatTile
           label="Finished, 14 days"
           icon={CircleCheckIcon}
-          tone="emerald"
+          tone="green"
           value={loading(formatCount(finishedRecently ?? 0))}
           detail={`${formatCount(doneAllTime)} done all time`}
         />
         <StatTile
           label="Working now"
           icon={BotIcon}
-          tone="sky"
+          tone="blue"
           value={loading(formatCount(totals?.running ?? 0))}
           detail={`${snapshot.agents.length} employees · ${paused} paused`}
         />
@@ -177,14 +186,14 @@ export function DashboardView(props: {
         <StatTile
           label="Time to done"
           icon={TimerIcon}
-          tone="amber"
+          tone="yellow"
           value={loading(spanOrDash(dashboard?.medianCycleMs ?? null))}
           detail="Median, created to done"
         />
         <StatTile
           label="Tokens"
           icon={CoinsIcon}
-          tone="violet"
+          tone="purple"
           value={loading(formatTokens(totals === null ? 0 : totalTokens(totals.tokens)))}
           detail={
             totals === null ? "" : `${percentOrDash(cachedShare(totals.tokens))} of input cached`
@@ -195,7 +204,7 @@ export function DashboardView(props: {
       {hasAttentionItems(attention) ? (
         <Panel
           title="Needs attention"
-          tone="red"
+          tone="pink"
           count={
             attention.blocked.length +
             attention.unassigned.length +
@@ -214,27 +223,25 @@ export function DashboardView(props: {
         </Panel>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
+      <div className="grid gap-3 lg:grid-cols-3 lg:items-start">
         <Panel
           className="lg:col-span-2"
           title="Activity, last 14 days"
+          tone="blue"
           aside={
-            <ToggleGroup
-              aria-label="Activity metric"
-              size="segmented"
-              variant="segmented"
-              value={[metric]}
-              onValueChange={(next) => {
-                const chosen = METRICS.find((option) => option.id === next[0]);
-                if (chosen !== undefined) setMetric(chosen.id);
-              }}
-            >
+            <div role="group" aria-label="Activity metric" className="flex flex-wrap gap-1.5">
               {METRICS.map((option) => (
-                <Toggle key={option.id} value={option.id}>
+                <RemixButton
+                  key={option.id}
+                  size="sm"
+                  variant={metric === option.id ? "active" : "paper"}
+                  aria-pressed={metric === option.id}
+                  onClick={() => setMetric(option.id)}
+                >
                   {option.label}
-                </Toggle>
+                </RemixButton>
               ))}
-            </ToggleGroup>
+            </div>
           }
         >
           {dashboard === null ? (
@@ -244,19 +251,19 @@ export function DashboardView(props: {
           )}
         </Panel>
 
-        <Panel title="Tasks by column">
+        <Panel title="Tasks by column" tone="yellow">
           <BarList
             rows={columns.map((column) => ({
               key: column.status,
               label: column.label,
               value: column.count,
               display: formatCount(column.count),
-              fill: TONES[COLUMN_TONES[column.status]].fill,
+              tone: REMIX_COLUMN_TONES[column.status],
             }))}
           />
         </Panel>
 
-        <Panel className="lg:col-span-2" title="Models">
+        <Panel className="lg:col-span-2" title="Models" tone="purple">
           {dashboard === null ? (
             <Skeleton className="h-32" />
           ) : (
@@ -264,19 +271,19 @@ export function DashboardView(props: {
           )}
         </Panel>
 
-        <Panel title="Departments">
+        <Panel title="Departments" tone="orange">
           <BarList
             rows={departmentRows(snapshot, employees).map((department) => ({
               key: department.id,
               label: department.name,
               value: department.openCards,
               display: `${department.openCards} open · ${department.headcount} ${department.headcount === 1 ? "person" : "people"}`,
-              fill: departmentFill(department.id) ?? TONES.gray.fill,
+              tone: departmentTone(department.id) ?? "gray",
             }))}
           />
         </Panel>
 
-        <Panel className="lg:col-span-3" title="Employees" count={employees.length}>
+        <Panel className="lg:col-span-3" title="Employees" tone="green" count={employees.length}>
           <Table>
             <TableHeader>
               <TableRow>
@@ -305,15 +312,15 @@ export function DashboardView(props: {
                         muted={row.agent.paused}
                       />
                       <span className="flex flex-col leading-tight">
-                        <span className="text-sm text-foreground">{row.agent.name}</span>
-                        <span className="text-muted-foreground">{row.role}</span>
+                        <span className="text-sm font-semibold">{row.agent.name}</span>
+                        <span className="text-(--remix-text-muted)">{row.role}</span>
                       </span>
                     </span>
                   </TableCell>
                   <TableCell>
                     <DepartmentName
                       name={row.department}
-                      fill={departmentFill(row.agent.departmentId)}
+                      tone={departmentTone(row.agent.departmentId)}
                     />
                   </TableCell>
                   <TableCell>
@@ -348,27 +355,25 @@ export function DashboardView(props: {
 function Panel(props: {
   readonly title: string;
   readonly count?: number;
-  /** Omitted for a neutral white pill. */
-  readonly tone?: Tone;
+  readonly tone: RemixTone;
   readonly aside?: ReactNode;
   readonly className?: string;
   readonly children: ReactNode;
 }) {
   return (
-    <section className={cn(OFFICE_PANEL, props.className)}>
-      <div className="flex min-h-7 flex-wrap items-center justify-between gap-2 ps-1">
+    <section data-remix-tone={props.tone} className={cn(REMIX_SHELL, props.className)}>
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 px-2.5 pt-2.5 pb-3">
         <h2 className="flex">
-          <OfficePill
-            tone={props.tone ?? "gray"}
-            variant={props.tone === undefined ? "plain" : "tint"}
-          >
+          <RemixBubble tone={props.tone} size="sm">
             {props.title}
             {props.count === undefined ? null : `: ${formatCount(props.count)}`}
-          </OfficePill>
+          </RemixBubble>
         </h2>
         {props.aside}
       </div>
-      <div className={OFFICE_CARD}>{props.children}</div>
+      <div className="mx-1.5 mb-1.5 flex min-w-0 flex-col gap-3 rounded-(--remix-well-radius) bg-(--remix-surface) p-3">
+        {props.children}
+      </div>
     </section>
   );
 }
@@ -376,25 +381,30 @@ function Panel(props: {
 function StatTile(props: {
   readonly label: string;
   readonly icon: LucideIcon;
-  readonly tone: Tone;
+  readonly tone: RemixTone;
   readonly value: ReactNode;
   readonly detail: string;
 }) {
   const Icon = props.icon;
   return (
-    <div className={cn(OFFICE_CARD, "gap-1")}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs text-muted-foreground">{props.label}</span>
-        <OfficeIconTile tone={props.tone}>
+    <div
+      data-remix-tone={props.tone}
+      className={cn(REMIX_CARD, "gap-0.5 rounded-2xl p-3 shadow-(--remix-lift)")}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="truncate pt-0.5 text-xs font-semibold text-(--remix-text-muted)">
+          {props.label}
+        </span>
+        <RemixIconTile tone={props.tone} size="md">
           <Icon />
-        </OfficeIconTile>
+        </RemixIconTile>
       </div>
       {props.value === null ? (
-        <Skeleton className="h-7 w-16" />
+        <Skeleton className="h-8 w-16" />
       ) : (
-        <span className="text-2xl font-medium tabular-nums text-foreground">{props.value}</span>
+        <span className="text-2xl font-semibold tabular-nums">{props.value}</span>
       )}
-      <span className="truncate text-xs text-muted-foreground">{props.detail}</span>
+      <span className="truncate text-xs font-medium text-(--remix-text-muted)">{props.detail}</span>
     </div>
   );
 }
@@ -410,25 +420,24 @@ function ActivityChart(props: {
   const scale = niceScale(Math.max(0, ...values), CHART_TICKS);
   const option = METRICS.find((entry) => entry.id === props.metric);
   const label = option?.label ?? "";
-  const fill = TONES[option?.tone ?? "gray"].fill;
   const first = props.days[0];
   const middle = props.days[Math.floor(props.days.length / 2)];
   const last = props.days.at(-1);
   if (scale.max === 0) {
     return (
-      <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
+      <div className="flex h-48 items-center justify-center text-sm font-medium text-(--remix-text-muted)">
         No {label.toLowerCase()} in the last 14 days
       </div>
     );
   }
   return (
-    <div className="flex flex-col gap-1">
+    <div data-remix-tone={option?.tone ?? "gray"} className="flex flex-col gap-1">
       <div className="flex h-48 gap-2">
         <div className="relative w-10 shrink-0">
           {scale.ticks.map((tick) => (
             <span
               key={tick}
-              className="absolute right-0 -translate-y-1/2 text-2xs tabular-nums text-muted-foreground"
+              className="absolute right-0 -translate-y-1/2 text-2xs font-medium tabular-nums text-(--remix-text-muted)"
               style={{ top: `${100 - (tick / scale.max) * 100}%` }}
             >
               {tick === 0 ? "0" : format(tick)}
@@ -438,13 +447,13 @@ function ActivityChart(props: {
         <div
           role="img"
           aria-label={`${label} per day: ${props.days.map((day) => `${formatDayShort(day.day)} ${format(day[props.metric])}`).join(", ")}`}
-          className="relative flex min-w-0 flex-1 items-end gap-0.5"
+          className="relative flex min-w-0 flex-1 items-end gap-1"
         >
           {scale.ticks.map((tick) => (
             <span
               key={tick}
               aria-hidden
-              className="pointer-events-none absolute inset-x-0 border-t border-border"
+              className="pointer-events-none absolute inset-x-0 border-t border-dashed border-(--remix-ink)/15"
               style={{ top: `${100 - (tick / scale.max) * 100}%` }}
             />
           ))}
@@ -452,13 +461,15 @@ function ActivityChart(props: {
             <Tooltip key={day.day}>
               <TooltipTrigger
                 render={
-                  <div className="relative flex h-full min-w-0 flex-1 items-end hover:bg-muted/60" />
+                  <div className="relative flex h-full min-w-0 flex-1 items-end rounded-t-md hover:bg-(--tone-wash)" />
                 }
               >
-                <div
-                  className={cn("w-full rounded-t-xs", fill)}
-                  style={{ height: `${(day[props.metric] / scale.max) * 100}%` }}
-                />
+                {day[props.metric] === 0 ? null : (
+                  <div
+                    className="w-full rounded-t-md border-2 border-b-0 border-(--remix-ink) bg-(--tone)"
+                    style={{ height: `${(day[props.metric] / scale.max) * 100}%` }}
+                  />
+                )}
               </TooltipTrigger>
               <TooltipPopup>
                 {formatDayShort(day.day)} · {format(day[props.metric])} {label.toLowerCase()}
@@ -467,7 +478,7 @@ function ActivityChart(props: {
           ))}
         </div>
       </div>
-      <div className="flex justify-between ps-12 text-2xs text-muted-foreground">
+      <div className="flex justify-between border-t-2 border-(--remix-ink) ps-12 pt-1 text-2xs font-medium text-(--remix-text-muted)">
         <span>{first === undefined ? "" : formatDayShort(first.day)}</span>
         <span>{middle === undefined ? "" : formatDayShort(middle.day)}</span>
         <span>{last === undefined ? "" : formatDayShort(last.day)}</span>
@@ -482,24 +493,23 @@ function BarList(props: {
     readonly label: string;
     readonly value: number;
     readonly display: string;
-    readonly fill: string;
+    readonly tone: RemixTone;
   }>;
 }) {
   const peak = Math.max(1, ...props.rows.map((row) => row.value));
   return (
     <div className="flex flex-col gap-2.5">
       {props.rows.map((row) => (
-        <div key={row.key} className="flex flex-col gap-1">
+        <div key={row.key} data-remix-tone={row.tone} className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-3 text-xs">
-            <span className="flex min-w-0 items-center gap-2">
-              <span aria-hidden className={cn("size-2 shrink-0 rounded-full", row.fill)} />
-              <span className="truncate text-foreground">{row.label}</span>
+            <span className="truncate font-semibold">{row.label}</span>
+            <span className="shrink-0 text-xs font-medium tabular-nums text-(--remix-text-muted)">
+              {row.display}
             </span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">{row.display}</span>
           </div>
-          <div className="h-1.5 rounded-full bg-muted">
+          <div className="h-2.5 overflow-hidden rounded-full border-(length:--remix-line-thin) border-(--remix-ink) bg-(--tone-wash)">
             <div
-              className={cn("h-full rounded-full", row.fill)}
+              className="h-full rounded-full bg-(--tone)"
               style={{ width: `${(row.value / peak) * 100}%` }}
             />
           </div>
@@ -519,51 +529,50 @@ function AttentionList(props: {
 }) {
   const { attention } = props;
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-2">
       {attention.pendingHires > 0 ? (
-        <Button variant="outline" size="sm" className="max-w-full" onClick={props.onOpenOrgChart}>
-          <UserPlusIcon className={TONES.indigo.ink} />
-          <span className="truncate">
+        <RemixButton size="sm" className="max-w-full" onClick={props.onOpenOrgChart}>
+          <UserPlusIcon className="text-(--remix-purple)" />
+          <span className="min-w-0 truncate">
             {attention.pendingHires} hire {attention.pendingHires === 1 ? "request" : "requests"} to
             review
           </span>
-        </Button>
+        </RemixButton>
       ) : null}
       {attention.blocked.map((task) => (
-        <Button
+        <RemixButton
           key={task.id}
-          variant="outline"
           size="sm"
           className="max-w-full"
           onClick={() => props.onOpenCard(task.id)}
         >
-          <AlertTriangleIcon className={TONES.red.ink} />
-          <span className="truncate">Blocked: {task.title}</span>
-        </Button>
+          <AlertTriangleIcon className="text-(--remix-pink)" />
+          <span className="min-w-0 truncate">Blocked: {task.title}</span>
+        </RemixButton>
       ))}
       {attention.unassigned.map((task) => (
-        <Button
+        <RemixButton
           key={task.id}
-          variant="outline"
           size="sm"
           className="max-w-full"
           onClick={() => props.onOpenCard(task.id)}
         >
-          <InboxIcon className={TONES.amber.ink} />
-          <span className="truncate">No assignee: {task.title}</span>
-        </Button>
+          <InboxIcon className="text-(--remix-orange)" />
+          <span className="min-w-0 truncate">No assignee: {task.title}</span>
+        </RemixButton>
       ))}
       {attention.failed.map((thread) => (
-        <Button
+        <RemixButton
           key={thread.threadId}
-          variant="outline"
           size="sm"
           className="max-w-full"
           onClick={() => props.onOpenThread(thread.threadId)}
         >
-          <XCircleIcon className={TONES.red.ink} />
-          <span className="truncate">{failedThreadLabel(thread, props.agents, props.tasks)}</span>
-        </Button>
+          <XCircleIcon className="text-(--remix-red)" />
+          <span className="min-w-0 truncate">
+            {failedThreadLabel(thread, props.agents, props.tasks)}
+          </span>
+        </RemixButton>
       ))}
     </div>
   );
@@ -591,7 +600,7 @@ function ModelsTable(props: {
 }) {
   const { models, totals } = props.dashboard;
   if (models.length === 0) {
-    return <p className="text-sm text-muted-foreground">No runs yet</p>;
+    return <p className="text-sm font-medium text-(--remix-text-muted)">No runs yet</p>;
   }
   const allTokens = totalTokens(totals.tokens);
   return (
@@ -616,7 +625,9 @@ function ModelsTable(props: {
               <TableCell>
                 <span className="flex flex-col leading-tight">
                   <ModelName model={entry.modelSelection.model} />
-                  <span className="text-muted-foreground">{entry.modelSelection.instanceId}</span>
+                  <span className="text-(--remix-text-muted)">
+                    {entry.modelSelection.instanceId}
+                  </span>
                 </span>
               </TableCell>
               <TableCell>
@@ -639,14 +650,14 @@ function ModelsTable(props: {
               <NumberCell>{spanOrDash(averageRunMs(entry.stats))}</NumberCell>
               <NumberCell>{formatTokens(tokens)}</NumberCell>
               <TableCell>
-                <span className="flex items-center gap-2">
-                  <span className="h-1.5 w-24 rounded-full bg-muted">
+                <span data-remix-tone="purple" className="flex items-center gap-2">
+                  <span className="h-2.5 w-24 overflow-hidden rounded-full border-(length:--remix-line-thin) border-(--remix-ink) bg-(--tone-wash)">
                     <span
-                      className={cn("block h-full rounded-full", TONES.violet.fill)}
+                      className="block h-full rounded-full bg-(--tone)"
                       style={{ width: `${share * 100}%` }}
                     />
                   </span>
-                  <span className="tabular-nums text-muted-foreground">
+                  <span className="font-medium tabular-nums text-(--remix-text-muted)">
                     {formatPercent(share, 0)}
                   </span>
                 </span>
@@ -660,15 +671,19 @@ function ModelsTable(props: {
 }
 
 function ModelName(props: { readonly model: string }) {
-  return <span className="font-mono text-foreground">{props.model}</span>;
+  return <span className="font-mono">{props.model}</span>;
 }
 
-function DepartmentName(props: { readonly name: string | null; readonly fill: string | null }) {
+function DepartmentName(props: { readonly name: string | null; readonly tone: RemixTone | null }) {
   if (props.name === null) return "–";
   return (
-    <span className="flex items-center gap-2">
-      {props.fill === null ? null : (
-        <span aria-hidden className={cn("size-2 shrink-0 rounded-full", props.fill)} />
+    <span className="flex items-center gap-2 font-medium">
+      {props.tone === null ? null : (
+        <span
+          aria-hidden
+          data-remix-tone={props.tone}
+          className="size-2.5 shrink-0 rounded-full border-(length:--remix-line-thin) border-(--remix-ink) bg-(--tone)"
+        />
       )}
       {props.name}
     </span>
@@ -676,15 +691,15 @@ function DepartmentName(props: { readonly name: string | null; readonly fill: st
 }
 
 function ActivityBadge(props: { readonly activity: EmployeeActivity }) {
-  if (props.activity === "working") {
+  if (props.activity === "working") return <RemixChip tone="blue">Working</RemixChip>;
+  if (props.activity === "paused") {
     return (
-      <OfficePill tone="sky" variant="solid">
-        Working
-      </OfficePill>
+      <RemixChip tone="gray" variant="wash">
+        Paused
+      </RemixChip>
     );
   }
-  if (props.activity === "paused") return <OfficePill tone="gray">Paused</OfficePill>;
-  return <span className="text-muted-foreground">Idle</span>;
+  return <span className="font-medium text-(--remix-text-muted)">Idle</span>;
 }
 
 function NumberHead(props: { readonly children: ReactNode }) {

@@ -55,15 +55,15 @@ import { FilePicker } from "./FilePicker";
 import type { RunBoardCommand } from "./BoardPage";
 import { AgentFace, AgentName } from "./AgentAvatar";
 import { BOARD_COLUMNS, agentById, boardStatusLabel, canArchiveTask } from "./board.logic";
-import { COLUMN_TONES, type Tone } from "./boardTones";
 import {
-  OFFICE_CARD,
-  OFFICE_INSET,
-  OfficeHeading,
-  OfficeIconTile,
-  OfficePill,
-  statusPillVariant,
-} from "./OfficeSurface";
+  REMIX_CARD,
+  REMIX_INSET,
+  RemixHeading,
+  RemixIconTile,
+  RemixChip,
+  REMIX_COLUMN_TONES,
+  type RemixTone,
+} from "./RemixSurface";
 import "./office.css";
 
 export function BoardCardSheet(props: {
@@ -173,9 +173,9 @@ function BoardCardDetail(props: {
         <SheetDescription className="sr-only">Board task details</SheetDescription>
         {/* Keeps the title clear of the sheet's close button in the corner. */}
         <div className="pe-8">
-          <OfficeHeading
+          <RemixHeading
             icon={<ClipboardListIcon />}
-            tone={COLUMN_TONES[task.status]}
+            tone={REMIX_COLUMN_TONES[task.status]}
             title={
               <Input
                 size="lg"
@@ -191,21 +191,22 @@ function BoardCardDetail(props: {
             }
             description={
               <div className="flex flex-wrap items-center gap-2">
-                <OfficePill
-                  tone={COLUMN_TONES[task.status]}
-                  variant={statusPillVariant(task.status)}
-                >
+                <RemixChip tone={REMIX_COLUMN_TONES[task.status]}>
                   {boardStatusLabel(task.status)}
-                </OfficePill>
-                {task.archivedAt !== null ? <OfficePill tone="gray">Archived</OfficePill> : null}
+                </RemixChip>
+                {task.archivedAt !== null ? (
+                  <RemixChip tone="gray" variant="wash">
+                    Archived
+                  </RemixChip>
+                ) : null}
                 {task.activeRunKind !== null ? (
-                  <OfficePill tone="sky" variant="live">
+                  <RemixChip tone="blue">
                     {task.activeRunKind === "review"
                       ? "Reviewer working"
                       : task.activeRunKind === "reply"
                         ? "Agent replying"
                         : "Agent working"}
-                  </OfficePill>
+                  </RemixChip>
                 ) : null}
               </div>
             }
@@ -268,7 +269,7 @@ function BoardCardDetail(props: {
         <div className="flex flex-col gap-4 px-6 pb-6">
           <div
             className={cn(
-              OFFICE_INSET,
+              REMIX_INSET,
               "grid gap-3",
               task.assignedToUser ? "grid-cols-2" : "grid-cols-3",
             )}
@@ -322,7 +323,7 @@ function BoardCardDetail(props: {
             )}
           </div>
 
-          <section className={OFFICE_INSET}>
+          <section className={REMIX_INSET}>
             <div className="flex min-h-7 items-center justify-between gap-3">
               <SectionTitle label="Description" htmlFor="board-card-detail-description" />
               {editingDescription ? null : (
@@ -367,7 +368,7 @@ function BoardCardDetail(props: {
                 </div>
               </>
             ) : task.description.trim().length > 0 ? (
-              <div className={OFFICE_CARD} data-office-markdown>
+              <div className={REMIX_CARD} data-office-markdown>
                 <ChatMarkdown
                   text={task.description}
                   cwd={task.worktreePath ?? undefined}
@@ -379,7 +380,7 @@ function BoardCardDetail(props: {
             )}
           </section>
 
-          <section className={OFFICE_INSET}>
+          <section className={REMIX_INSET}>
             <SectionTitle label="Files" count={files.length} />
             <FilePicker
               disabled={disabled}
@@ -422,8 +423,8 @@ function BoardCardDetail(props: {
           ) : null}
 
           {workLinks.length > 0 ? (
-            <section className={OFFICE_INSET}>
-              <SectionTitle label="Linked work" tone="violet" count={workLinks.length} />
+            <section className={REMIX_INSET}>
+              <SectionTitle label="Linked work" tone="purple" count={workLinks.length} />
               <div className="flex flex-col gap-2">
                 {workLinks.map((link) => (
                   <WorkLinkRow
@@ -439,10 +440,10 @@ function BoardCardDetail(props: {
           ) : null}
 
           {parent !== null || subtasks.length > 0 ? (
-            <section className={OFFICE_INSET}>
+            <section className={REMIX_INSET}>
               <SectionTitle
                 label="Related tasks"
-                tone="indigo"
+                tone="purple"
                 count={(parent === null ? 0 : 1) + subtasks.length}
               />
               <div className="flex flex-col gap-2">
@@ -465,11 +466,11 @@ function BoardCardDetail(props: {
             </section>
           ) : null}
 
-          <section className={OFFICE_INSET}>
+          <section className={REMIX_INSET}>
             <div className="flex">
               <SectionTitle
                 label="Activity"
-                tone="sky"
+                tone="blue"
                 count={detail.data?.comments.length}
                 htmlFor="board-card-comment"
               />
@@ -522,7 +523,7 @@ function BoardCardDetail(props: {
           </section>
 
           {(detail.data?.runs.length ?? 0) > 0 ? (
-            <section className={OFFICE_INSET}>
+            <section className={REMIX_INSET}>
               <SectionTitle label="Agent runs" tone="teal" count={detail.data?.runs.length} />
               <div className="flex flex-col gap-2">
                 {(detail.data?.runs ?? []).toReversed().map((run) => (
@@ -546,18 +547,18 @@ function BoardCardDetail(props: {
 /** A section's pill heading; with `htmlFor` it is the label of that field instead. */
 function SectionTitle(props: {
   readonly label: string;
-  readonly tone?: Tone;
+  readonly tone?: RemixTone;
   readonly count?: number | undefined;
   readonly htmlFor?: string;
 }) {
   const pill = (
-    <OfficePill tone={props.tone ?? "gray"} variant={props.tone === undefined ? "plain" : "tint"}>
+    <RemixChip tone={props.tone ?? "gray"} variant={props.tone === undefined ? "paper" : "wash"}>
       {props.label}
       {props.count === undefined ? null : (
         // A count inside a label would rename its field every time the count changes.
         <span aria-hidden={props.htmlFor !== undefined}>: {props.count}</span>
       )}
-    </OfficePill>
+    </RemixChip>
   );
   return props.htmlFor === undefined ? (
     <h3 className="flex">{pill}</h3>
@@ -601,8 +602,8 @@ function ShipSection(props: {
   };
 
   return (
-    <section className={OFFICE_INSET}>
-      <SectionTitle label="Ship" tone="emerald" />
+    <section className={REMIX_INSET}>
+      <SectionTitle label="Ship" tone="green" />
       {/* The branch itself, with its merged status, is listed under Linked work. */}
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={unavailable} onClick={() => void ship("pull_request")}>
@@ -636,18 +637,15 @@ function RelatedCard(props: {
       type="button"
       onClick={props.onOpen}
       className={cn(
-        OFFICE_CARD,
+        REMIX_CARD,
         "cursor-pointer flex-row items-center gap-3 p-3 text-start text-sm outline-none hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
       )}
     >
       <span className="text-muted-foreground">{props.prefix}</span>
       <span className="min-w-0 flex-1 truncate font-medium">{props.task.title}</span>
-      <OfficePill
-        tone={COLUMN_TONES[props.task.status]}
-        variant={statusPillVariant(props.task.status)}
-      >
+      <RemixChip tone={REMIX_COLUMN_TONES[props.task.status]}>
         {boardStatusLabel(props.task.status)}
-      </OfficePill>
+      </RemixChip>
     </button>
   );
 }
@@ -662,22 +660,22 @@ const WORK_LINK_ICONS: Record<BoardWorkLink["kind"], LucideIcon> = {
   file: FileIcon,
 };
 
-const WORK_LINK_TONES: Record<BoardWorkLink["kind"], Tone> = {
-  pull_request: "violet",
+const WORK_LINK_TONES: Record<BoardWorkLink["kind"], RemixTone> = {
+  pull_request: "purple",
   branch: "teal",
-  preview: "sky",
+  preview: "blue",
   commit: "teal",
-  document: "indigo",
+  document: "orange",
   other: "gray",
   file: "gray",
 };
 
 const WORK_LINK_STATUS_TONES = {
-  open: "sky",
+  open: "blue",
   draft: "gray",
-  merged: "emerald",
+  merged: "green",
   closed: "gray",
-} as const satisfies Record<NonNullable<BoardWorkLink["status"]>, Tone>;
+} as const satisfies Record<NonNullable<BoardWorkLink["status"]>, RemixTone>;
 
 function WorkLinkRow(props: {
   readonly link: BoardWorkLink;
@@ -690,10 +688,10 @@ function WorkLinkRow(props: {
   const agent = agentById(props.snapshot.agents, link.agentId);
   const href = /^https?:\/\//.test(link.url) ? link.url : null;
   return (
-    <div className={cn(OFFICE_CARD, "flex-row items-center gap-3 p-3 text-sm")}>
-      <OfficeIconTile tone={WORK_LINK_TONES[link.kind]}>
+    <div className={cn(REMIX_CARD, "flex-row items-center gap-3 p-3 text-sm")}>
+      <RemixIconTile tone={WORK_LINK_TONES[link.kind]}>
         <Icon />
-      </OfficeIconTile>
+      </RemixIconTile>
       {href !== null ? (
         <a
           href={href}
@@ -707,7 +705,9 @@ function WorkLinkRow(props: {
         <span className="min-w-0 truncate font-mono text-xs">{link.title}</span>
       )}
       {link.status !== null ? (
-        <OfficePill tone={WORK_LINK_STATUS_TONES[link.status]}>{link.status}</OfficePill>
+        <RemixChip tone={WORK_LINK_STATUS_TONES[link.status]} variant="wash">
+          {link.status}
+        </RemixChip>
       ) : null}
       {agent !== null ? (
         <AgentName agent={agent} className="ms-auto shrink-0 text-xs text-muted-foreground" />
@@ -753,7 +753,7 @@ function CommentRow(props: {
   }
   const authorName = comment.authorKind === "user" ? "You" : (agent?.name ?? "Agent");
   return (
-    <div className={cn(OFFICE_CARD, "gap-2.5")} data-office-markdown>
+    <div className={cn(REMIX_CARD, "gap-2.5")} data-office-markdown>
       <div className="flex min-w-0 items-center gap-2 text-xs">
         {comment.authorKind === "user" ? (
           <span
@@ -790,7 +790,7 @@ function RunRow(props: {
   const agent = agentById(props.snapshot.agents, props.run.agentId);
   const time = formatRelativeTimeLabel(props.run.startedAt);
   return (
-    <div className={cn(OFFICE_CARD, "flex-row items-center gap-3 p-3 text-sm")}>
+    <div className={cn(REMIX_CARD, "flex-row items-center gap-3 p-3 text-sm")}>
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
         {agent !== null ? (
           <AgentName agent={agent} className="font-medium" />
@@ -802,13 +802,11 @@ function RunRow(props: {
         </span>
       </span>
       {props.run.status === "running" ? (
-        <OfficePill tone="sky" variant="live">
-          {props.run.status}
-        </OfficePill>
+        <RemixChip tone="blue">{props.run.status}</RemixChip>
       ) : (
-        <OfficePill tone={props.run.status === "completed" ? "emerald" : "amber"}>
+        <RemixChip tone={props.run.status === "completed" ? "green" : "yellow"} variant="wash">
           {props.run.status}
-        </OfficePill>
+        </RemixChip>
       )}
       <Button size="xs" variant="ghost" onClick={props.onOpenThread}>
         Thread

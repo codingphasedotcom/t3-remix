@@ -36,6 +36,7 @@ import { resolveThreadStatusPill } from "../Sidebar.logic";
 import { ThreadStatusLabel } from "../ThreadStatusIndicators";
 import { AgentAvatar } from "../board/AgentAvatar";
 import { CompanyDialog } from "../board/CompanyDialog";
+import { RemixButton, RemixChip, RemixIconTile } from "../board/RemixSurface";
 import { useRunBoardCommand } from "../board/useRunBoardCommand";
 import { employeeThreadTitle, orgChartRows } from "../board/board.logic";
 import { Button } from "../ui/button";
@@ -131,10 +132,10 @@ function CompaniesForEnvironment(props: { readonly environmentId: EnvironmentId 
       <SidebarGroup className="flex-1">
         <div className="flex flex-col items-start gap-2 px-2 py-3 text-sm text-muted-foreground">
           <span>No companies yet. A company has a CEO and employees who work your tasks.</span>
-          <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+          <RemixButton variant="go" onClick={() => setCreating(true)}>
             <Building2Icon />
             Create a company
-          </Button>
+          </RemixButton>
         </div>
         {companyDialog}
       </SidebarGroup>
@@ -202,24 +203,22 @@ function CompanyNode(props: {
               open && "rotate-90",
             )}
           />
-          <Building2Icon className="size-4 shrink-0 text-sidebar-muted-foreground" />
+          <RemixIconTile tone="blue">
+            <Building2Icon />
+          </RemixIconTile>
           <span className="truncate">{props.company.name}</span>
           {props.company.pendingHireCount > 0 ? (
-            <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-2xs text-warning">
-              {props.company.pendingHireCount} hire
-            </span>
+            <RemixChip tone="yellow">{props.company.pendingHireCount} hire</RemixChip>
           ) : null}
         </button>
-        <Button
-          size="xs"
-          variant="outline"
+        <RemixButton
+          size="sm"
           aria-label={`Open ${props.company.name}'s dashboard`}
-          className="shrink-0"
           onClick={() => openDashboard(props.company.id)}
         >
           <LayoutDashboardIcon />
           Dashboard
-        </Button>
+        </RemixButton>
       </div>
       {open ? (
         <CompanyEmployees
