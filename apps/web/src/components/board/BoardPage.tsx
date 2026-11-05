@@ -18,6 +18,7 @@ import {
   FolderIcon,
   GaugeIcon,
   GitBranchIcon,
+  InboxIcon,
   KanbanSquareIcon,
   LayoutDashboardIcon,
   NetworkIcon,
@@ -77,6 +78,8 @@ import { BoardColumns } from "./BoardColumns";
 import { BoardNewCardDialog } from "./BoardNewCardDialog";
 import { CompanyDialog } from "./CompanyDialog";
 import { DashboardView } from "./DashboardView";
+import { InboxView } from "./InboxView";
+import { useBoardInbox } from "./boardInbox";
 import { OrgChartView } from "./OrgChartView";
 import { RoutinesView } from "./RoutinesView";
 import { SkillsView } from "./SkillsView";
@@ -95,7 +98,7 @@ import {
   OfficeTabs,
 } from "./OfficeSurface";
 
-export type BoardTab = "board" | "dashboard" | "org" | "skills" | "routines";
+export type BoardTab = "board" | "inbox" | "dashboard" | "org" | "skills" | "routines";
 
 export interface BoardPageProps {
   readonly environmentId?: EnvironmentId | undefined;
@@ -178,6 +181,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
   const projects = useCompanyProjects(environmentId);
   const snapshot = boardQuery.data;
+  const inbox = useBoardInbox(environmentId);
   const tab = props.tab ?? "board";
 
   const go = (search: {
@@ -243,6 +247,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         search={{
           ...(props.environmentId === undefined ? {} : { environmentId: props.environmentId }),
           company: firstCompany.id,
+          ...(props.tab === undefined ? {} : { tab: props.tab }),
         }}
       />
     );
@@ -359,6 +364,19 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           </div>
           <OfficeTabs label="Company views">
             <OfficeTab
+              active={tab === "inbox"}
+              icon={<InboxIcon />}
+              tone="amber"
+              onClick={() => go({ company: company.id, tab: "inbox" })}
+            >
+              Inbox
+              {inbox.length > 0 ? (
+                <Badge variant="warning" size="sm">
+                  {inbox.length}
+                </Badge>
+              ) : null}
+            </OfficeTab>
+            <OfficeTab
               active={tab === "dashboard"}
               icon={<LayoutDashboardIcon />}
               tone="emerald"
@@ -427,6 +445,13 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             onOpenCard={(cardId) => go({ company: company.id, card: cardId })}
           />
         </>
+      ) : tab === "inbox" ? (
+        <InboxView
+          items={inbox}
+          snapshot={snapshot}
+          onOpenTask={(companyId, taskId) => go({ company: companyId, card: taskId, tab })}
+          onOpenHires={(companyId) => go({ company: companyId, tab: "org" })}
+        />
       ) : tab === "dashboard" ? (
         <DashboardView
           environmentId={environmentId}

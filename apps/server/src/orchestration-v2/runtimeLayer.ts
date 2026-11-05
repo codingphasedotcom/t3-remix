@@ -56,6 +56,7 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as BoardService from "../board/BoardService.ts";
+import * as BoardAttachments from "../board/BoardAttachments.ts";
 import * as BoardStore from "../board/BoardStore.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 
@@ -296,6 +297,7 @@ const layerBoardProvided = BoardService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       BoardStore.layer,
+      BoardAttachments.layer,
       layerThreadLaunchProvided,
       layerThreadManagementProvided,
       layerManagedProjectFoldersProvided,

@@ -2,9 +2,11 @@ import type {
   BoardAgent,
   BoardAgentId,
   BoardComment,
+  BoardCommentId,
   BoardCompany,
   BoardSkill,
   BoardTask,
+  ChatAttachment,
 } from "@t3tools/contracts";
 
 import { assignableBy, chainOfCommand, departmentName, directReports } from "./boardOrg.ts";
@@ -39,13 +41,32 @@ export interface BoardPromptContext {
     readonly taskTitle: string;
     readonly path: string;
   }>;
+  /** The tasks this one waited on, which are done by the time it starts. */
+  readonly prerequisites: ReadonlyArray<BoardPrerequisite>;
+}
+
+/** A file attached to a person's comment, with where it is on this machine. */
+export interface CommentFile {
+  readonly attachment: ChatAttachment;
+  readonly path: string | null;
 }
 
 export interface BoardInstruction {
+  readonly commentId: BoardCommentId;
   readonly taskId: BoardTask["id"];
   readonly taskTitle: string;
   readonly body: string;
+  readonly files: ReadonlyArray<CommentFile>;
   readonly createdAt: string;
+}
+
+export interface BoardPrerequisite {
+  readonly task: BoardTask;
+  readonly branch: string | null;
+  /** Its branch landed in the base, or it worked in this task's own folder. */
+  readonly inYourFolder: boolean;
+  /** The last summary its agent left. */
+  readonly summary: string | null;
 }
 
 /** Where the agent's session runs, as its prompt describes it. */
@@ -60,7 +81,7 @@ export interface BoardWorkspace {
   readonly sharedWith: ReadonlyArray<BoardTask>;
 }
 
-const MAX_PROMPT_COMMENTS = 20;
+export const MAX_PROMPT_COMMENTS = 20;
 const MAX_PARENT_DESCRIPTION_CHARS = 600;
 
 function agentName(agents: ReadonlyArray<BoardAgent>, id: BoardAgentId | null): string {
@@ -208,6 +229,15 @@ function commentLines(context: BoardPromptContext, since?: string): ReadonlyArra
 }
 
 const MAX_BOARD_COMMENT_CHARS = 2_000;
+const MAX_PREREQUISITE_SUMMARY_CHARS = 600;
+
+function filesNote(files: ReadonlyArray<CommentFile>): string {
+  if (files.length === 0) return "";
+  const listed = files.map(({ attachment, path }) =>
+    path === null ? attachment.name : `${attachment.name} (${path})`,
+  );
+  return ` Attached: ${listed.join(", ")}. Open each from its path.`;
+}
 
 /**
  * What people said on this task and every task above it. Subtasks see their parents'
@@ -222,7 +252,10 @@ function boardCommentsBlock(context: BoardPromptContext, newSince?: string): str
   for (const comment of context.boardComments.slice(-MAX_PROMPT_COMMENTS)) {
     const where = comment.taskId === context.task.id ? "On this task" : `On "${comment.taskTitle}"`;
     const fresh = newSince !== undefined && comment.createdAt > newSince ? " (new)" : "";
-    lines.push(`- ${where}${fresh}: ${truncate(comment.body.trim(), MAX_BOARD_COMMENT_CHARS)}`);
+    const body = comment.body.trim().length > 0 ? comment.body.trim() : "(files only)";
+    lines.push(
+      `- ${where}${fresh}: ${truncate(body, MAX_BOARD_COMMENT_CHARS)}${filesNote(comment.files)}`,
+    );
   }
   return lines.join("\n");
 }
@@ -254,6 +287,23 @@ function taskBlock(context: BoardPromptContext): string {
       lines.push(
         `- ${file.path}${file.taskId === context.task.id ? "" : ` (attached to "${file.taskTitle}")`}`,
       );
+    }
+  }
+  if (context.prerequisites.length > 0) {
+    lines.push(
+      "",
+      "## Done before this task",
+      "This task waited for these to finish. Build on what they did instead of redoing it.",
+    );
+    for (const { task: done, branch, inYourFolder, summary } of context.prerequisites) {
+      const where = inYourFolder
+        ? "its work is in your folder"
+        : branch === null
+          ? "it changed no branch of its own"
+          : `its work is on ${branch} and not in your folder yet; if you need it, run \`git merge ${branch}\` first`;
+      const said =
+        summary === null ? "" : `: ${truncate(summary.trim(), MAX_PREREQUISITE_SUMMARY_CHARS)}`;
+      lines.push(`- ${done.title} (${done.id}), ${where}${said}`);
     }
   }
   if (context.subtasks.length > 0) {
@@ -355,7 +405,7 @@ You are an individual contributor: do this task's work yourself, in this workspa
       ? "Prefer delegating over doing the work yourself"
       : "You have no reports yet, so do the work yourself, and request hires with board_request_hire when the work needs people you do not have";
   return `## How you work
-You manage work. ${team}. To delegate, split this task into focused subtasks with board_create_task: set parentTaskId to this task, write what done looks like, assign the best-suited person, and use status "todo" so they start. Then comment with your plan and move this task to "blocked". Each finished subtask comes back to you here for review: approve it by moving it to "done", or move it back to "todo" with precise changes. Once every subtask is done this task returns to "todo" and you continue here: check that the pieces add up. ${finish} ${REMEMBER_RULE}`;
+You manage work. ${team}. To delegate, split this task into focused subtasks with board_create_task: set parentTaskId to this task, write what done looks like, assign the best-suited person, and use status "todo" so they start. When one subtask needs another's result, create the first, then give the second waitsOn with the first's id; it starts once the first is done. Then comment with your plan and move this task to "blocked". Each finished subtask comes back to you here for review: approve it by moving it to "done", or move it back to "todo" with precise changes. Once every subtask is done this task returns to "todo" and you continue here: check that the pieces add up. ${finish} ${REMEMBER_RULE}`;
 }
 
 export function buildWorkPrompt(context: BoardPromptContext, workspace: BoardWorkspace): string {
@@ -544,6 +594,11 @@ export function buildReplyPrompt(
   return sections.join("\n\n");
 }
 
-export function buildUserCommentMessage(task: BoardTask, body: string): string {
-  return `The board (a human) commented on your task "${task.title}" (${task.id}):\n\n${body}\n\nReply on the board with board_add_comment right away: answer it, or say how you will act on it. Then follow it.`;
+export function buildUserCommentMessage(
+  task: BoardTask,
+  body: string,
+  files: ReadonlyArray<CommentFile>,
+): string {
+  const said = body.trim().length > 0 ? body : "(files only)";
+  return `The board (a human) commented on your task "${task.title}" (${task.id}):\n\n${said}${files.length > 0 ? `\n\n${filesNote(files).trim()}` : ""}\n\nReply on the board with board_add_comment right away: answer it, or say how you will act on it. Then follow it.`;
 }

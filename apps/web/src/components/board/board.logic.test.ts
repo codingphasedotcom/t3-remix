@@ -32,6 +32,7 @@ function card(id: string, status: BoardTask["status"], position: number): BoardT
     assignedToUser: false,
     reviewerAgentId: null,
     parentTaskId: null,
+    waitsOnTaskIds: [],
     threadId: null,
     worktreePath: null,
     activeRunKind: null,

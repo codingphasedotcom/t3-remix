@@ -63,6 +63,7 @@ function card(id: string, status: BoardTask["status"], assignee: string | null):
     assignedToUser: false,
     reviewerAgentId: null,
     parentTaskId: null,
+    waitsOnTaskIds: [],
     threadId: null,
     worktreePath: null,
     activeRunKind: null,

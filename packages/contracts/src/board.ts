@@ -10,6 +10,7 @@ import {
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
+import { ChatAttachment } from "./chatAttachment.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
 
@@ -186,6 +187,14 @@ const TaskArchivedAt = Schema.NullOr(IsoDateTime)
       "When a person archived the finished task, with its subtasks. Archived tasks leave the board until restored.",
   });
 
+/** Servers from before tasks could wait on each other send none. */
+const WaitsOnTaskIds = Schema.Array(BoardTaskId)
+  .pipe(Schema.withDecodingDefault(Effect.succeed([])))
+  .annotate({
+    description:
+      "Tasks that must be done before this one starts. It waits in To do until every one is done.",
+  });
+
 export const BoardTask = Schema.Struct({
   id: BoardTaskId,
   companyId: BoardCompanyId,
@@ -198,6 +207,7 @@ export const BoardTask = Schema.Struct({
   assignedToUser: AssignedToUser,
   reviewerAgentId: Schema.NullOr(BoardAgentId),
   parentTaskId: Schema.NullOr(BoardTaskId),
+  waitsOnTaskIds: WaitsOnTaskIds,
   threadId: Schema.NullOr(ThreadId),
   worktreePath: Schema.NullOr(Schema.String),
   activeRunKind: Schema.NullOr(BoardRunKind),
@@ -209,8 +219,29 @@ export const BoardTask = Schema.Struct({
 });
 export type BoardTask = typeof BoardTask.Type;
 
+/** The tasks this one waits on that are not done yet, in the order it names them. */
+export function boardTaskWaitingOn(
+  task: BoardTask,
+  tasks: ReadonlyArray<BoardTask>,
+): ReadonlyArray<BoardTask> {
+  return task.waitsOnTaskIds.flatMap((id) => {
+    const prerequisite = tasks.find((candidate) => candidate.id === id);
+    return prerequisite === undefined || prerequisite.status === "done" ? [] : [prerequisite];
+  });
+}
+
 export const BoardCommentAuthorKind = Schema.Literals(["user", "agent", "system"]);
 export type BoardCommentAuthorKind = typeof BoardCommentAuthorKind.Type;
+
+export const MAX_BOARD_COMMENT_ATTACHMENTS = 10;
+
+/** Servers from before comments carried files send none. */
+const CommentAttachments = Schema.Array(ChatAttachment)
+  .pipe(Schema.withDecodingDefault(Effect.succeed([])))
+  .annotate({
+    description:
+      "Pictures and files a person attached. Agents receive pictures as images and every file by its path.",
+  });
 
 export const BoardComment = Schema.Struct({
   id: BoardCommentId,
@@ -218,6 +249,7 @@ export const BoardComment = Schema.Struct({
   authorKind: BoardCommentAuthorKind,
   authorAgentId: Schema.NullOr(BoardAgentId),
   body: Schema.String,
+  attachments: CommentAttachments,
   createdAt: IsoDateTime,
 });
 export type BoardComment = typeof BoardComment.Type;
@@ -357,6 +389,32 @@ export const BoardDashboard = Schema.Struct({
 });
 export type BoardDashboard = typeof BoardDashboard.Type;
 
+/**
+ * Something waiting on the person who owns the board: a task to review, a task an agent gave up
+ * on, a hire to decide, or a task of their own to do.
+ */
+export const BoardInboxKind = Schema.Literals(["review", "blocked", "hire", "todo"]);
+export type BoardInboxKind = typeof BoardInboxKind.Type;
+
+export const BoardInboxItem = Schema.Struct({
+  kind: BoardInboxKind,
+  companyId: BoardCompanyId,
+  companyName: TrimmedNonEmptyString,
+  taskId: Schema.NullOr(BoardTaskId),
+  hireId: Schema.NullOr(BoardHireId),
+  title: TrimmedNonEmptyString,
+  detail: Schema.NullOr(Schema.String).annotate({
+    description: "The last thing an agent said on the task, or why a hire is needed.",
+  }),
+  agentId: Schema.NullOr(BoardAgentId).annotate({
+    description: "Who it comes from: the task's assignee or the agent asking to hire.",
+  }),
+  since: IsoDateTime.annotate({
+    description: "When it started waiting; a task that comes back again gets a new time.",
+  }),
+});
+export type BoardInboxItem = typeof BoardInboxItem.Type;
+
 /** Every company's summary, plus the full board of the one being viewed. */
 export const BoardSnapshot = Schema.Struct({
   companies: Schema.Array(BoardCompanySummary),
@@ -371,6 +429,9 @@ export const BoardSnapshot = Schema.Struct({
   usage: Schema.NullOr(BoardUsage),
   dashboard: Schema.optional(BoardDashboard).annotate({
     description: "Present only for a subscription that asked for it.",
+  }),
+  inbox: Schema.optional(Schema.Array(BoardInboxItem)).annotate({
+    description: "What waits on the person in every company, oldest first. Only when asked for.",
   }),
 });
 export type BoardSnapshot = typeof BoardSnapshot.Type;
@@ -454,6 +515,10 @@ export const BoardSubscribeInput = Schema.Struct({
   ).annotate({
     description:
       "Also send the company's dashboard, with days starting at midnight in the viewer's UTC offset.",
+  }),
+  inbox: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Also send every company's inbox, and refresh when any company changes. Snapshots that change nothing are not sent.",
   }),
 });
 export type BoardSubscribeInput = typeof BoardSubscribeInput.Type;
@@ -588,6 +653,7 @@ export const BoardTaskCreateInput = Schema.Struct({
   }),
   reviewerAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
   parentTaskId: Schema.optional(Schema.NullOr(BoardTaskId)),
+  waitsOnTaskIds: Schema.optional(Schema.Array(BoardTaskId)),
 });
 export type BoardTaskCreateInput = typeof BoardTaskCreateInput.Type;
 
@@ -600,12 +666,21 @@ export const BoardTaskUpdateInput = Schema.Struct({
   assigneeAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
   assignedToUser: Schema.optional(Schema.Boolean),
   reviewerAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
+  waitsOnTaskIds: Schema.optional(Schema.Array(BoardTaskId)).annotate({
+    description: "Replaces every task this one waits on; an empty list removes them all.",
+  }),
 });
 export type BoardTaskUpdateInput = typeof BoardTaskUpdateInput.Type;
 
+/** A comment needs words, files, or both. */
 export const BoardCommentAddInput = Schema.Struct({
   taskId: BoardTaskId,
-  body: TrimmedNonEmptyString,
+  body: TrimmedString,
+  attachments: Schema.optional(
+    Schema.Array(ChatAttachment).check(Schema.isMaxLength(MAX_BOARD_COMMENT_ATTACHMENTS)),
+  ).annotate({
+    description: "Files uploaded with attachments.createUploadUrl, which the board keeps.",
+  }),
 });
 export type BoardCommentAddInput = typeof BoardCommentAddInput.Type;
 

@@ -1,4 +1,4 @@
-import type { BoardAgentId, BoardSnapshot, BoardTaskStatus } from "@t3tools/contracts";
+import type { BoardAgentId, BoardSnapshot, BoardTaskId, BoardTaskStatus } from "@t3tools/contracts";
 import { ClipboardPlusIcon, FileIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -21,6 +21,7 @@ import { mentionCandidates, type MentionCandidate } from "./boardMentions";
 import { FilePicker } from "./FilePicker";
 import { MentionField } from "./MentionField";
 import { OFFICE_CARD, OFFICE_INSET, OfficeHeading, OfficeIconTile } from "./OfficeSurface";
+import { WaitsOnField } from "./WaitsOnField";
 
 export function BoardNewCardDialog(props: {
   readonly open: boolean;
@@ -50,6 +51,7 @@ function NewCardForm(props: {
   const [assigneeFollowsMention, setAssigneeFollowsMention] = useState(true);
   const [reviewerAgentId, setReviewerAgentId] = useState<BoardAgentId | null>(null);
   const [files, setFiles] = useState<ReadonlyArray<string>>([]);
+  const [waitsOn, setWaitsOn] = useState<ReadonlyArray<BoardTaskId>>([]);
   const [saving, setSaving] = useState(false);
   const candidates = company === null ? [] : mentionCandidates([{ ...company, members: agents }]);
   const onMention = (candidate: MentionCandidate) => {
@@ -67,6 +69,7 @@ function NewCardForm(props: {
     setAssigneeFollowsMention(true);
     setReviewerAgentId(null);
     setFiles([]);
+    setWaitsOn([]);
   };
 
   const create = async (status: BoardTaskStatus) => {
@@ -83,6 +86,7 @@ function NewCardForm(props: {
         assignedToUser,
         reviewerAgentId: assignedToUser ? null : reviewerAgentId,
         ...(files.length > 0 ? { files } : {}),
+        ...(waitsOn.length > 0 ? { waitsOnTaskIds: [...waitsOn] } : {}),
       },
     });
     setSaving(false);
@@ -160,6 +164,13 @@ function NewCardForm(props: {
                 Agents use the files where they are on this computer; nothing is uploaded.
               </span>
             </div>
+            <div className={cn(OFFICE_INSET, "gap-2")}>
+              <Label>Waits on</Label>
+              <WaitsOnField tasks={props.snapshot.tasks} value={waitsOn} onChange={setWaitsOn} />
+              <span className="text-xs text-muted-foreground">
+                It stays in To do until every task here is done.
+              </span>
+            </div>
             <div className={cn(OFFICE_INSET, "grid grid-cols-2 gap-3")}>
               <div className="flex flex-col gap-2">
                 <Label>Assignee</Label>
@@ -212,7 +223,11 @@ function NewCardForm(props: {
             }
             onClick={() => void create("todo")}
           >
-            {assignedToUser ? "Add to To do" : "Add and start"}
+            {assignedToUser
+              ? "Add to To do"
+              : waitsOn.length > 0
+                ? "Add to To do"
+                : "Add and start"}
           </Button>
         </DialogFooter>
       </DialogPopup>

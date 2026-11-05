@@ -12,17 +12,19 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import type {
-  BoardRunKind,
-  BoardSnapshot,
-  BoardTask,
-  BoardTaskId,
-  BoardTaskStatus,
+import {
+  boardTaskWaitingOn,
+  type BoardRunKind,
+  type BoardSnapshot,
+  type BoardTask,
+  type BoardTaskId,
+  type BoardTaskStatus,
 } from "@t3tools/contracts";
 import {
   ArchiveIcon,
   ChevronRightIcon,
   ClockIcon,
+  HourglassIcon,
   ListTreeIcon,
   MessageSquareIcon,
 } from "lucide-react";
@@ -291,6 +293,7 @@ function BoardCardFace(props: {
   // A card you keep never goes to a reviewer, so a leftover one isn't shown.
   const reviewer = task.assignedToUser ? null : agentById(snapshot.agents, task.reviewerAgentId);
   const progress = subtaskProgress(snapshot.tasks, task.id);
+  const waiting = task.status === "todo" ? boardTaskWaitingOn(task, snapshot.tasks) : [];
   const parent =
     task.parentTaskId === null
       ? null
@@ -353,6 +356,20 @@ function BoardCardFace(props: {
         </span>
       ) : null}
       <span className="line-clamp-3 text-base leading-snug font-medium">{task.title}</span>
+      {waiting.length > 0 ? (
+        <span
+          className={cn(
+            "-mt-1 flex min-w-0 items-center gap-1.5 text-xs",
+            live ? "text-primary-foreground/75" : "text-muted-foreground",
+          )}
+        >
+          <HourglassIcon className="size-3.5 shrink-0" />
+          <span className="truncate">
+            Waits on {waiting[0]!.title}
+            {waiting.length > 1 ? ` and ${waiting.length - 1} more` : ""}
+          </span>
+        </span>
+      ) : null}
       <div className="flex items-center gap-3">
         {progress.total > 0 ? (
           <CardStat

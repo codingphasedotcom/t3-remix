@@ -189,6 +189,7 @@ const make = Effect.gen(function* () {
                 ? {}
                 : { reviewerAgentId: input.reviewerAgentId }),
               ...(input.status === undefined ? {} : { status: input.status }),
+              ...(input.waitsOn === undefined ? {} : { waitsOnTaskIds: input.waitsOn }),
             },
             yield* actor(),
           )
@@ -212,6 +213,7 @@ const make = Effect.gen(function* () {
               ...(input.reviewerAgentId === undefined
                 ? {}
                 : { reviewerAgentId: input.reviewerAgentId }),
+              ...(input.waitsOn === undefined ? {} : { waitsOnTaskIds: input.waitsOn }),
             },
             yield* actor(),
           )

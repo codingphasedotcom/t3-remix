@@ -137,6 +137,10 @@ const BoardCreateTaskTool = Tool.make("board_create_task", {
     assigneeAgentId: Schema.optional(BoardAgentId),
     reviewerAgentId: Schema.optional(BoardAgentId),
     status: Schema.optional(Schema.Literals(["backlog", "todo"])),
+    waitsOn: Schema.optional(Schema.Array(BoardTaskId)).annotate({
+      description:
+        "Tasks that must be done first, such as the subtask whose result this one builds on. It waits in todo until they are.",
+    }),
   }),
   success: Schema.Struct({ task: BoardTask }),
 }).annotate(Tool.Destructive, false);
@@ -152,6 +156,9 @@ const BoardUpdateTaskTool = Tool.make("board_update_task", {
     description: Schema.optional(Schema.String),
     assigneeAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
     reviewerAgentId: Schema.optional(Schema.NullOr(BoardAgentId)),
+    waitsOn: Schema.optional(Schema.Array(BoardTaskId)).annotate({
+      description: "Replaces the tasks it waits on; an empty list lets it start now.",
+    }),
   }),
   success: Schema.Struct({ task: BoardTask }),
 }).annotate(Tool.Destructive, false);

@@ -1,10 +1,4 @@
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  Building2Icon,
-  ChartNoAxesColumnIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -22,6 +16,7 @@ import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
 import { APP_BASE_NAME } from "../../branding";
 import { T3Wordmark } from "../T3Wordmark";
+import { CompaniesNavIcon } from "../board/CompaniesNavIcon";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -293,7 +288,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             />
           ) : null}
           <SidebarUtilityItem
-            icon={<Building2Icon />}
+            icon={<CompaniesNavIcon />}
             label="Companies"
             onClick={handleBoardClick}
           />
