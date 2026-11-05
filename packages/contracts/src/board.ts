@@ -99,12 +99,18 @@ export const BoardCompany = Schema.Struct({
 });
 export type BoardCompany = typeof BoardCompany.Type;
 
+const InstalledSkillPath = Schema.NullOr(TrimmedNonEmptyString).annotate({
+  description:
+    "The SKILL.md of a skill installed on this computer. Its file holds the instructions.",
+});
+
 export const BoardSkill = Schema.Struct({
   id: BoardSkillId,
   companyId: BoardCompanyId,
   name: TrimmedNonEmptyString,
   description: Schema.String,
   instructions: Schema.String,
+  installedPath: InstalledSkillPath.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -593,6 +599,7 @@ export const BoardSkillUpsertInput = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.String,
   instructions: Schema.String,
+  installedPath: Schema.optional(InstalledSkillPath),
 });
 export type BoardSkillUpsertInput = typeof BoardSkillUpsertInput.Type;
 

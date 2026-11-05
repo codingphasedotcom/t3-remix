@@ -8,7 +8,9 @@ import type {
   BoardTaskCreateInput,
   BoardTaskId,
   BoardTaskStatus,
+  ServerProvider,
 } from "@t3tools/contracts";
+import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 
 export interface BoardColumn {
   readonly status: BoardTaskStatus;
@@ -376,4 +378,52 @@ export function repeatLabel(everyDays: number): string {
 export function localDateTimeInput(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** A skill installed for one or more coding agents on the environment's machine. */
+export interface InstalledSkill {
+  readonly name: string;
+  readonly description: string;
+  /** Its SKILL.md files; the same skill is often installed once per agent. */
+  readonly paths: ReadonlyArray<string>;
+  /** The providers that have it, by display name. */
+  readonly providers: ReadonlyArray<string>;
+}
+
+/** Every enabled skill of the enabled providers, once per name, as seen from `cwd`. */
+export function installedSkillsFor(
+  providers: ReadonlyArray<{
+    readonly displayName: string;
+    readonly enabled: boolean;
+    readonly snapshot: ServerProvider;
+  }>,
+  cwd: string | null,
+): ReadonlyArray<InstalledSkill> {
+  const byName = new Map<string, InstalledSkill>();
+  const add = (list: ReadonlyArray<string>, item: string) =>
+    list.includes(item) ? list : [...list, item];
+  for (const provider of providers) {
+    if (!provider.enabled) continue;
+    for (const skill of resolveProviderSkillsForCwd(provider.snapshot, cwd)) {
+      if (!skill.enabled) continue;
+      const key = skill.name.toLowerCase();
+      const known = byName.get(key);
+      byName.set(
+        key,
+        known === undefined
+          ? {
+              name: skill.name,
+              description: skill.description ?? skill.shortDescription ?? "",
+              paths: [skill.path],
+              providers: [provider.displayName],
+            }
+          : {
+              ...known,
+              paths: add(known.paths, skill.path),
+              providers: add(known.providers, provider.displayName),
+            },
+      );
+    }
+  }
+  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
 }

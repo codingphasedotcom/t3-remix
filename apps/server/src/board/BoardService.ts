@@ -59,6 +59,7 @@ import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -193,6 +194,11 @@ export class BoardService extends Context.Service<
       companyId: BoardCompanyId,
       query: string,
     ) => Effect.Effect<ReadonlyArray<BoardCardMatch>, BoardError>;
+    /** A library skill by id or name; an installed one comes with its SKILL.md as instructions. */
+    readonly readSkill: (
+      companyId: BoardCompanyId,
+      skill: string,
+    ) => Effect.Effect<BoardSkill, BoardError>;
     /** Applies one client mutation; the RPC transport sends every board write through here. */
     readonly runCommand: (
       command: BoardCommand,
@@ -231,12 +237,16 @@ function fileName(path: string): string {
 /** "2026-10-20:" or "2026-10-20 (Grace):" at the start of a memory note. */
 const LEADING_NOTE_DATE = /^\d{4}-\d{2}-\d{2}(?:\s*\([^)]*\))?\s*[:\u2013\u2014-]\s*/;
 
+/** The tail of an installed skill's path; what is left names its folder. */
+const INSTALLED_SKILL_FILE = /[\\/]SKILL\.md$/;
+
 function boardError(message: string, cause?: unknown): BoardError {
   return new BoardError({ message, ...(cause === undefined ? {} : { cause }) });
 }
 
 const make = Effect.gen(function* () {
   const store = yield* BoardStore.BoardStore;
+  const fileSystem = yield* FileSystem.FileSystem;
   const files = yield* BoardAttachments.BoardAttachments;
   const providers = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
@@ -841,19 +851,59 @@ const make = Effect.gen(function* () {
     if (existing !== null && existing.companyId !== input.companyId) {
       return yield* boardError("That skill belongs to another company.");
     }
+    const installedPath =
+      input.installedPath === undefined ? (existing?.installedPath ?? null) : input.installedPath;
+    if (installedPath !== null && !INSTALLED_SKILL_FILE.test(installedPath)) {
+      return yield* boardError("An installed skill is added by the path of its SKILL.md file.");
+    }
     const at = yield* store.now;
     const skill: BoardSkill = {
       id: existing?.id ?? BoardSkillId.make(yield* store.newId("board-skill")),
       companyId: input.companyId,
       name: input.name,
       description: input.description,
-      instructions: input.instructions,
+      instructions: installedPath === null ? input.instructions : "",
+      installedPath,
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
     };
     yield* store.upsertSkill(skill);
     yield* notify(input.companyId);
     return skill;
+  });
+
+  const readSkill = Effect.fn("BoardService.readSkill")(function* (
+    companyId: BoardCompanyId,
+    wanted: string,
+  ) {
+    const skills = yield* store.listSkills(companyId);
+    const name = wanted.toLowerCase();
+    const skill = skills.find(
+      (candidate) => candidate.id === wanted || candidate.name.toLowerCase() === name,
+    );
+    if (skill === undefined) {
+      return yield* boardError(
+        `No skill named "${wanted}". Skills: ${skills.map((candidate) => candidate.name).join(", ") || "none"}.`,
+      );
+    }
+    const path = skill.installedPath;
+    if (path === null) return skill;
+    // Read on every call, so agents follow the skill as it is installed now.
+    const contents = yield* fileSystem
+      .readFileString(path)
+      .pipe(
+        Effect.mapError((cause) =>
+          boardError(
+            `The installed skill "${skill.name}" is no longer at ${path}. Ask a person to install it again or remove it from the skill library.`,
+            cause,
+          ),
+        ),
+      );
+    const folder = path.replace(INSTALLED_SKILL_FILE, "");
+    return {
+      ...skill,
+      instructions: `This skill's files are in ${folder}. Paths it mentions are relative to that folder.\n\n${contents}`,
+    };
   });
 
   const deleteSkill = Effect.fn("BoardService.deleteSkill")(function* (id: BoardSkillId) {
@@ -2494,6 +2544,7 @@ const make = Effect.gen(function* () {
     remember,
     rewriteMemory,
     searchCards,
+    readSkill,
     runCommand,
     assignmentForThread,
   });

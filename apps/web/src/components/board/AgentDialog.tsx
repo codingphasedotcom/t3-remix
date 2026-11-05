@@ -462,7 +462,7 @@ function AgentForm(props: {
                       <span className="flex min-w-0 flex-col gap-0.5">
                         <span className="text-sm font-medium text-foreground">{skill.name}</span>
                         {skill.description ? (
-                          <span className="text-xs leading-snug text-muted-foreground">
+                          <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
                             {skill.description}
                           </span>
                         ) : null}

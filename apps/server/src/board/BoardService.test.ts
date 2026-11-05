@@ -69,6 +69,8 @@ const pullRequestOpened = {
   toast: { title: "Created PR", cta: { kind: "none" } },
 } as unknown as GitRunStackedActionResult;
 
+const INSTALLED_SKILL = "/home/me/.claude/skills/design-review/SKILL.md";
+
 const makeHarness = Effect.gen(function* () {
   const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchService.ThreadLaunchInput>>([]);
   const gitActions = yield* Ref.make<ReadonlyArray<GitRunStackedActionInput>>([]);
@@ -147,7 +149,11 @@ const makeHarness = Effect.gen(function* () {
         } as GitVcsDriver.ExecuteGitResult;
       }),
   });
-  const fileSystem = FileSystem.layerNoop({ realPath: (path) => Effect.succeed(path) });
+  const fileSystem = FileSystem.layerNoop({
+    realPath: (path) => Effect.succeed(path),
+    readFileString: (path) =>
+      path === INSTALLED_SKILL ? Effect.succeed("Check every page at phone width.") : Effect.never,
+  });
   // The board keeps "board-" copies of uploads; each thread gets copies named after it.
   const removedFiles = yield* Ref.make<ReadonlyArray<string>>([]);
   const renamed = (attachment: ChatAttachment, id: string): ChatAttachment => ({
@@ -1772,7 +1778,7 @@ it.effect("a busy manager's review waits for its thread unless a person starts i
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
-it.effect("lists long skills by name for the agent to read when needed", () =>
+it.effect("lists long and installed skills by name for the agent to read when needed", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
@@ -1790,15 +1796,51 @@ it.effect("lists long skills by name for the agent to read when needed", () =>
         },
         user,
       );
+      const { skill: installed } = yield* board.runCommand(
+        {
+          type: "skill.upsert",
+          skill: {
+            companyId: company.id,
+            name: "design-review",
+            description: "Reviews a page's design.",
+            instructions: "",
+            installedPath: INSTALLED_SKILL,
+          },
+        },
+        user,
+      );
       yield* board.runCommand(
-        { type: "agent.upsert", agent: { ...lead, skillIds: [skill!.id] } },
+        { type: "agent.upsert", agent: { ...lead, skillIds: [skill!.id, installed!.id] } },
         user,
       );
       yield* startTaskFor(board, company.id, "Ship v2", lead.id);
       const prompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
       assert.include(prompt, "Read each skill that applies to this task with board_read_skill");
       assert.include(prompt, "- Release process: How we ship.");
+      assert.include(prompt, "- design-review: Reviews a page's design.");
       assert.notInclude(prompt, "Step. Step.");
+      // An installed skill is read from its SKILL.md, so agents follow it as installed now.
+      const read = yield* board.readSkill(company.id, "Design-Review");
+      assert.equal(
+        read.instructions,
+        "This skill's files are in /home/me/.claude/skills/design-review. Paths it mentions are relative to that folder.\n\nCheck every page at phone width.",
+      );
+      const notASkill = yield* board
+        .runCommand(
+          {
+            type: "skill.upsert",
+            skill: {
+              companyId: company.id,
+              name: "Secrets",
+              description: "",
+              instructions: "",
+              installedPath: "/home/me/.ssh/id_ed25519",
+            },
+          },
+          user,
+        )
+        .pipe(Effect.flip);
+      assert.include(notASkill.message, "SKILL.md");
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

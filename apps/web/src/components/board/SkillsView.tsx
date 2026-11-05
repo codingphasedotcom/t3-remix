@@ -1,5 +1,12 @@
-import type { BoardSkill, BoardSkillId, BoardSnapshot } from "@t3tools/contracts";
-import { PencilIcon, PlusIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import type { BoardSkill, BoardSkillId, BoardSnapshot, EnvironmentId } from "@t3tools/contracts";
+import {
+  CheckIcon,
+  PackageIcon,
+  PencilIcon,
+  PlusIcon,
+  SparklesIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -20,8 +27,9 @@ import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import { Textarea } from "../ui/textarea";
 import { AgentName } from "./AgentAvatar";
+import { useModelChoices } from "./AgentDialog";
 import type { RunBoardCommand } from "./BoardPage";
-import { SKILL_PRESETS } from "./board.logic";
+import { SKILL_PRESETS, installedSkillsFor, type InstalledSkill } from "./board.logic";
 import {
   OFFICE_CARD,
   OFFICE_INSET,
@@ -42,13 +50,20 @@ interface SkillDraft {
 const EMPTY_SKILL: SkillDraft = { id: null, name: "", description: "", instructions: "" };
 
 export function SkillsView(props: {
+  readonly environmentId: EnvironmentId;
   readonly snapshot: BoardSnapshot;
   readonly canOperate: boolean;
   readonly runCommand: RunBoardCommand;
+  /** The company's project folder, where project skills are found. */
+  readonly cwd: string | null;
 }) {
   const { snapshot } = props;
   const company = snapshot.company;
   const [draft, setDraft] = useState<SkillDraft | null>(null);
+  const installed = installedSkillsFor(
+    useModelChoices(props.environmentId, company?.projectId ?? null).instanceEntries,
+    props.cwd,
+  );
   if (company === null) return null;
   const missingPresets = SKILL_PRESETS.filter(
     (preset) => !snapshot.skills.some((skill) => skill.name === preset.name),
@@ -109,13 +124,28 @@ export function SkillsView(props: {
                   <SparklesIcon />
                 </OfficeIconTile>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <span className="text-base leading-snug font-medium">{skill.name}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-base leading-snug font-medium">
+                      {skill.name}
+                    </span>
+                    {skill.installedPath !== null ? (
+                      <OfficePill tone="teal">Installed</OfficePill>
+                    ) : null}
+                  </span>
                   {skill.description ? (
-                    <span className="text-xs text-muted-foreground">{skill.description}</span>
+                    <span className="line-clamp-2 text-xs text-muted-foreground">
+                      {skill.description}
+                    </span>
                   ) : null}
-                  <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
-                    {skill.instructions}
-                  </p>
+                  {skill.installedPath !== null ? (
+                    <span className="truncate font-mono text-xs text-muted-foreground">
+                      {skill.installedPath}
+                    </span>
+                  ) : (
+                    <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                      {skill.instructions}
+                    </p>
+                  )}
                   {holders.length > 0 ? (
                     <div className="flex flex-wrap gap-1 pt-1">
                       {holders.map((agent) => (
@@ -127,22 +157,25 @@ export function SkillsView(props: {
                   ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={`Edit ${skill.name}`}
-                    disabled={!props.canOperate}
-                    onClick={() =>
-                      setDraft({
-                        id: skill.id,
-                        name: skill.name,
-                        description: skill.description,
-                        instructions: skill.instructions,
-                      })
-                    }
-                  >
-                    <PencilIcon />
-                  </Button>
+                  {/* An installed skill is edited where it is installed. */}
+                  {skill.installedPath === null ? (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`Edit ${skill.name}`}
+                      disabled={!props.canOperate}
+                      onClick={() =>
+                        setDraft({
+                          id: skill.id,
+                          name: skill.name,
+                          description: skill.description,
+                          instructions: skill.instructions,
+                        })
+                      }
+                    >
+                      <PencilIcon />
+                    </Button>
+                  ) : null}
                   <Button
                     size="icon-sm"
                     variant="ghost-destructive"
@@ -157,6 +190,23 @@ export function SkillsView(props: {
             );
           })}
         </div>
+        <InstalledSkills
+          skills={installed}
+          library={snapshot.skills}
+          canOperate={props.canOperate}
+          onAdd={(skill) =>
+            props.runCommand({
+              type: "skill.upsert",
+              skill: {
+                companyId: company.id,
+                name: skill.name,
+                description: skill.description,
+                instructions: "",
+                installedPath: skill.paths[0]!,
+              },
+            })
+          }
+        />
       </div>
       <Dialog
         open={draft !== null}
@@ -188,6 +238,97 @@ export function SkillsView(props: {
         </DialogPopup>
       </Dialog>
     </ScrollArea>
+  );
+}
+
+/** A long list gets a filter; most people have a handful of skills, some have hundreds. */
+const FILTER_FROM = 8;
+
+function InstalledSkills(props: {
+  readonly skills: ReadonlyArray<InstalledSkill>;
+  readonly library: ReadonlyArray<BoardSkill>;
+  readonly canOperate: boolean;
+  readonly onAdd: (skill: InstalledSkill) => Promise<unknown>;
+}) {
+  const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState<string | null>(null);
+  const wanted = query.trim().toLowerCase();
+  const shown =
+    wanted.length === 0
+      ? props.skills
+      : props.skills.filter(
+          (skill) =>
+            skill.name.toLowerCase().includes(wanted) ||
+            skill.description.toLowerCase().includes(wanted),
+        );
+  const inLibrary = new Set(props.library.map((skill) => skill.installedPath));
+  return (
+    <>
+      <OfficeHeading
+        icon={<PackageIcon />}
+        tone="teal"
+        title={<OfficeTitle>Installed skills</OfficeTitle>}
+        description="Skills your coding agents already have on the computer this company runs on. Add one to the library, then give it to agents like any other skill."
+      />
+      <div className={OFFICE_PANEL}>
+        <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
+          <OfficePill tone="teal">Installed: {props.skills.length}</OfficePill>
+          {props.skills.length >= FILTER_FROM ? (
+            <Input
+              type="search"
+              size="sm"
+              className="ms-auto w-56"
+              aria-label="Filter installed skills"
+              placeholder="Filter skills"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          ) : null}
+        </div>
+        {props.skills.length === 0 ? (
+          <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>
+            No installed skills found. Skills you install for Claude Code, Codex, and your other
+            agents show up here.
+          </div>
+        ) : shown.length === 0 ? (
+          <div className={cn(OFFICE_CARD, "text-sm text-muted-foreground")}>
+            No installed skill matches “{query.trim()}”.
+          </div>
+        ) : null}
+        {shown.map((skill) => {
+          const added = skill.paths.some((path) => inLibrary.has(path));
+          return (
+            <div key={skill.name} className={cn(OFFICE_CARD, "flex-row items-center gap-3 py-3")}>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-sm font-medium">{skill.name}</span>
+                {skill.description ? (
+                  <span className="line-clamp-2 text-xs text-muted-foreground">
+                    {skill.description}
+                  </span>
+                ) : null}
+                <span className="truncate text-xs text-muted-foreground">
+                  {skill.providers.join(", ")}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                disabled={!props.canOperate || added || adding === skill.name}
+                onClick={async () => {
+                  setAdding(skill.name);
+                  await props.onAdd(skill);
+                  setAdding(null);
+                }}
+              >
+                {added ? <CheckIcon /> : <PlusIcon />}
+                {added ? "In library" : "Add"}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 

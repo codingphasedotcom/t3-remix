@@ -474,7 +474,13 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
         />
       ) : (
-        <SkillsView snapshot={snapshot} canOperate={canOperate} runCommand={runCommand} />
+        <SkillsView
+          environmentId={environmentId}
+          snapshot={snapshot}
+          canOperate={canOperate}
+          runCommand={runCommand}
+          cwd={home?.workspaceRoot ?? null}
+        />
       )}
 
       {companyDialog}

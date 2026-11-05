@@ -177,25 +177,31 @@ function skillsBlock(context: BoardPromptContext): string | null {
     .map((id) => context.skills.find((skill) => skill.id === id))
     .filter((skill) => skill !== undefined);
   if (skills.length === 0) return null;
-  const total = skills.reduce((sum, skill) => sum + skill.instructions.length, 0);
-  if (total > MAX_INLINE_SKILL_CHARS) {
-    return [
-      "## Your skills",
-      "Read each skill that applies to this task with board_read_skill before you start.",
-      ...skills.map(
-        (skill) =>
-          `- ${skill.name}${skill.description.trim() ? `: ${skill.description.trim()}` : ""}`,
-      ),
-    ].join("\n");
+  // An installed skill's instructions live in its SKILL.md, which board_read_skill reads.
+  const written = skills.filter((skill) => skill.installedPath === null);
+  const total = written.reduce((sum, skill) => sum + skill.instructions.length, 0);
+  const inline = total > MAX_INLINE_SKILL_CHARS ? [] : written;
+  const listed = skills.filter((skill) => !inline.includes(skill));
+  const sections = ["## Your skills"];
+  if (listed.length > 0) {
+    sections.push(
+      [
+        "Read each skill that applies to this task with board_read_skill before you start.",
+        ...listed.map(
+          (skill) =>
+            `- ${skill.name}${skill.description.trim() ? `: ${skill.description.trim()}` : ""}`,
+        ),
+      ].join("\n"),
+    );
   }
-  return [
-    "## Your skills",
-    ...skills.map((skill) =>
+  for (const skill of inline) {
+    sections.push(
       [`### ${skill.name}`, skill.description.trim(), skill.instructions.trim()]
         .filter((part) => part.length > 0)
         .join("\n\n"),
-    ),
-  ].join("\n\n");
+    );
+  }
+  return sections.join("\n\n");
 }
 
 function memoryBlock(context: BoardPromptContext): string | null {

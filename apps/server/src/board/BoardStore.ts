@@ -314,6 +314,7 @@ interface SkillRow {
   readonly name: string;
   readonly description: string;
   readonly instructions: string;
+  readonly installed_path: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -580,6 +581,9 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_skills_company ON board_skills(company_id)`;
+  if (!(yield* columns("board_skills")).has("installed_path")) {
+    yield* sql`ALTER TABLE board_skills ADD COLUMN installed_path TEXT`;
+  }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_agents (
       agent_id TEXT PRIMARY KEY,
@@ -837,6 +841,7 @@ const make = Effect.gen(function* () {
       name: row.name,
       description: row.description,
       instructions: row.instructions,
+      installedPath: row.installed_path,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
@@ -1088,16 +1093,18 @@ const make = Effect.gen(function* () {
   const upsertSkill: BoardStore["Service"]["upsertSkill"] = (skill) =>
     sql`
       INSERT INTO board_skills (
-        skill_id, company_id, name, description, instructions, created_at, updated_at
+        skill_id, company_id, name, description, instructions, installed_path, created_at,
+        updated_at
       )
       VALUES (
         ${skill.id}, ${skill.companyId}, ${skill.name}, ${skill.description},
-        ${skill.instructions}, ${skill.createdAt}, ${skill.updatedAt}
+        ${skill.instructions}, ${skill.installedPath}, ${skill.createdAt}, ${skill.updatedAt}
       )
       ON CONFLICT (skill_id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
         instructions = excluded.instructions,
+        installed_path = excluded.installed_path,
         updated_at = excluded.updated_at
     `.pipe(Effect.asVoid, failWith("Could not save the skill."));
 

@@ -79,6 +79,12 @@ Agents receive the instructions of every skill they have on each task they work;
 employee's skills add up to more than a page, the prompt lists them by name and the agent reads
 the ones that apply.
 
+**Installed skills** on the same tab lists the skills your coding agents already have on the
+computer the company runs on, such as Claude Code skills and plugins or Codex skills, along with
+those in the company's project. **Add** one to put it in the library, then tick it on employees
+like any other skill. An agent reads an installed skill from its own folder each time it uses it,
+so it always follows the skill as installed now. Edit or update it where it is installed.
+
 ## How work flows
 
 - A task in **To do** with an assignee starts that agent in a new thread, once every task it
