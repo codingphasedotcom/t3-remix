@@ -18,6 +18,7 @@ import {
   FolderIcon,
   GaugeIcon,
   GitBranchIcon,
+  InboxIcon,
   KanbanSquareIcon,
   LayoutDashboardIcon,
   NetworkIcon,
@@ -76,6 +77,8 @@ import { BoardColumns } from "./BoardColumns";
 import { BoardNewCardDialog } from "./BoardNewCardDialog";
 import { CompanyDialog } from "./CompanyDialog";
 import { DashboardView } from "./DashboardView";
+import { InboxView } from "./InboxView";
+import { useBoardInbox } from "./boardInbox";
 import { OrgChartView } from "./OrgChartView";
 import { RoutinesView } from "./RoutinesView";
 import { SkillsView } from "./SkillsView";
@@ -93,7 +96,7 @@ import {
   type RemixTone,
 } from "./RemixSurface";
 
-export type BoardTab = "board" | "dashboard" | "org" | "skills" | "routines";
+export type BoardTab = "board" | "inbox" | "dashboard" | "org" | "skills" | "routines";
 
 export interface BoardPageProps {
   readonly environmentId?: EnvironmentId | undefined;
@@ -176,6 +179,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
   const projects = useCompanyProjects(environmentId);
   const snapshot = boardQuery.data;
+  const inbox = useBoardInbox(environmentId);
   const tab = props.tab ?? "board";
 
   const go = (search: {
@@ -241,6 +245,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         search={{
           ...(props.environmentId === undefined ? {} : { environmentId: props.environmentId }),
           company: firstCompany.id,
+          ...(props.tab === undefined ? {} : { tab: props.tab }),
         }}
       />
     );
@@ -359,6 +364,13 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           </div>
           <nav aria-label="Company views" className="flex min-w-0 items-center gap-1.5">
             <RemixTab
+              active={tab === "inbox"}
+              icon={<InboxIcon />}
+              label="Inbox"
+              badge={inbox.length > 0 ? <RemixChip tone="yellow">{inbox.length}</RemixChip> : null}
+              onClick={() => go({ company: company.id, tab: "inbox" })}
+            />
+            <RemixTab
               active={tab === "dashboard"}
               icon={<LayoutDashboardIcon />}
               label="Dashboard"
@@ -413,6 +425,13 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             onOpenCard={(cardId) => go({ company: company.id, card: cardId })}
           />
         </>
+      ) : tab === "inbox" ? (
+        <InboxView
+          items={inbox}
+          snapshot={snapshot}
+          onOpenTask={(companyId, taskId) => go({ company: companyId, card: taskId, tab })}
+          onOpenHires={(companyId) => go({ company: companyId, tab: "org" })}
+        />
       ) : tab === "dashboard" ? (
         <DashboardView
           environmentId={environmentId}
@@ -438,7 +457,13 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
         />
       ) : (
-        <SkillsView snapshot={snapshot} canOperate={canOperate} runCommand={runCommand} />
+        <SkillsView
+          environmentId={environmentId}
+          snapshot={snapshot}
+          canOperate={canOperate}
+          runCommand={runCommand}
+          cwd={home?.workspaceRoot ?? null}
+        />
       )}
 
       {companyDialog}

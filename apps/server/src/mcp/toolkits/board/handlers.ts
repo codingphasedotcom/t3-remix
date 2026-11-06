@@ -189,6 +189,7 @@ const make = Effect.gen(function* () {
                 ? {}
                 : { reviewerAgentId: input.reviewerAgentId }),
               ...(input.status === undefined ? {} : { status: input.status }),
+              ...(input.waitsOn === undefined ? {} : { waitsOnTaskIds: input.waitsOn }),
             },
             yield* actor(),
           )
@@ -212,6 +213,7 @@ const make = Effect.gen(function* () {
               ...(input.reviewerAgentId === undefined
                 ? {}
                 : { reviewerAgentId: input.reviewerAgentId }),
+              ...(input.waitsOn === undefined ? {} : { waitsOnTaskIds: input.waitsOn }),
             },
             yield* actor(),
           )
@@ -291,17 +293,9 @@ const make = Effect.gen(function* () {
     board_read_skill: McpToolAccess.reads((input) =>
       Effect.gen(function* () {
         const { companyId } = yield* callerContext(input.companyId);
-        const snapshot = yield* companyBoard(companyId);
-        const wanted = input.skill.toLowerCase();
-        const skill = snapshot.skills.find(
-          (candidate) => candidate.id === input.skill || candidate.name.toLowerCase() === wanted,
-        );
-        if (skill === undefined) {
-          return yield* new OrchestratorMcpFailure({
-            code: "invalid_request",
-            message: `No skill named "${input.skill}". Skills: ${snapshot.skills.map((candidate) => candidate.name).join(", ") || "none"}.`,
-          });
-        }
+        const skill = yield* board
+          .readSkill(companyId, input.skill)
+          .pipe(Effect.mapError(boardFailure));
         return { skill };
       }),
     ),

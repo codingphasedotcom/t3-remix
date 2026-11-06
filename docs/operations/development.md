@@ -246,6 +246,12 @@ T3 Office, so macOS treats the renamed app as the same one. Leave
 upstream. The `t3code://` link scheme stays shared, so an outside `t3code://` link may open
 either app.
 
+T3 Remix also ships its own `t3` server archives, which the "T3 Remix desktop builds" workflow
+attaches to each release. `scripts/install.sh`, `t3 update`, desktop SSH environments, and the WSL
+runtime download them because `CLI_RELEASE_REPOSITORY` in `packages/shared/src/cliRelease.ts` and
+`repo` in `scripts/install.sh` name `codingphasedotcom/t3-remix`. Keep both on upstream merges,
+or every server install silently goes back to T3 Code.
+
 ### Linux AppImage prerequisites
 
 Build on Linux because the browser-secret helper links against the host's libsecret. Install

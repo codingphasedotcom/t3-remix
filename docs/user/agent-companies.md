@@ -79,10 +79,16 @@ Agents receive the instructions of every skill they have on each task they work;
 employee's skills add up to more than a page, the prompt lists them by name and the agent reads
 the ones that apply.
 
+**Installed skills** on the same tab lists the skills your coding agents already have on the
+computer the company runs on, such as Claude Code skills and plugins or Codex skills, along with
+those in the company's project. **Add** one to put it in the library, then tick it on employees
+like any other skill. An agent reads an installed skill from its own folder each time it uses it,
+so it always follows the skill as installed now. Edit or update it where it is installed.
+
 ## How work flows
 
-- A task in **To do** with an assignee starts that agent in a new thread. New tasks go to the
-  CEO unless you pick someone else.
+- A task in **To do** with an assignee starts that agent in a new thread, once every task it
+  waits on is done. New tasks go to the CEO unless you pick someone else.
 - A manager splits its task into subtasks for its reports and moves its own task to
   **Blocked**. Subtasks work in the parent task's worktree, so the parent's branch collects
   the whole result. When every subtask is done, the parent returns to **To do** and the
@@ -119,6 +125,11 @@ their context and each new message carries only what changed. A manager reviews 
 subtask in its own thread for the parent task, so delegating adds no thread per review. Open a
 task to see its activity, its runs, and links to each agent's thread.
 
+Paste, drop, or attach pictures and other files in a comment, such as a screenshot of what is
+wrong. They upload to the computer running T3 Code, so this works from a browser or another device
+too. Claude and Codex agents see pictures as images; agents on other providers get each file's path
+and open it themselves. Files stay with the comment until you delete the task.
+
 Attach files a task needs, such as a video to edit from your Downloads folder, under **Files**
 when you create the task or later in the task. In the desktop app, use **Add files** or drop them
 in; in a browser, paste the file's full path. Nothing is uploaded: agents work from the files
@@ -126,6 +137,19 @@ where they are on the computer running T3 Code, and subtasks see their parent's 
 
 A task lists its **Linked work**: its branch, and the pull requests, previews, and documents its
 agents report, with each pull request's status. Remove a wrong link with its **×**.
+
+## Tasks that wait on other tasks
+
+Under **Waits on**, in a new task or an open one, pick the tasks that must be done first. The task
+stays in **To do** until every one of them is **Done**, then starts on its own; its card says what
+it waits on, and the task it waits on lists it under **Needed by**. Remove one with its **×** to stop
+waiting. **Start agent** stays off while a task waits.
+
+The agent that starts is told what came before: each task it waited on, with its branch and the last
+summary its agent left. Work a task did in its own worktree is only in the next task's folder once
+it is merged, so the agent merges that branch into its own when it needs it. Subtasks of one task
+share its worktree, so a subtask that waits on another already has its work. Managers set these up
+themselves when they split work into steps that build on each other.
 
 ## Ship finished work
 
@@ -166,6 +190,21 @@ Set a monthly token limit for the whole company under **Edit company**, or for o
 their editor. Limits count input plus output tokens per calendar month (UTC), the same total the
 dashboard shows. From 80% the org chart and board warn you; at the limit, agents aren't started
 until you raise it or the month ends. An agent already running finishes its run.
+
+## Inbox
+
+**Inbox**, beside the dashboard, lists what waits on you in every company, oldest first:
+
+- tasks in **Review** that you review, or whose reviewer finished without deciding
+- top-level tasks stuck in **Blocked** with nothing below them still moving
+- hire requests
+- your own to-dos in **To do**
+
+Select an item to open its task, or the org chart for a hire. The sidebar's **Companies** button
+shows how many items are waiting. When something new arrives, T3 Code alerts you the way it does for
+threads, following **Settings → General → Notifications**: a system notification while the app is
+in the background, or an in-app toast while it has focus if **In-app notifications** is on. Board
+items do not reach your phone yet; the agents' own threads still alert there as they finish.
 
 ## Dashboard
 

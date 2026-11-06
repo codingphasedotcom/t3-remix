@@ -1,5 +1,6 @@
 import {
   boardShipBlocker,
+  boardTaskWaitingOn,
   type BoardAgentId,
   type BoardComment,
   type BoardRun,
@@ -24,6 +25,7 @@ import {
   GitCommitHorizontalIcon,
   GlobeIcon,
   LinkIcon,
+  PaperclipIcon,
   PencilIcon,
   PlayIcon,
   Trash2Icon,
@@ -31,7 +33,7 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
 import { cn } from "../../lib/utils";
@@ -54,6 +56,8 @@ import { AgentSelect } from "./AgentSelect";
 import { FilePicker } from "./FilePicker";
 import type { RunBoardCommand } from "./BoardPage";
 import { AgentFace, AgentName } from "./AgentAvatar";
+import { CommentFiles, DraftFileChips, useCommentDraftFiles } from "./CommentFiles";
+import { WaitsOnField } from "./WaitsOnField";
 import { BOARD_COLUMNS, agentById, boardStatusLabel, canArchiveTask } from "./board.logic";
 import {
   REMIX_CARD,
@@ -112,9 +116,13 @@ function BoardCardDetail(props: {
   const branchLink = workLinks.find((link) => link.kind === "branch") ?? null;
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
+  const draftFiles = useCommentDraftFiles(props.environmentId);
+  const filePicker = useRef<HTMLInputElement>(null);
   const descriptionDirty = description !== task.description;
   const parent = snapshot.tasks.find((candidate) => candidate.id === task.parentTaskId) ?? null;
   const subtasks = snapshot.tasks.filter((candidate) => candidate.parentTaskId === task.id);
+  const neededBy = snapshot.tasks.filter((candidate) => candidate.waitsOnTaskIds.includes(task.id));
+  const waiting = boardTaskWaitingOn(task, snapshot.tasks);
   // A subtask in its parent's worktree works on the parent's branch, which ships with the parent.
   const ownsBranch =
     branchLink !== null && task.worktreePath !== null && parent?.worktreePath !== task.worktreePath;
@@ -127,6 +135,7 @@ function BoardCardDetail(props: {
     assigneeAgentId?: BoardAgentId | null;
     assignedToUser?: boolean;
     reviewerAgentId?: BoardAgentId | null;
+    waitsOnTaskIds?: Array<BoardTaskId>;
   }) => props.runCommand({ type: "task.update", task: { id: task.id, ...patch } });
 
   const openThread = (threadId: string) =>
@@ -139,14 +148,21 @@ function BoardCardDetail(props: {
 
   const postComment = async () => {
     const body = comment.trim();
-    if (body.length === 0) return;
+    if (body.length === 0 && draftFiles.files.length === 0) return;
     setPosting(true);
-    const posted = await props.runCommand({
-      type: "comment.add",
-      comment: { taskId: task.id, body },
-    });
+    const attachments = await draftFiles.collect();
+    const posted =
+      attachments === null
+        ? null
+        : await props.runCommand({
+            type: "comment.add",
+            comment: { taskId: task.id, body, ...(attachments.length > 0 ? { attachments } : {}) },
+          });
     setPosting(false);
-    if (posted !== null) setComment("");
+    if (posted !== null) {
+      setComment("");
+      draftFiles.clear();
+    }
   };
 
   const deleteCard = async () => {
@@ -164,7 +180,7 @@ function BoardCardDetail(props: {
     !task.assignedToUser &&
     (task.status === "review"
       ? task.reviewerAgentId !== null
-      : task.status !== "done" && task.assigneeAgentId !== null);
+      : task.status !== "done" && task.assigneeAgentId !== null && waiting.length === 0);
 
   return (
     <>
@@ -410,6 +426,25 @@ function BoardCardDetail(props: {
             </FilePicker>
           </section>
 
+          {task.status !== "done" || task.waitsOnTaskIds.length > 0 ? (
+            <section className={REMIX_INSET}>
+              <SectionTitle label="Waits on" tone="yellow" count={task.waitsOnTaskIds.length} />
+              <WaitsOnField
+                tasks={snapshot.tasks}
+                value={task.waitsOnTaskIds}
+                self={task.id}
+                disabled={disabled}
+                onOpen={(id) => props.onOpenCard(id)}
+                onChange={(waitsOnTaskIds) => void update({ waitsOnTaskIds: [...waitsOnTaskIds] })}
+              />
+              {waiting.length > 0 && task.status === "todo" ? (
+                <span className="text-xs text-muted-foreground">
+                  Starts once {waiting.length === 1 ? "this task is" : "these tasks are"} done.
+                </span>
+              ) : null}
+            </section>
+          ) : null}
+
           {ownsBranch ? (
             <ShipSection
               environmentId={props.environmentId}
@@ -439,12 +474,12 @@ function BoardCardDetail(props: {
             </section>
           ) : null}
 
-          {parent !== null || subtasks.length > 0 ? (
+          {parent !== null || subtasks.length > 0 || neededBy.length > 0 ? (
             <section className={REMIX_INSET}>
               <SectionTitle
                 label="Related tasks"
                 tone="purple"
-                count={(parent === null ? 0 : 1) + subtasks.length}
+                count={(parent === null ? 0 : 1) + subtasks.length + neededBy.length}
               />
               <div className="flex flex-col gap-2">
                 {parent !== null ? (
@@ -460,6 +495,14 @@ function BoardCardDetail(props: {
                     prefix="Subtask"
                     task={subtask}
                     onOpen={() => props.onOpenCard(subtask.id)}
+                  />
+                ))}
+                {neededBy.map((dependent) => (
+                  <RelatedCard
+                    key={dependent.id}
+                    prefix="Needed by"
+                    task={dependent}
+                    onOpen={() => props.onOpenCard(dependent.id)}
                   />
                 ))}
               </div>
@@ -489,18 +532,34 @@ function BoardCardDetail(props: {
                 <span className="text-sm text-muted-foreground">No activity yet</span>
               ) : null}
             </div>
-            <div className="flex flex-col gap-2">
+            <div
+              className="flex flex-col gap-2"
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (disabled || event.dataTransfer.files.length === 0) return;
+                event.preventDefault();
+                draftFiles.add([...event.dataTransfer.files]);
+              }}
+            >
               <Textarea
                 id="board-card-comment"
                 value={comment}
                 rows={3}
                 disabled={disabled}
+                onPaste={(event) => {
+                  const pasted = [...event.clipboardData.files];
+                  if (pasted.length === 0) return;
+                  event.preventDefault();
+                  draftFiles.add(pasted);
+                }}
                 placeholder={
                   task.activeRunKind !== null
-                    ? "Comment, and the working agent receives it right away"
+                    ? "Comment, and the working agent receives it right away. Paste or drop pictures."
                     : task.assignedToUser
                       ? "Add a note for yourself"
-                      : "Comment, and the task's agent answers on the board"
+                      : "Comment, and the task's agent answers on the board. Paste or drop pictures."
                 }
                 onChange={(event) => setComment(event.target.value)}
                 onKeyDown={(event) => {
@@ -510,10 +569,39 @@ function BoardCardDetail(props: {
                   }
                 }}
               />
-              <div className="flex justify-end">
+              <DraftFileChips
+                files={draftFiles.files}
+                disabled={disabled || posting}
+                onRemove={draftFiles.remove}
+                onRetry={draftFiles.retry}
+              />
+              <div className="flex items-center justify-between gap-2">
+                <input
+                  ref={filePicker}
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={(event) => {
+                    draftFiles.add([...(event.target.files ?? [])]);
+                    event.target.value = "";
+                  }}
+                />
                 <Button
                   size="sm"
-                  disabled={disabled || posting || comment.trim().length === 0}
+                  variant="ghost"
+                  disabled={disabled || posting}
+                  onClick={() => filePicker.current?.click()}
+                >
+                  <PaperclipIcon />
+                  Attach
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={
+                    disabled ||
+                    posting ||
+                    (comment.trim().length === 0 && draftFiles.files.length === 0)
+                  }
                   onClick={() => void postComment()}
                 >
                   Comment
@@ -772,12 +860,15 @@ function CommentRow(props: {
         <span className="ms-auto shrink-0 text-muted-foreground tabular-nums">{time}</span>
       </div>
       {/* People type plain lines; agents write markdown with blank lines between paragraphs. */}
-      <ChatMarkdown
-        text={comment.body}
-        cwd={props.cwd}
-        environmentId={props.environmentId}
-        lineBreaks={comment.authorKind === "user"}
-      />
+      {comment.body.length > 0 ? (
+        <ChatMarkdown
+          text={comment.body}
+          cwd={props.cwd}
+          environmentId={props.environmentId}
+          lineBreaks={comment.authorKind === "user"}
+        />
+      ) : null}
+      <CommentFiles environmentId={props.environmentId} attachments={comment.attachments} />
     </div>
   );
 }

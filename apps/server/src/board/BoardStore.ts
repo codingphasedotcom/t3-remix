@@ -23,6 +23,7 @@ import {
   BoardRoutineId,
   BoardWorkLink,
   BoardWorkLinkId,
+  ChatAttachment,
   ModelSelection,
   ThreadId,
   type BoardCommentAuthorKind,
@@ -212,7 +213,19 @@ export class BoardStore extends Context.Service<
       readonly authorKind: BoardCommentAuthorKind;
       readonly authorAgentId: BoardAgentId | null;
       readonly body: string;
+      readonly attachments?: ReadonlyArray<ChatAttachment>;
     }) => StoreEffect<BoardComment>;
+    /** Replaces the tasks `taskId` waits on. */
+    readonly setTaskDependencies: (
+      taskId: BoardTaskId,
+      waitsOn: ReadonlyArray<BoardTaskId>,
+    ) => StoreEffect<void>;
+    /** Comments whose files this thread has already been sent. */
+    readonly listDeliveredComments: (threadId: ThreadId) => StoreEffect<ReadonlySet<string>>;
+    readonly recordDeliveries: (
+      threadId: ThreadId,
+      commentIds: ReadonlyArray<BoardCommentId>,
+    ) => StoreEffect<void>;
 
     readonly listRuns: (taskId: BoardTaskId) => StoreEffect<ReadonlyArray<BoardRun>>;
     readonly insertRun: (input: {
@@ -301,6 +314,7 @@ interface SkillRow {
   readonly name: string;
   readonly description: string;
   readonly instructions: string;
+  readonly installed_path: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -363,6 +377,7 @@ interface TaskRow {
   readonly updated_at: string;
   readonly comment_count: number;
   readonly active_run_kind: string | null;
+  readonly waits_on_json: string;
 }
 
 interface CommentRow {
@@ -371,6 +386,7 @@ interface CommentRow {
   readonly author_kind: string;
   readonly author_agent_id: string | null;
   readonly body: string;
+  readonly attachments_json: string;
   readonly created_at: string;
 }
 
@@ -403,6 +419,10 @@ const decodeDepartments = Schema.decodeUnknownEffect(DepartmentsJson);
 const encodeDepartments = Schema.encodeEffect(DepartmentsJson);
 const ModelSelectionJson = Schema.fromJsonString(ModelSelection);
 const decodeSkillIds = Schema.decodeUnknownEffect(SkillIdsJson);
+const decodeTaskIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(BoardTaskId)));
+const AttachmentsJson = Schema.fromJsonString(Schema.Array(ChatAttachment));
+const decodeAttachments = Schema.decodeUnknownEffect(AttachmentsJson);
+const encodeAttachments = Schema.encodeEffect(AttachmentsJson);
 const encodeSkillIds = Schema.encodeEffect(SkillIdsJson);
 const decodeModelSelection = Schema.decodeUnknownEffect(ModelSelectionJson);
 const encodeModelSelection = Schema.encodeEffect(ModelSelectionJson);
@@ -500,7 +520,11 @@ const TASK_COLUMNS = `
     WHERE c.task_id = t.task_id AND c.author_kind != 'system') AS comment_count,
   (SELECT r.kind FROM board_runs r
     WHERE r.task_id = t.task_id AND r.status = 'running'
-    ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1) AS active_run_kind
+    ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1) AS active_run_kind,
+  (SELECT json_group_array(d.waits_on_task_id) FROM (
+    SELECT waits_on_task_id FROM board_task_dependencies
+    WHERE task_id = t.task_id ORDER BY rowid
+  ) d) AS waits_on_json
 `;
 
 /** Wraps a store failure so callers see one error type with a readable message. */
@@ -557,6 +581,9 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_skills_company ON board_skills(company_id)`;
+  if (!(yield* columns("board_skills")).has("installed_path")) {
+    yield* sql`ALTER TABLE board_skills ADD COLUMN installed_path TEXT`;
+  }
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_agents (
       agent_id TEXT PRIMARY KEY,
@@ -668,6 +695,27 @@ const make = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX IF NOT EXISTS idx_board_comments_task ON board_comments(task_id, created_at)`;
+  if (!(yield* columns("board_comments")).has("attachments_json")) {
+    yield* sql`ALTER TABLE board_comments ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'`;
+  }
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS board_task_dependencies (
+      task_id TEXT NOT NULL,
+      waits_on_task_id TEXT NOT NULL,
+      PRIMARY KEY (task_id, waits_on_task_id)
+    )
+  `;
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS idx_board_task_dependencies_waits_on
+    ON board_task_dependencies(waits_on_task_id)
+  `;
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS board_attachment_deliveries (
+      thread_id TEXT NOT NULL,
+      comment_id TEXT NOT NULL,
+      PRIMARY KEY (thread_id, comment_id)
+    )
+  `;
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_runs (
       run_id TEXT PRIMARY KEY,
@@ -793,6 +841,7 @@ const make = Effect.gen(function* () {
       name: row.name,
       description: row.description,
       instructions: row.instructions,
+      installedPath: row.installed_path,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
@@ -849,6 +898,7 @@ const make = Effect.gen(function* () {
       assignedToUser: row.assigned_to_user === 1,
       reviewerAgentId: row.reviewer_agent_id,
       parentTaskId: row.parent_task_id,
+      waitsOnTaskIds: yield* decodeTaskIds(row.waits_on_json),
       threadId: row.thread_id,
       worktreePath: row.worktree_path,
       activeRunKind: row.active_run_kind,
@@ -866,15 +916,17 @@ const make = Effect.gen(function* () {
     } satisfies StoredTask;
   });
 
-  const toComment = (row: CommentRow) =>
-    decodeComment({
+  const toComment = Effect.fnUntraced(function* (row: CommentRow) {
+    return yield* decodeComment({
       id: row.comment_id,
       taskId: row.task_id,
       authorKind: row.author_kind,
       authorAgentId: row.author_agent_id,
       body: row.body,
+      attachments: yield* decodeAttachments(row.attachments_json),
       createdAt: row.created_at,
     });
+  });
 
   const toRun = (row: RunRow) =>
     decodeRun({
@@ -990,7 +1042,12 @@ const make = Effect.gen(function* () {
       .withTransaction(
         Effect.all(
           [
+            sql`DELETE FROM board_attachment_deliveries WHERE comment_id IN
+              (SELECT comment_id FROM board_comments WHERE task_id IN
+                (SELECT task_id FROM board_tasks WHERE company_id = ${id}))`,
             sql`DELETE FROM board_comments WHERE task_id IN
+              (SELECT task_id FROM board_tasks WHERE company_id = ${id})`,
+            sql`DELETE FROM board_task_dependencies WHERE task_id IN
               (SELECT task_id FROM board_tasks WHERE company_id = ${id})`,
             sql`DELETE FROM board_runs WHERE task_id IN
               (SELECT task_id FROM board_tasks WHERE company_id = ${id})`,
@@ -1036,16 +1093,18 @@ const make = Effect.gen(function* () {
   const upsertSkill: BoardStore["Service"]["upsertSkill"] = (skill) =>
     sql`
       INSERT INTO board_skills (
-        skill_id, company_id, name, description, instructions, created_at, updated_at
+        skill_id, company_id, name, description, instructions, installed_path, created_at,
+        updated_at
       )
       VALUES (
         ${skill.id}, ${skill.companyId}, ${skill.name}, ${skill.description},
-        ${skill.instructions}, ${skill.createdAt}, ${skill.updatedAt}
+        ${skill.instructions}, ${skill.installedPath}, ${skill.createdAt}, ${skill.updatedAt}
       )
       ON CONFLICT (skill_id) DO UPDATE SET
         name = excluded.name,
         description = excluded.description,
         instructions = excluded.instructions,
+        installed_path = excluded.installed_path,
         updated_at = excluded.updated_at
     `.pipe(Effect.asVoid, failWith("Could not save the skill."));
 
@@ -1322,7 +1381,12 @@ const make = Effect.gen(function* () {
           [
             sql`UPDATE board_tasks SET parent_task_id = ${task.parentTaskId}
               WHERE parent_task_id = ${task.id}`,
+            sql`DELETE FROM board_attachment_deliveries WHERE comment_id IN
+              (SELECT comment_id FROM board_comments WHERE task_id = ${task.id})`,
             sql`DELETE FROM board_comments WHERE task_id = ${task.id}`,
+            // Tasks that waited on this one no longer wait for it.
+            sql`DELETE FROM board_task_dependencies
+              WHERE task_id = ${task.id} OR waits_on_task_id = ${task.id}`,
             sql`DELETE FROM board_work_links WHERE task_id = ${task.id}`,
             sql`DELETE FROM board_runs WHERE task_id = ${task.id}`,
             sql`DELETE FROM board_tasks WHERE task_id = ${task.id}`,
@@ -1492,12 +1556,14 @@ const make = Effect.gen(function* () {
     const id = BoardCommentId.make(yield* newId("board-comment"));
     const createdAt = yield* now;
     const body = input.body.slice(0, MAX_COMMENT_CHARS);
+    const attachments = input.attachments ?? [];
     yield* sql`
         INSERT INTO board_comments (
-          comment_id, task_id, author_kind, author_agent_id, body, created_at
+          comment_id, task_id, author_kind, author_agent_id, body, attachments_json, created_at
         )
         VALUES (
-          ${id}, ${input.taskId}, ${input.authorKind}, ${input.authorAgentId}, ${body}, ${createdAt}
+          ${id}, ${input.taskId}, ${input.authorKind}, ${input.authorAgentId}, ${body},
+          ${yield* encodeAttachments(attachments)}, ${createdAt}
         )
       `;
     return {
@@ -1506,9 +1572,43 @@ const make = Effect.gen(function* () {
       authorKind: input.authorKind,
       authorAgentId: input.authorAgentId,
       body,
+      attachments,
       createdAt,
     } satisfies BoardComment;
   }, failWith("Could not add the comment."));
+
+  const setTaskDependencies: BoardStore["Service"]["setTaskDependencies"] = (taskId, waitsOn) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* sql`DELETE FROM board_task_dependencies WHERE task_id = ${taskId}`;
+          for (const id of new Set(waitsOn)) {
+            yield* sql`
+              INSERT INTO board_task_dependencies (task_id, waits_on_task_id)
+              VALUES (${taskId}, ${id})
+            `;
+          }
+        }),
+      )
+      .pipe(failWith("Could not save what the task waits on."));
+
+  const listDeliveredComments: BoardStore["Service"]["listDeliveredComments"] = (threadId) =>
+    sql<{ readonly comment_id: string }>`
+      SELECT comment_id FROM board_attachment_deliveries WHERE thread_id = ${threadId}
+    `.pipe(
+      Effect.map((rows) => new Set(rows.map((row) => row.comment_id))),
+      failWith("Could not read which files the thread has."),
+    );
+
+  const recordDeliveries: BoardStore["Service"]["recordDeliveries"] = (threadId, commentIds) =>
+    Effect.forEach(
+      commentIds,
+      (commentId) => sql`
+        INSERT OR IGNORE INTO board_attachment_deliveries (thread_id, comment_id)
+        VALUES (${threadId}, ${commentId})
+      `,
+      { discard: true },
+    ).pipe(failWith("Could not record the files sent to the thread."));
 
   const listRuns: BoardStore["Service"]["listRuns"] = Effect.fn("BoardStore.listRuns")(function* (
     taskId,
@@ -1873,6 +1973,9 @@ const make = Effect.gen(function* () {
     searchTasks,
     listComments,
     insertComment,
+    setTaskDependencies,
+    listDeliveredComments,
+    recordDeliveries,
     listRuns,
     insertRun,
     endRun,

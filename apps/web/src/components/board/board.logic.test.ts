@@ -5,6 +5,7 @@ import type {
   BoardTask,
   BoardTaskId,
   ProjectId,
+  ServerProvider,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -12,6 +13,7 @@ import {
   dropPosition,
   employeeThreadTitle,
   groupTasksByStatus,
+  installedSkillsFor,
   limitProgress,
   localDateTimeInput,
   orgChartRows,
@@ -32,6 +34,7 @@ function card(id: string, status: BoardTask["status"], position: number): BoardT
     assignedToUser: false,
     reviewerAgentId: null,
     parentTaskId: null,
+    waitsOnTaskIds: [],
     threadId: null,
     worktreePath: null,
     activeRunKind: null,
@@ -134,5 +137,60 @@ describe("routines", () => {
 
   it("fills a datetime-local input in local time", () => {
     expect(localDateTimeInput(new Date(2026, 9, 21, 9, 5))).toBe("2026-10-21T09:05");
+  });
+});
+
+describe("installedSkillsFor", () => {
+  it("lists each skill once, with every provider that has it", () => {
+    const agentsReview = { name: "review", path: "/home/me/.agents/skills/review/SKILL.md" };
+    const provider = (skills: ReadonlyArray<object>, cwdSkills?: ReadonlyArray<object>) =>
+      ({
+        skills,
+        workspaceSnapshots: cwdSkills && [{ cwd: "/repo", skills: cwdSkills }],
+      }) as unknown as ServerProvider;
+    const skills = installedSkillsFor(
+      [
+        {
+          displayName: "Codex",
+          enabled: true,
+          snapshot: provider([
+            { ...agentsReview, enabled: true, description: "Reviews code." },
+            { name: "off", path: "/off/SKILL.md", enabled: false },
+          ]),
+        },
+        {
+          displayName: "Claude",
+          enabled: true,
+          // A project's own skills come from the snapshot taken in its folder.
+          snapshot: provider(
+            [],
+            [
+              { name: "review", path: "/home/me/.claude/skills/review/SKILL.md", enabled: true },
+              { name: "deploy", path: "/repo/.claude/skills/deploy/SKILL.md", enabled: true },
+            ],
+          ),
+        },
+        {
+          displayName: "Grok",
+          enabled: false,
+          snapshot: provider([{ name: "grok-only", path: "/grok/SKILL.md", enabled: true }]),
+        },
+      ],
+      "/repo",
+    );
+    expect(skills).toEqual([
+      {
+        name: "deploy",
+        description: "",
+        paths: ["/repo/.claude/skills/deploy/SKILL.md"],
+        providers: ["Claude"],
+      },
+      {
+        name: "review",
+        description: "Reviews code.",
+        paths: [agentsReview.path, "/home/me/.claude/skills/review/SKILL.md"],
+        providers: ["Codex", "Claude"],
+      },
+    ]);
   });
 });

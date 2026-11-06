@@ -8,6 +8,7 @@ import {
   MAX_AGENT_MEMORY_CHARS,
   MAX_COMPANY_MEMORY_CHARS,
   boardShipBlocker,
+  boardTaskWaitingOn,
   CommandId,
   MessageId,
   ThreadId,
@@ -27,6 +28,7 @@ import {
   type BoardHire,
   type BoardHireDecisionInput,
   type BoardHireId,
+  type BoardInboxItem,
   type BoardRunKind,
   type BoardSettings,
   type BoardSettingsUpdateInput,
@@ -48,6 +50,7 @@ import {
   type BoardWorkLinkId,
   type BoardWorkLinkKind,
   type BoardWorkLinkStatus,
+  type ChatAttachment,
   type OrchestrationV2Run,
   type ProjectId,
   type ThreadPullRequestLink,
@@ -56,6 +59,7 @@ import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -69,10 +73,13 @@ import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import { forkParked } from "../serverActivation.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
+import * as BoardAttachments from "./BoardAttachments.ts";
 import * as BoardStore from "./BoardStore.ts";
 import { buildDashboard } from "./boardDashboard.ts";
+import { companyInbox, inboxCandidates, type InboxTaskFacts } from "./boardInbox.ts";
 import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
 import { makeMergeTaskBranch } from "./boardShip.ts";
 import {
@@ -83,9 +90,12 @@ import {
   buildReworkPrompt,
   buildUserCommentMessage,
   buildWorkPrompt,
+  MAX_PROMPT_COMMENTS,
   type BlockedSubtask,
+  type BoardInstruction,
   type BoardPromptContext,
   type BoardWorkspace,
+  type CommentFile,
 } from "./boardPrompts.ts";
 
 /** Who is changing the board. An agent is identified by the thread its MCP credential belongs to. */
@@ -127,11 +137,8 @@ export class BoardService extends Context.Service<
     readonly snapshot: (
       companyId: BoardCompanyId | null,
     ) => Effect.Effect<BoardSnapshot, BoardError>;
-    /** The board as it changes; with `dashboard`, each snapshot carries the company's dashboard. */
-    readonly subscribe: (
-      companyId: BoardCompanyId | null,
-      dashboard?: BoardSubscribeInput["dashboard"],
-    ) => Stream.Stream<BoardSnapshot, BoardError>;
+    /** The board as it changes, with the dashboard and the inbox when the input asks for them. */
+    readonly subscribe: (input: BoardSubscribeInput) => Stream.Stream<BoardSnapshot, BoardError>;
     readonly taskDetail: (taskId: BoardTaskId) => Effect.Effect<BoardTaskDetail, BoardError>;
     readonly subscribeTaskDetail: (
       taskId: BoardTaskId,
@@ -187,6 +194,11 @@ export class BoardService extends Context.Service<
       companyId: BoardCompanyId,
       query: string,
     ) => Effect.Effect<ReadonlyArray<BoardCardMatch>, BoardError>;
+    /** A library skill by id or name; an installed one comes with its SKILL.md as instructions. */
+    readonly readSkill: (
+      companyId: BoardCompanyId,
+      skill: string,
+    ) => Effect.Effect<BoardSkill, BoardError>;
     /** Applies one client mutation; the RPC transport sends every board write through here. */
     readonly runCommand: (
       command: BoardCommand,
@@ -212,6 +224,12 @@ function cardBranchName(task: BoardTask, threadId: ThreadId): string {
   return `board/${slug}-${token}`;
 }
 
+/**
+ * Drivers that take pictures as images. Others only learn a picture's path, which the prompt
+ * already gives: some ACP agents refuse image input, and the whole run would fail.
+ */
+const IMAGE_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
+
 function fileName(path: string): string {
   return path.split(/[\\/]/).findLast((part) => part.length > 0) ?? path;
 }
@@ -219,12 +237,18 @@ function fileName(path: string): string {
 /** "2026-10-20:" or "2026-10-20 (Grace):" at the start of a memory note. */
 const LEADING_NOTE_DATE = /^\d{4}-\d{2}-\d{2}(?:\s*\([^)]*\))?\s*[:\u2013\u2014-]\s*/;
 
+/** The tail of an installed skill's path; what is left names its folder. */
+const INSTALLED_SKILL_FILE = /[\\/]SKILL\.md$/;
+
 function boardError(message: string, cause?: unknown): BoardError {
   return new BoardError({ message, ...(cause === undefined ? {} : { cause }) });
 }
 
 const make = Effect.gen(function* () {
   const store = yield* BoardStore.BoardStore;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const files = yield* BoardAttachments.BoardAttachments;
+  const providers = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const projectFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
@@ -254,6 +278,85 @@ const make = Effect.gen(function* () {
 
   const systemComment = (taskId: BoardTaskId, body: string) =>
     store.insertComment({ taskId, authorKind: "system", authorAgentId: null, body });
+
+  const quoted = (tasks: ReadonlyArray<BoardTask>) =>
+    tasks.map((task) => `"${task.title}"`).join(", ");
+
+  /** A task may wait only on other tasks in its company, and never in a circle. */
+  const assertWaitsOn = Effect.fn("BoardService.assertWaitsOn")(function* (
+    companyId: BoardCompanyId,
+    taskId: BoardTaskId | null,
+    parentTaskId: BoardTaskId | null,
+    waitsOn: ReadonlyArray<BoardTaskId>,
+  ) {
+    if (waitsOn.length === 0) return;
+    const tasks = (yield* store.listTasks(companyId)).map((stored) => stored.task);
+    const ancestors = new Set<BoardTaskId>();
+    for (let id = parentTaskId; id !== null && !ancestors.has(id);) {
+      ancestors.add(id);
+      id = tasks.find((task) => task.id === id)?.parentTaskId ?? null;
+    }
+    for (const id of waitsOn) {
+      if (id === taskId) return yield* boardError("A task cannot wait on itself.");
+      if (!tasks.some((task) => task.id === id)) {
+        return yield* boardError(
+          `Task ${id} is not on this company's board. board_list_tasks lists them.`,
+        );
+      }
+      // A parent finishes after its subtasks, so a subtask waiting on it would wait forever.
+      if (ancestors.has(id)) {
+        return yield* boardError("A subtask cannot wait on a task above it.");
+      }
+    }
+    if (taskId === null) return;
+    const seen = new Set<BoardTaskId>();
+    const queue = [...waitsOn];
+    while (queue.length > 0) {
+      const id = queue.pop()!;
+      if (id === taskId) {
+        return yield* boardError(
+          "That task already waits on this one, so neither would ever start.",
+        );
+      }
+      if (seen.has(id)) continue;
+      seen.add(id);
+      queue.push(...(tasks.find((task) => task.id === id)?.waitsOnTaskIds ?? []));
+    }
+  });
+
+  /** Tells each task that waited on a task now done where it stands. */
+  const releaseDependents = Effect.fn("BoardService.releaseDependents")(function* (
+    done: BoardTask,
+  ) {
+    const tasks = (yield* store.listTasks(done.companyId)).map((stored) => stored.task);
+    for (const dependent of tasks) {
+      if (dependent.status === "done" || !dependent.waitsOnTaskIds.includes(done.id)) continue;
+      const still = boardTaskWaitingOn(dependent, tasks);
+      yield* systemComment(
+        dependent.id,
+        still.length === 0
+          ? `"${done.title}" is done, so this task no longer waits.`
+          : `"${done.title}" is done; still waiting on ${quoted(still)}.`,
+      );
+    }
+  });
+
+  const commentFiles = (attachments: ReadonlyArray<ChatAttachment>): ReadonlyArray<CommentFile> =>
+    attachments.map((attachment) => ({ attachment, path: files.pathOf(attachment) }));
+
+  /** The files to attach to a message for this agent; the rest it opens from their paths. */
+  const attachableFor = Effect.fn("BoardService.attachableFor")(function* (
+    agentId: BoardAgentId,
+    attachments: ReadonlyArray<ChatAttachment>,
+  ) {
+    if (!attachments.some((attachment) => attachment.type === "image")) return attachments;
+    const agent = yield* store.getAgent(agentId);
+    const instance =
+      agent === null ? undefined : yield* providers.getInstance(agent.modelSelection.instanceId);
+    return instance !== undefined && IMAGE_DRIVERS.has(instance.driverKind)
+      ? attachments
+      : attachments.filter((attachment) => attachment.type !== "image");
+  });
 
   /** The company agent behind an agent actor, or null for people and ordinary threads. */
   const actingAgent = Effect.fn("BoardService.actingAgent")(function* (
@@ -394,34 +497,74 @@ const make = Effect.gen(function* () {
     },
   );
 
+  /** What waits on the person in every company, oldest first. */
+  const inbox = Effect.fn("BoardService.inbox")(function* () {
+    const items: Array<BoardInboxItem> = [];
+    for (const companyId of yield* store.listCompanyIds()) {
+      const company = yield* store.getCompany(companyId);
+      if (company === null) continue;
+      const candidates = inboxCandidates(yield* store.listTasks(companyId));
+      const facts = new Map<BoardTaskId, InboxTaskFacts>();
+      for (const { stored, kind } of candidates) {
+        const comments = yield* store.listComments(stored.task.id);
+        facts.set(stored.task.id, {
+          lastReviewStartedAt:
+            kind === "review" ? yield* store.lastRunStartedAt(stored.task.id, "review") : null,
+          lastAgentComment:
+            comments.findLast((comment) => comment.authorKind === "agent")?.body ?? null,
+        });
+      }
+      const agents = yield* store.listAgents(companyId);
+      items.push(
+        ...companyInbox({
+          company,
+          candidates,
+          facts,
+          agentIds: new Set(agents.map((agent) => agent.id)),
+          hires: yield* store.listHires(companyId),
+        }),
+      );
+    }
+    return items.toSorted((left, right) => left.since.localeCompare(right.since));
+  });
+
   // A running agent's tokens land on the dashboard with the board change that ends its run.
-  const view = Effect.fn("BoardService.view")(function* (
-    companyId: BoardCompanyId | null,
-    options: BoardSubscribeInput["dashboard"],
-  ) {
-    const board = yield* snapshot(companyId);
-    if (options === undefined || board.company === null) return board;
+  const view = Effect.fn("BoardService.view")(function* (input: BoardSubscribeInput) {
+    const board = yield* snapshot(input.companyId);
     return {
       ...board,
-      dashboard: yield* dashboard({
-        companyId: board.company.id,
-        utcOffsetMinutes: options.utcOffsetMinutes,
-      }),
+      ...(input.dashboard === undefined || board.company === null
+        ? {}
+        : {
+            dashboard: yield* dashboard({
+              companyId: board.company.id,
+              utcOffsetMinutes: input.dashboard.utcOffsetMinutes,
+            }),
+          }),
+      ...(input.inbox === true ? { inbox: yield* inbox() } : {}),
     } satisfies BoardSnapshot;
   });
 
-  const subscribe: BoardService["Service"]["subscribe"] = (companyId, options) =>
+  const subscribe: BoardService["Service"]["subscribe"] = (input) =>
     Stream.unwrap(
       Effect.gen(function* () {
         // Subscribe before the first snapshot so a change in between is not lost.
         const subscription = yield* PubSub.subscribe(changes);
-        return Stream.concat(
-          Stream.fromEffect(view(companyId, options)),
+        const snapshots = Stream.concat(
+          Stream.fromEffect(view(input)),
           Stream.fromSubscription(subscription).pipe(
-            Stream.filter((changed) => changed === null || changed === companyId),
-            Stream.mapEffect(() => view(companyId, options)),
+            Stream.filter(
+              (changed) => input.inbox === true || changed === null || changed === input.companyId,
+            ),
+            Stream.mapEffect(() => view(input)),
           ),
         );
+        // The inbox follows every company, and most changes leave it as it was.
+        return input.inbox === true
+          ? snapshots.pipe(
+              Stream.changesWith((left, right) => JSON.stringify(left) === JSON.stringify(right)),
+            )
+          : snapshots;
       }),
     );
 
@@ -692,7 +835,11 @@ const make = Effect.gen(function* () {
     if ((yield* store.countRunningRuns(id)) > 0) {
       return yield* boardError("Agents are still working in this company. Stop them first.");
     }
+    const kept = yield* Effect.forEach(yield* store.listTasks(id), ({ task }) =>
+      store.listComments(task.id),
+    );
     yield* store.deleteCompany(id);
+    yield* files.remove(kept.flat().flatMap((comment) => comment.attachments));
     yield* notify(null);
   });
 
@@ -704,19 +851,59 @@ const make = Effect.gen(function* () {
     if (existing !== null && existing.companyId !== input.companyId) {
       return yield* boardError("That skill belongs to another company.");
     }
+    const installedPath =
+      input.installedPath === undefined ? (existing?.installedPath ?? null) : input.installedPath;
+    if (installedPath !== null && !INSTALLED_SKILL_FILE.test(installedPath)) {
+      return yield* boardError("An installed skill is added by the path of its SKILL.md file.");
+    }
     const at = yield* store.now;
     const skill: BoardSkill = {
       id: existing?.id ?? BoardSkillId.make(yield* store.newId("board-skill")),
       companyId: input.companyId,
       name: input.name,
       description: input.description,
-      instructions: input.instructions,
+      instructions: installedPath === null ? input.instructions : "",
+      installedPath,
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
     };
     yield* store.upsertSkill(skill);
     yield* notify(input.companyId);
     return skill;
+  });
+
+  const readSkill = Effect.fn("BoardService.readSkill")(function* (
+    companyId: BoardCompanyId,
+    wanted: string,
+  ) {
+    const skills = yield* store.listSkills(companyId);
+    const name = wanted.toLowerCase();
+    const skill = skills.find(
+      (candidate) => candidate.id === wanted || candidate.name.toLowerCase() === name,
+    );
+    if (skill === undefined) {
+      return yield* boardError(
+        `No skill named "${wanted}". Skills: ${skills.map((candidate) => candidate.name).join(", ") || "none"}.`,
+      );
+    }
+    const path = skill.installedPath;
+    if (path === null) return skill;
+    // Read on every call, so agents follow the skill as it is installed now.
+    const contents = yield* fileSystem
+      .readFileString(path)
+      .pipe(
+        Effect.mapError((cause) =>
+          boardError(
+            `The installed skill "${skill.name}" is no longer at ${path}. Ask a person to install it again or remove it from the skill library.`,
+            cause,
+          ),
+        ),
+      );
+    const folder = path.replace(INSTALLED_SKILL_FILE, "");
+    return {
+      ...skill,
+      instructions: `This skill's files are in ${folder}. Paths it mentions are relative to that folder.\n\n${contents}`,
+    };
   });
 
   const deleteSkill = Effect.fn("BoardService.deleteSkill")(function* (id: BoardSkillId) {
@@ -918,6 +1105,8 @@ const make = Effect.gen(function* () {
           return yield* boardError("A subtask must belong to its parent task's company.");
         }
       }
+      const waitsOn = [...new Set(input.waitsOnTaskIds ?? [])];
+      yield* assertWaitsOn(company.id, null, input.parentTaskId ?? null, waitsOn);
       const assignedToUser = input.assignedToUser ?? false;
       const assigneeAgentId = assignedToUser ? null : (input.assigneeAgentId ?? null);
       // A manager reviews the work it hands down unless it names another reviewer.
@@ -941,6 +1130,14 @@ const make = Effect.gen(function* () {
       });
       if (actor.kind === "agent") {
         yield* systemComment(id, `Created by ${actorLabel(actingAs, actor)}.`);
+      }
+      if (waitsOn.length > 0) {
+        yield* store.setTaskDependencies(id, waitsOn);
+        const tasks = (yield* store.listTasks(company.id)).map((stored) => stored.task);
+        const waiting = boardTaskWaitingOn((yield* requireTask(id)).task, tasks);
+        if (waiting.length > 0) {
+          yield* systemComment(id, `Waits on ${quoted(waiting)} before it starts.`);
+        }
       }
       // Files are referenced where they are, never copied: agents run on the same machine.
       for (const file of new Set(input.files ?? [])) {
@@ -1084,6 +1281,11 @@ const make = Effect.gen(function* () {
         input.assignedToUser ??
         (input.assigneeAgentId !== undefined && input.assigneeAgentId !== null ? false : undefined);
       const assigneeAgentId = assignedToUser === true ? null : input.assigneeAgentId;
+      const waitsOn =
+        input.waitsOnTaskIds === undefined ? undefined : [...new Set(input.waitsOnTaskIds)];
+      if (waitsOn !== undefined) {
+        yield* assertWaitsOn(company.id, before.id, before.parentTaskId, waitsOn);
+      }
       const statusChanged = yield* store.updateTask(input.id, {
         ...(input.title === undefined ? {} : { title: input.title }),
         ...(input.description === undefined ? {} : { description: input.description }),
@@ -1101,6 +1303,22 @@ const make = Effect.gen(function* () {
         if (input.status === "done" && before.parentTaskId !== null) {
           yield* resumeParentIfSubtasksDone(before.parentTaskId);
         }
+        if (input.status === "done") yield* releaseDependents(before);
+      }
+      if (
+        waitsOn !== undefined &&
+        (waitsOn.length !== before.waitsOnTaskIds.length ||
+          waitsOn.some((id) => !before.waitsOnTaskIds.includes(id)))
+      ) {
+        yield* store.setTaskDependencies(input.id, waitsOn);
+        const tasks = (yield* store.listTasks(company.id)).map((stored) => stored.task);
+        const named = waitsOn.flatMap((id) => tasks.filter((task) => task.id === id));
+        yield* systemComment(
+          input.id,
+          named.length === 0
+            ? `${actorLabel(actingAs, actor)} removed what this task waited on.`
+            : `${actorLabel(actingAs, actor)} set this task to wait on ${quoted(named)}.`,
+        );
       }
       yield* notify(company.id);
       return (yield* requireTask(input.id)).task;
@@ -1109,7 +1327,9 @@ const make = Effect.gen(function* () {
 
   const deleteTask = Effect.fn("BoardService.deleteTask")(function* (id: BoardTaskId) {
     const current = yield* requireTask(id);
+    const comments = yield* store.listComments(id);
     yield* store.deleteTask(current.task);
+    yield* files.remove(comments.flatMap((comment) => comment.attachments));
     yield* notify(current.task.companyId);
   });
 
@@ -1170,12 +1390,23 @@ const make = Effect.gen(function* () {
     function* (input, actor) {
       const current = yield* requireTask(input.taskId);
       const actingAs = yield* actingAgent(actor, current.task.companyId);
-      const comment = yield* store.insertComment({
-        taskId: input.taskId,
-        authorKind: actor.kind === "user" ? "user" : "agent",
-        authorAgentId: actingAs?.id ?? null,
-        body: input.body,
-      });
+      const uploads = input.attachments ?? [];
+      if (input.body.length === 0 && uploads.length === 0) {
+        return yield* boardError("Write a comment or attach a file.");
+      }
+      if (actor.kind === "agent" && uploads.length > 0) {
+        return yield* boardError("Agents link their files with board_link_work instead.");
+      }
+      const kept = yield* files.claim(uploads);
+      const comment = yield* store
+        .insertComment({
+          taskId: input.taskId,
+          authorKind: actor.kind === "user" ? "user" : "agent",
+          authorAgentId: actingAs?.id ?? null,
+          body: input.body,
+          attachments: kept,
+        })
+        .pipe(Effect.onError(() => files.remove(kept)));
       // A person talking to a working agent reaches it now, in whichever thread is running;
       // with nobody working, the dispatch pass this change triggers starts a reply.
       const running =
@@ -1183,24 +1414,32 @@ const make = Effect.gen(function* () {
           ? (yield* store.listRunningRuns()).find(({ run }) => run.taskId === input.taskId)
           : undefined;
       if (running !== undefined) {
+        const { threadId } = running.run;
+        const copies = yield* files.copyToThread(
+          threadId,
+          yield* attachableFor(running.run.agentId, kept),
+        );
         yield* threads
           .sendToThread({
             projectId: current.task.projectId,
             commandId: CommandId.make(`board:comment:${comment.id}`),
-            threadId: running.run.threadId,
+            threadId,
             messageId: MessageId.make(`board-comment:${comment.id}`),
-            text: buildUserCommentMessage(current.task, input.body),
-            attachments: [],
+            text: buildUserCommentMessage(current.task, input.body, commentFiles(kept)),
+            attachments: copies,
             mode: "auto",
             createdBy: "user",
             creationSource: "server",
           })
           .pipe(
+            Effect.andThen(
+              kept.length === 0 ? Effect.void : store.recordDeliveries(threadId, [comment.id]),
+            ),
             Effect.catch((cause) =>
               Effect.logWarning("Could not forward a board comment to its agent", {
                 taskId: input.taskId,
                 cause,
-              }),
+              }).pipe(Effect.andThen(files.remove(copies))),
             ),
           );
       }
@@ -1249,6 +1488,7 @@ const make = Effect.gen(function* () {
     yield* store.updateTask(task.id, { status: "done" });
     yield* systemComment(task.id, `${landed}; moved the task from Review to Done.`);
     if (task.parentTaskId !== null) yield* resumeParentIfSubtasksDone(task.parentTaskId);
+    yield* releaseDependents(task);
   });
 
   /** Opens a pull request for a finished task's branch, or merges it into the project folder. */
@@ -1538,7 +1778,7 @@ const make = Effect.gen(function* () {
     }
     const comments = yield* store.listComments(task.id);
     // Files attached to a task above this one are usually what its subtasks work on.
-    const files = (yield* Effect.forEach([task, ...ancestors], (owner) =>
+    const attachedFiles = (yield* Effect.forEach([task, ...ancestors], (owner) =>
       store
         .listWorkLinks(owner.id)
         .pipe(
@@ -1554,10 +1794,12 @@ const make = Effect.gen(function* () {
         Effect.map((list) =>
           list
             .filter((comment) => comment.authorKind === "user")
-            .map((comment) => ({
+            .map((comment): BoardInstruction => ({
+              commentId: comment.id,
               taskId: owner.id,
               taskTitle: owner.title,
               body: comment.body,
+              files: commentFiles(comment.attachments),
               createdAt: comment.createdAt,
             })),
         ),
@@ -1565,6 +1807,25 @@ const make = Effect.gen(function* () {
     ))
       .flat()
       .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const folder = task.worktreePath ?? ancestors[0]?.worktreePath ?? null;
+    const prerequisites = yield* Effect.forEach(
+      task.waitsOnTaskIds.flatMap((id) => allTasks.filter((candidate) => candidate.id === id)),
+      (done) =>
+        Effect.gen(function* () {
+          const links = yield* store.listWorkLinks(done.id);
+          const said = yield* store.listComments(done.id);
+          const landed = links.some(
+            (link) =>
+              (link.kind === "branch" || link.kind === "pull_request") && link.status === "merged",
+          );
+          return {
+            task: done,
+            branch: (yield* store.getTask(done.id))?.branch ?? null,
+            inYourFolder: landed || (done.worktreePath !== null && done.worktreePath === folder),
+            summary: said.findLast((comment) => comment.authorKind === "agent")?.body ?? null,
+          };
+        }),
+    );
     return {
       company,
       agent,
@@ -1575,7 +1836,8 @@ const make = Effect.gen(function* () {
       subtasks: allTasks.filter((candidate) => candidate.parentTaskId === task.id),
       comments,
       boardComments,
-      files,
+      files: attachedFiles,
+      prerequisites,
     } satisfies BoardPromptContext;
   });
 
@@ -1755,6 +2017,20 @@ const make = Effect.gen(function* () {
     const threadId = reuseThread
       ? (previousThread as ThreadId)
       : ThreadId.make(yield* store.newId("board-thread"));
+    // Each thread gets each comment's files once, whichever run first shows it the comment.
+    const delivered = reuseThread
+      ? yield* store.listDeliveredComments(threadId)
+      : new Set<string>();
+    const owed = context.boardComments
+      .slice(-MAX_PROMPT_COMMENTS)
+      .filter((comment) => comment.files.length > 0 && !delivered.has(comment.commentId));
+    const copies = yield* files.copyToThread(
+      threadId,
+      yield* attachableFor(
+        agent.id,
+        owed.flatMap((comment) => comment.files.map((file) => file.attachment)),
+      ),
+    );
     // Read before this run is recorded, so "since" means since the previous run.
     const replySince = kind === "reply" ? yield* store.lastRunEndedAt(task.id) : null;
     const reworkSince = yield* store.lastRunEndedAt(task.id, "work");
@@ -1824,7 +2100,7 @@ const make = Effect.gen(function* () {
                     workedBefore
                     ? buildReworkPrompt(context, reworkSince, plan!.prompt)
                     : buildWorkPrompt(context, plan!.prompt),
-            attachments: [],
+            attachments: copies,
             mode: "queue",
             createdBy: "system",
             creationSource: "server",
@@ -1852,7 +2128,7 @@ const make = Effect.gen(function* () {
           runtimeMode: agent.runtimeMode,
           interactionMode: "default",
           workspaceStrategy,
-          initialMessage: { messageId, text: prompt, attachments: [] },
+          initialMessage: { messageId, text: prompt, attachments: copies },
           createdBy: "system",
           creationSource: "server",
         });
@@ -1869,6 +2145,7 @@ const make = Effect.gen(function* () {
         taskId: task.id,
         cause: launched.cause,
       });
+      yield* files.remove(copies);
       yield* store.endRun(runId, "failed");
       if (kind === "reply") {
         yield* systemComment(
@@ -1883,6 +2160,12 @@ const make = Effect.gen(function* () {
         `${agent.name} could not be started. Check the agent's provider and model, then move the task back.`,
       );
       return;
+    }
+    if (owed.length > 0) {
+      yield* store.recordDeliveries(
+        threadId,
+        owed.map((comment) => comment.commentId),
+      );
     }
     if (ownsTaskThread && kind !== "review" && launched.value !== null) {
       yield* store.setTaskThread(task.id, threadId, launched.value);
@@ -1914,6 +2197,8 @@ const make = Effect.gen(function* () {
       readonly blockedSubtasks: ReadonlyArray<BoardTask>;
       /** Agents over a monthly limit are not started, even by hand. */
       readonly overLimit: (agent: BoardAgent) => boolean;
+      /** Tasks it waits on are not done yet, so its work cannot start. */
+      readonly waiting: boolean;
     },
   ) {
     const { manual } = options;
@@ -1927,7 +2212,7 @@ const make = Effect.gen(function* () {
         : agent;
     };
     // Work and review prompts carry the board's comments, so they answer them too.
-    if (task.status === "todo" && options.slotFree) {
+    if (task.status === "todo" && options.slotFree && !options.waiting) {
       const agent = ready(task.assigneeAgentId);
       if (agent !== null) return { kind: "work" as const, agent };
     }
@@ -1994,6 +2279,7 @@ const make = Effect.gen(function* () {
         awaitingReply: awaitingReply.has(stored.task.id),
         blockedSubtasks: blockedByParent.get(stored.task.id) ?? [],
         overLimit: (agent) => limitReached(usage, settings, agent) !== null,
+        waiting: boardTaskWaitingOn(stored.task, allTasks).length > 0,
       });
       if (next === null) continue;
       yield* startRun({ company, stored, ...next, agents, allTasks, settings });
@@ -2025,6 +2311,15 @@ const make = Effect.gen(function* () {
     }
     if (task.status !== "review" && task.assigneeAgentId === null) {
       return yield* boardError("Assign an agent before starting the task.");
+    }
+    if (task.status !== "review") {
+      const tasks = (yield* store.listTasks(task.companyId)).map((stored) => stored.task);
+      const waiting = boardTaskWaitingOn(task, tasks);
+      if (waiting.length > 0) {
+        return yield* boardError(
+          `This task waits on ${quoted(waiting)}. Remove them from Waits on to start it now.`,
+        );
+      }
     }
     // Starting by hand explains a limit instead of quietly leaving the task waiting.
     const starter = yield* store.getAgent(
@@ -2249,6 +2544,7 @@ const make = Effect.gen(function* () {
     remember,
     rewriteMemory,
     searchCards,
+    readSkill,
     runCommand,
     assignmentForThread,
   });

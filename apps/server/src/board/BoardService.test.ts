@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
   BoardError,
+  ChatAttachmentId,
   ProjectId,
   ProviderInstanceId,
   type BoardAgentId,
@@ -9,6 +10,7 @@ import {
   type BoardHireId,
   type BoardSnapshot,
   type BoardTaskId,
+  type ChatAttachment,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   type OrchestrationV2DomainEvent,
@@ -35,7 +37,9 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as BoardAttachments from "./BoardAttachments.ts";
 import * as BoardService from "./BoardService.ts";
 import * as BoardStore from "./BoardStore.ts";
 
@@ -64,6 +68,8 @@ const pullRequestOpened = {
   },
   toast: { title: "Created PR", cta: { kind: "none" } },
 } as unknown as GitRunStackedActionResult;
+
+const INSTALLED_SKILL = "/home/me/.claude/skills/design-review/SKILL.md";
 
 const makeHarness = Effect.gen(function* () {
   const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchService.ThreadLaunchInput>>([]);
@@ -143,7 +149,40 @@ const makeHarness = Effect.gen(function* () {
         } as GitVcsDriver.ExecuteGitResult;
       }),
   });
-  const fileSystem = FileSystem.layerNoop({ realPath: (path) => Effect.succeed(path) });
+  const fileSystem = FileSystem.layerNoop({
+    realPath: (path) => Effect.succeed(path),
+    readFileString: (path) =>
+      path === INSTALLED_SKILL ? Effect.succeed("Check every page at phone width.") : Effect.never,
+  });
+  // The board keeps "board-" copies of uploads; each thread gets copies named after it.
+  const removedFiles = yield* Ref.make<ReadonlyArray<string>>([]);
+  const renamed = (attachment: ChatAttachment, id: string): ChatAttachment => ({
+    ...attachment,
+    id: ChatAttachmentId.make(id.replace(/[^a-z0-9_-]+/gi, "-")),
+  });
+  const boardFiles = Layer.mock(BoardAttachments.BoardAttachments)({
+    claim: (attachments) =>
+      Effect.succeed(
+        attachments.map((attachment) =>
+          renamed(attachment, attachment.id.replace(/^pending-/, "board-")),
+        ),
+      ),
+    copyToThread: (threadId, attachments) =>
+      Effect.succeed(
+        attachments.map((attachment) => renamed(attachment, `${threadId}-${attachment.id}`)),
+      ),
+    remove: (attachments) =>
+      Ref.update(removedFiles, (all) => [...all, ...attachments.map((file) => file.id)]),
+    pathOf: (attachment) => `/attachments/${attachment.id}`,
+  });
+  // "claude" takes pictures as images; any other instance gets their paths only.
+  const providerInstances = Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+    getInstance: (instanceId) =>
+      Effect.succeed({
+        instanceId,
+        driverKind: instanceId === "claude" ? "claudeAgent" : "grok",
+      } as never),
+  });
   const layer = BoardService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -155,10 +194,13 @@ const makeHarness = Effect.gen(function* () {
         gitWorkflow,
         gitDriver,
         fileSystem,
+        boardFiles,
+        providerInstances,
       ),
     ),
   );
   return {
+    removedFiles,
     launches,
     events,
     sent,
@@ -226,7 +268,7 @@ const boardWhere = (
   matches: (snapshot: BoardSnapshot) => boolean,
 ) =>
   board
-    .subscribe(companyId)
+    .subscribe({ companyId })
     .pipe(Stream.filter(matches), Stream.runHead, Effect.map(Option.getOrThrow));
 
 const threadOf = (snapshot: BoardSnapshot, taskId: BoardTaskId | undefined) =>
@@ -607,7 +649,21 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
       });
 
       // Nobody is working the task, so its owner is started just to answer, in a short prompt.
-      yield* board.addComment({ taskId: task!.id, body: "Only merge once it is verified." }, user);
+      const screenshot: ChatAttachment = {
+        type: "image",
+        id: ChatAttachmentId.make("pending-shot"),
+        name: "checkout.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+      };
+      yield* board.addComment(
+        {
+          taskId: task!.id,
+          body: "Only merge once it is verified.",
+          attachments: [screenshot],
+        },
+        user,
+      );
       // The run is recorded before its thread launches; the thread id lands only after the launch.
       yield* boardWhere(
         board,
@@ -618,7 +674,17 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
       const [reply] = yield* Ref.get(harness.launches);
       const replyPrompt = reply?.initialMessage?.text ?? "";
       assert.include(replyPrompt, "## Reply now");
-      assert.include(replyPrompt, "- On this task (new): Only merge once it is verified.");
+      assert.include(
+        replyPrompt,
+        "- On this task (new): Only merge once it is verified. Attached: checkout.png (/attachments/board-shot).",
+      );
+      // The thread gets its own copy of the picture, since deleting a thread deletes its files.
+      const replyFiles = reply?.initialMessage?.attachments ?? [];
+      assert.deepEqual(
+        replyFiles.map((file) => file.name),
+        ["checkout.png"],
+      );
+      assert.notEqual(replyFiles[0]?.id, "board-shot");
       assert.notInclude(replyPrompt, "Departments:");
       assert.notInclude(replyPrompt, "## What you remember");
       // The reply opens the task's own thread, in the task's workspace.
@@ -643,6 +709,8 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
       assert.include(secondReply?.text ?? "", "- On this task (new): Use the staging site.");
       assert.include(secondReply?.text ?? "", "- On this task: Only merge once it is verified.");
       assert.notInclude(secondReply?.text ?? "", "You are Lead");
+      // The thread already has the picture.
+      assert.deepEqual(secondReply?.attachments, []);
       yield* settle(taskThread, "run-reply-2");
 
       // Work continues the same thread too, starting with the full work prompt.
@@ -659,6 +727,7 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
       assert.equal(work?.threadId, taskThread);
       assert.include(work?.text ?? "", "## Where you work");
       assert.include(work?.text ?? "", "- On this task: Only merge once it is verified.");
+      assert.deepEqual(work?.attachments, []);
       assert.lengthOf(yield* Ref.get(harness.launches), 1);
 
       // People's instructions reach subtasks below the task.
@@ -676,17 +745,108 @@ it.effect("answers a person's comment right away and keeps it in later prompts",
           (candidate) => candidate.id === subtask.id && candidate.threadId !== null,
         ),
       );
-      const subtaskPrompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
+      const subtaskLaunch = (yield* Ref.get(harness.launches)).at(-1);
+      const subtaskPrompt = subtaskLaunch?.initialMessage?.text ?? "";
       assert.include(subtaskPrompt, '- On "Fix the funnel": Use the staging site.');
+      // A new thread below the task gets the pictures people left on the task above it.
+      assert.deepEqual(
+        subtaskLaunch?.initialMessage?.attachments.map((file) => file.name),
+        ["checkout.png"],
+      );
 
       // A comment on a task someone is working reaches that thread at once.
       const launchesBefore = (yield* Ref.get(harness.launches)).length;
-      yield* board.addComment({ taskId: task!.id, body: "Ship it behind a flag." }, user);
+      yield* board.addComment(
+        {
+          taskId: task!.id,
+          body: "Ship it behind a flag.",
+          attachments: [
+            { ...screenshot, id: ChatAttachmentId.make("pending-flag"), name: "flag.png" },
+          ],
+        },
+        user,
+      );
       const forwarded = yield* Queue.take(harness.sent);
       assert.equal(forwarded?.threadId, taskThread);
       assert.include(forwarded?.text ?? "", "Ship it behind a flag.");
+      assert.include(forwarded?.text ?? "", "Attached: flag.png (/attachments/board-flag)");
+      assert.deepEqual(
+        forwarded?.attachments.map((file) => file.name),
+        ["flag.png"],
+      );
       assert.include(forwarded?.text ?? "", "Reply on the board with board_add_comment");
       assert.lengthOf(yield* Ref.get(harness.launches), launchesBefore);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("gives an agent whose provider takes no pictures their paths instead", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { agent: grok } = yield* board.runCommand(
+        {
+          type: "agent.upsert",
+          agent: {
+            companyId: company.id,
+            name: "Gus",
+            title: "Engineer",
+            reportsToAgentId: lead.id,
+            skillIds: [],
+            instructions: "",
+            modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-4.7" },
+            runtimeMode: "full-access",
+          },
+        },
+        user,
+      );
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: {
+            companyId: company.id,
+            title: "Fix the header",
+            assigneeAgentId: grok!.id,
+            status: "backlog",
+          },
+        },
+        user,
+      );
+      yield* board.addComment(
+        {
+          taskId: task!.id,
+          body: "Like this.",
+          attachments: [
+            {
+              type: "image",
+              id: ChatAttachmentId.make("pending-header"),
+              name: "header.png",
+              mimeType: "image/png",
+              sizeBytes: 3,
+            },
+            {
+              type: "file",
+              id: ChatAttachmentId.make("pending-spec-pdf"),
+              name: "spec.pdf",
+              mimeType: "application/pdf",
+              sizeBytes: 3,
+            },
+          ],
+        },
+        user,
+      );
+      yield* boardWhere(board, company.id, (snapshot) => threadOf(snapshot, task?.id) !== null);
+      const [reply] = yield* Ref.get(harness.launches);
+      assert.include(
+        reply?.initialMessage?.text ?? "",
+        "Attached: header.png (/attachments/board-header), spec.pdf (/attachments/board-spec-pdf).",
+      );
+      assert.deepEqual(
+        reply?.initialMessage?.attachments.map((file) => file.name),
+        ["spec.pdf"],
+      );
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
@@ -785,6 +945,20 @@ it.effect("adds an agent only once a person approves its hire request", () =>
       assert.equal(hire.reportsToAgentId, lead.id);
       const before = yield* board.snapshot(company.id);
       assert.isFalse(before.agents.some((agent) => agent.name === "Dana"));
+      // The request waits on the person, so it reaches the inbox that follows every company.
+      const inbox = yield* board.subscribe({ companyId: null, inbox: true }).pipe(
+        Stream.filter((snapshot) => (snapshot.inbox ?? []).length > 0),
+        Stream.runHead,
+        Effect.map(Option.getOrThrow),
+      );
+      assert.deepInclude(inbox.inbox?.[0], {
+        kind: "hire",
+        hireId: hire.id,
+        companyName: "Acme",
+        title: "Dana, Designer",
+        detail: "Nobody on the team designs.",
+        agentId: lead.id,
+      });
 
       const { agent } = yield* board.runCommand(
         { type: "hire.decide", hire: { id: hire.id, approve: true } },
@@ -897,6 +1071,81 @@ it.effect("returns a split task to its owner once every subtask is done", () =>
       const resumed = yield* board.taskDetail(parent.id);
       assert.equal(resumed.task.status, "todo");
       assert.include(resumed.comments.at(-1)?.body ?? "", "Every subtask is done");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("starts a task once every task it waits on is done, and never in a circle", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, engineer } = yield* createCompany(board);
+      yield* board.runCommand(
+        { type: "settings.update", settings: { companyId: company.id, maxConcurrentRuns: 5 } },
+        user,
+      );
+      const create = Effect.fn("test.create")(function* (
+        title: string,
+        extra: { readonly status?: "backlog"; readonly waitsOnTaskIds?: Array<BoardTaskId> },
+      ) {
+        const { task } = yield* board.runCommand(
+          {
+            type: "task.create",
+            task: { companyId: company.id, title, assigneeAgentId: engineer.id, ...extra },
+          },
+          user,
+        );
+        return task!;
+      });
+      const schema = yield* create("Design the schema", { status: "backlog" });
+      const api = yield* create("Build the API", { waitsOnTaskIds: [schema.id] });
+      assert.deepEqual(api.waitsOnTaskIds, [schema.id]);
+      assert.equal(api.status, "todo");
+
+      const circle = yield* board
+        .updateTask({ id: schema.id, waitsOnTaskIds: [api.id] }, user)
+        .pipe(Effect.flip);
+      assert.include(circle.message, "neither would ever start");
+      const early = yield* board
+        .runCommand({ type: "task.start", id: api.id }, user)
+        .pipe(Effect.flip);
+      assert.include(early.message, 'waits on "Design the schema"');
+
+      // The schema starts; the API keeps waiting in To do.
+      yield* board.updateTask({ id: schema.id, status: "todo" }, user);
+      const started = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, schema.id) !== null,
+      );
+      assert.isNull(threadOf(started, api.id));
+      assert.equal(started.tasks.find((task) => task.id === api.id)?.status, "todo");
+      assert.lengthOf(yield* Ref.get(harness.launches), 1);
+
+      // Once it is done, the API starts, told what came before it.
+      yield* board.addComment(
+        { taskId: schema.id, body: "Added the orders table." },
+        { kind: "agent", threadId: threadOf(started, schema.id)! },
+      );
+      yield* board.updateTask({ id: schema.id, status: "done" }, user);
+      yield* boardWhere(board, company.id, (snapshot) => threadOf(snapshot, api.id) !== null);
+      const prompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
+      assert.include(prompt, "## Done before this task");
+      assert.include(
+        prompt,
+        `- Design the schema (${schema.id}), its work is on board/design-the-schema-`,
+      );
+      assert.include(prompt, "not in your folder yet; if you need it, run `git merge board/");
+      assert.include(prompt, ": Added the orders table.");
+      const { comments } = yield* board.taskDetail(api.id);
+      assert.includeMembers(
+        comments.map((comment) => comment.body),
+        [
+          'Waits on "Design the schema" before it starts.',
+          '"Design the schema" is done, so this task no longer waits.',
+        ],
+      );
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
@@ -1529,7 +1778,7 @@ it.effect("a busy manager's review waits for its thread unless a person starts i
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
-it.effect("lists long skills by name for the agent to read when needed", () =>
+it.effect("lists long and installed skills by name for the agent to read when needed", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
@@ -1547,15 +1796,51 @@ it.effect("lists long skills by name for the agent to read when needed", () =>
         },
         user,
       );
+      const { skill: installed } = yield* board.runCommand(
+        {
+          type: "skill.upsert",
+          skill: {
+            companyId: company.id,
+            name: "design-review",
+            description: "Reviews a page's design.",
+            instructions: "",
+            installedPath: INSTALLED_SKILL,
+          },
+        },
+        user,
+      );
       yield* board.runCommand(
-        { type: "agent.upsert", agent: { ...lead, skillIds: [skill!.id] } },
+        { type: "agent.upsert", agent: { ...lead, skillIds: [skill!.id, installed!.id] } },
         user,
       );
       yield* startTaskFor(board, company.id, "Ship v2", lead.id);
       const prompt = (yield* Ref.get(harness.launches)).at(-1)?.initialMessage?.text ?? "";
       assert.include(prompt, "Read each skill that applies to this task with board_read_skill");
       assert.include(prompt, "- Release process: How we ship.");
+      assert.include(prompt, "- design-review: Reviews a page's design.");
       assert.notInclude(prompt, "Step. Step.");
+      // An installed skill is read from its SKILL.md, so agents follow it as installed now.
+      const read = yield* board.readSkill(company.id, "Design-Review");
+      assert.equal(
+        read.instructions,
+        "This skill's files are in /home/me/.claude/skills/design-review. Paths it mentions are relative to that folder.\n\nCheck every page at phone width.",
+      );
+      const notASkill = yield* board
+        .runCommand(
+          {
+            type: "skill.upsert",
+            skill: {
+              companyId: company.id,
+              name: "Secrets",
+              description: "",
+              instructions: "",
+              installedPath: "/home/me/.ssh/id_ed25519",
+            },
+          },
+          user,
+        )
+        .pipe(Effect.flip);
+      assert.include(notASkill.message, "SKILL.md");
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
