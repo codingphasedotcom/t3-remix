@@ -21,6 +21,8 @@ import {
   employeeRows,
   formatSpan,
   hasAttentionItems,
+  priorityTasks,
+  recentThreads,
   successRate,
 } from "./dashboard.logic";
 
@@ -195,6 +197,45 @@ describe("attentionItems", () => {
     const mine = { ...card("errand", "todo", null), assignedToUser: true };
     const attention = attentionItems({ ...snapshot, tasks: [...snapshot.tasks, mine] });
     expect(attention.unassigned.map((task) => task.id)).toEqual(["docs"]);
+  });
+});
+
+describe("priorityTasks", () => {
+  it("puts live work first, then what waits on you, then the queue, and leaves out closed tasks", () => {
+    const tasks = [
+      card("idea", "backlog", null),
+      card("queued", "todo", "linus"),
+      card("review", "review", "linus"),
+      card("stuck", "blocked", "grace"),
+      { ...card("running", "todo", "linus"), activeRunKind: "work" as const },
+      card("finished", "done", "linus"),
+      { ...card("archived", "blocked", "linus"), archivedAt: "2026-10-21T00:00:00.000Z" },
+    ];
+    expect(priorityTasks(tasks, 10).map((task) => task.id)).toEqual([
+      "running",
+      "stuck",
+      "review",
+      "queued",
+      "idea",
+    ]);
+    expect(priorityTasks(tasks, 2).map((task) => task.id)).toEqual(["running", "stuck"]);
+  });
+
+  it("shows the most recently touched task first within a column", () => {
+    const older = card("older", "review", "linus");
+    const newer = { ...card("newer", "review", "linus"), updatedAt: "2026-10-21T00:00:00.000Z" };
+    expect(priorityTasks([older, newer], 10).map((task) => task.id)).toEqual(["newer", "older"]);
+  });
+});
+
+describe("recentThreads", () => {
+  it("lists the newest runs first and stops at the limit", () => {
+    expect(recentThreads(snapshot.threads, 1).map((thread) => thread.threadId)).toEqual([
+      "thread-1",
+    ]);
+    expect(
+      recentThreads(snapshot.threads.toReversed(), 5).map((thread) => thread.threadId),
+    ).toEqual(["thread-1", "thread-2"]);
   });
 });
 

@@ -295,7 +295,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
     <>
       <WorkspacePageHeader electron={isElectron}>
         <div className="@container flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-0.5 pt-1 pb-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex min-w-0 shrink items-center gap-0.5 rounded-full border-2 border-(--remix-ink) bg-(--remix-surface) p-0.5 shadow-(--remix-lift)">
+          <div className="flex min-w-0 shrink items-center gap-0.5 rounded-lg border border-(--remix-card-line) bg-(--remix-surface) p-0.5 shadow-(--remix-card-lift)">
             <Select
               value={company.id}
               onValueChange={(value) => go({ company: value as BoardCompanyId, tab })}
@@ -417,8 +417,11 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
         <DashboardView
           environmentId={environmentId}
           snapshot={snapshot}
+          canOperate={canOperate}
           onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
+          onOpenBoard={() => go({ company: company.id, tab: "board" })}
           onOpenOrgChart={() => go({ company: company.id, tab: "org" })}
+          onNewTask={() => setNewCardOpen(true)}
         />
       ) : tab === "org" ? (
         <OrgChartView
@@ -496,7 +499,7 @@ function CompanyLimitBanner(props: { readonly snapshot: BoardSnapshot }) {
       data-remix-tone="yellow"
       className={cn(
         REMIX_CARD,
-        "mx-(--workspace-gutter-start) mb-3 flex-row items-center gap-2.5 bg-(--tone-wash) px-2.5 py-1.5 text-sm font-medium shadow-(--remix-lift)",
+        "mx-(--workspace-gutter-start) mb-3 flex-row items-center gap-2.5 bg-(--tone-wash) px-2.5 py-1.5 text-sm font-medium shadow-(--remix-card-lift)",
       )}
     >
       <RemixIconTile tone="yellow">
@@ -523,7 +526,7 @@ function MissionBanner(props: {
     <div
       className={cn(
         REMIX_CARD,
-        "mx-(--workspace-gutter-start) mb-3 flex-row items-center gap-2.5 px-2 py-1.5 text-sm shadow-(--remix-lift)",
+        "mx-(--workspace-gutter-start) mb-3 flex-row items-center gap-2.5 px-2 py-1.5 text-sm shadow-(--remix-card-lift)",
       )}
     >
       {props.company.mission.trim().length > 0 ? (

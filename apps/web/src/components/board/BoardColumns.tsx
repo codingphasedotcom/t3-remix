@@ -351,9 +351,9 @@ function BoardCardFace(props: {
         REMIX_CARD,
         "cursor-pointer gap-1.5 p-2.5 text-left outline-none transition-transform duration-150 focus-visible:ring-2 focus-visible:ring-(--remix-ink)/40 focus-visible:ring-inset",
         live
-          ? "bg-(--tone) text-(--tone-on) shadow-(--remix-lift)"
+          ? "bg-(--tone) text-(--tone-on) shadow-(--remix-card-lift)"
           : "border-(--tone) shadow-(--tone-lift) hover:-translate-y-0.5",
-        props.lifted && "rotate-1 shadow-(--remix-lift-lg)",
+        props.lifted && "rotate-1 shadow-lg",
       )}
     >
       <div className={cn("flex items-center justify-between gap-3 text-xs font-medium", muted)}>

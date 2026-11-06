@@ -71,7 +71,7 @@ export function SkillsView(props: {
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-1 pb-14">
-        <div className={cn(REMIX_CARD, "p-3 shadow-(--remix-lift)")}>
+        <div className={cn(REMIX_CARD, "p-3 shadow-(--remix-card-lift)")}>
           <RemixHeading
             icon={<SparklesIcon />}
             tone="purple"

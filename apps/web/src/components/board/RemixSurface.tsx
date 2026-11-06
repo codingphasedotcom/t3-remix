@@ -29,7 +29,7 @@ export const REMIX_COLUMN_TONES: Record<BoardTaskStatus, RemixTone> = {
   done: "green",
 };
 
-/** The sky-blue page with clouds rolling along its bottom edge. */
+/** The pale page with clouds rolling along its bottom edge. */
 export function RemixPage(props: { readonly children: ReactNode }) {
   return (
     <div className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col bg-(--remix-page) text-(--remix-text)">
@@ -41,14 +41,14 @@ export function RemixPage(props: { readonly children: ReactNode }) {
 
 /** An outlined, toned container such as a board column or a dashboard panel. */
 export const REMIX_SHELL =
-  "flex min-w-0 flex-col rounded-(--remix-shell-radius) border-2 border-(--remix-ink) bg-(--tone-shell) shadow-(--remix-lift-lg)";
+  "flex min-w-0 flex-col rounded-(--remix-shell-radius) border border-(--remix-card-line) bg-(--tone-shell) shadow-(--remix-card-lift)";
 
 /** The paler well inside a shell that holds its cards. */
 export const REMIX_WELL = "flex min-w-0 flex-col rounded-(--remix-well-radius) bg-(--tone-wash)";
 
 /** An outlined white card. Inside a toned shell, pair it with `border-(--tone)`. */
 export const REMIX_CARD =
-  "flex min-w-0 flex-col gap-3 rounded-xl border-2 border-(--remix-ink) bg-(--remix-surface) p-4 text-(--remix-text)";
+  "flex min-w-0 flex-col gap-3 rounded-xl border border-(--remix-card-line) bg-(--remix-surface) p-4 text-(--remix-text)";
 
 /** A soft tinted block inside a white surface, such as a group of details in a panel. */
 export const REMIX_INSET = "flex min-w-0 flex-col gap-4 rounded-xl bg-(--remix-inset) p-4";
@@ -126,8 +126,8 @@ export function RemixIconTile(props: {
 type RemixButtonVariant = "paper" | "go" | "active";
 
 /**
- * A chunky outlined button that presses down into its shadow. `go` is the page's main action and
- * `active` marks the selected tab or option.
+ * A softly outlined button that presses down slightly. `go` is the page's main action and `active`
+ * marks the selected tab or option.
  */
 export function RemixButton({
   variant = "paper",
@@ -143,7 +143,7 @@ export function RemixButton({
       type="button"
       {...props}
       className={cn(
-        "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full border-2 border-(--remix-ink) font-semibold whitespace-nowrap shadow-(--remix-lift) outline-none transition-[translate,box-shadow] duration-100 focus-visible:ring-2 focus-visible:ring-inset active:translate-y-0.5 active:shadow-none disabled:pointer-events-none disabled:opacity-55 [&_svg]:shrink-0",
+        "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-(--remix-card-line) font-semibold whitespace-nowrap shadow-(--remix-card-lift) outline-none transition-[translate,box-shadow] duration-100 focus-visible:ring-2 focus-visible:ring-inset active:translate-y-px active:shadow-none disabled:pointer-events-none disabled:opacity-55 [&_svg]:shrink-0",
         size === "sm"
           ? "h-6 px-2 text-xs [&_svg]:size-3"
           : size === "icon"

@@ -155,6 +155,41 @@ export function hasAttentionItems(attention: AttentionItems): boolean {
   );
 }
 
+const TASK_ORDER: Record<BoardTaskStatus, number> = {
+  blocked: 0,
+  review: 1,
+  in_progress: 2,
+  todo: 3,
+  backlog: 4,
+  done: 5,
+};
+
+/** Open tasks, most urgent first: agents at work, then what waits on you, then the queue. */
+export function priorityTasks(
+  tasks: ReadonlyArray<BoardTask>,
+  limit: number,
+): ReadonlyArray<BoardTask> {
+  return tasks
+    .filter((task) => task.status !== "done" && task.archivedAt === null)
+    .toSorted(
+      (left, right) =>
+        Number(right.activeRunKind !== null) - Number(left.activeRunKind !== null) ||
+        TASK_ORDER[left.status] - TASK_ORDER[right.status] ||
+        right.updatedAt.localeCompare(left.updatedAt),
+    )
+    .slice(0, limit);
+}
+
+/** The latest runs across the company, newest first. */
+export function recentThreads(
+  threads: ReadonlyArray<BoardAgentThread>,
+  limit: number,
+): ReadonlyArray<BoardAgentThread> {
+  return threads
+    .toSorted((left, right) => right.startedAt.localeCompare(left.startedAt))
+    .slice(0, limit);
+}
+
 export type ActivityMetric = "runs" | "tasksFinished" | "tokens";
 
 /** Rounds a duration to its two largest units, such as "3h 20m" or "45s". */

@@ -101,7 +101,7 @@ export function OrgChartView(props: {
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="flex min-w-max flex-col gap-4 px-6 pt-1 pb-14">
-        <div className={cn(REMIX_CARD, "mx-auto w-full max-w-3xl p-3 shadow-(--remix-lift)")}>
+        <div className={cn(REMIX_CARD, "mx-auto w-full max-w-3xl p-3 shadow-(--remix-card-lift)")}>
           <RemixHeading
             icon={<NetworkIcon />}
             tone="purple"
@@ -253,11 +253,11 @@ function OrgCard(props: {
     <div data-remix-tone={props.accent} className="relative w-56 pt-10">
       <div
         className={cn(
-          "absolute top-0 left-1/2 z-10 -translate-x-1/2 rounded-full border-2 border-(--remix-ink) bg-(--tone) p-1 shadow-(--remix-lift)",
+          "absolute top-0 left-1/2 z-10 -translate-x-1/2 rounded-full border border-(--remix-card-line) bg-(--tone) p-1 shadow-(--remix-card-lift)",
           agent.paused && "opacity-60 grayscale",
         )}
       >
-        <div className="size-18 overflow-hidden rounded-full border-2 border-(--remix-ink) bg-(--remix-surface)">
+        <div className="size-18 overflow-hidden rounded-full border border-(--remix-card-line) bg-(--remix-surface)">
           {face !== null ? (
             <img
               src={face.url}
@@ -268,8 +268,8 @@ function OrgCard(props: {
           ) : null}
         </div>
       </div>
-      <div className={cn(REMIX_CARD, "gap-0 overflow-hidden p-0 shadow-(--remix-lift)")}>
-        <div className="h-12 border-b-2 border-(--remix-ink) bg-(--tone-shell)" />
+      <div className={cn(REMIX_CARD, "gap-0 overflow-hidden p-0 shadow-(--remix-card-lift)")}>
+        <div className="h-12 border-b border-(--remix-card-line) bg-(--tone-shell)" />
         <div className="flex flex-col items-center gap-1 px-4 pt-3 pb-4 text-center">
           <span className="max-w-full truncate text-sm font-semibold">{agent.name}</span>
           <span className="max-w-full truncate text-xs font-medium">

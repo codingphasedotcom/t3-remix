@@ -1,12 +1,12 @@
-/* T3 Remix's cartoon look: a sky-blue page, thick ink outlines, and bright fills. These are
-   runtime theme variables, kept fork-owned so upstream merges never touch them. They sit on
-   :root so dialogs and menus, which portal out of the page, can use them too. */
+/* T3 Remix's cartoon look: a pale page, thick ink outlines, and bright fills. These are runtime
+   theme variables, kept fork-owned so upstream merges never touch them. They sit on :root so
+   dialogs and menus, which portal out of the page, can use them too. */
 @reference "../../index.css";
 
 :root {
-  --remix-page: #5b8def;
-  --remix-cloud: #80aaf8;
-  --remix-cloud-far: #6d9cf4;
+  --remix-page: #ebf4f5;
+  --remix-cloud: rgb(255 255 255 / 0.75);
+  --remix-cloud-far: rgb(255 255 255 / 0.4);
   --remix-ink: #1d2a5c;
   --remix-text: #1d2a5c;
   --remix-text-muted: #5a6593;
@@ -28,18 +28,22 @@
   --remix-inset: color-mix(in oklab, var(--remix-blue) 7%, var(--remix-surface));
   /* A hard drop under outlined shapes, like a sticker. */
   --remix-lift: 0 2px 0 var(--remix-ink);
-  --remix-lift-lg: 0 3px 0 var(--remix-ink);
   --remix-line-thin: 1.5px;
+  /* Cards and panels get a light 1px outline; buttons and labels keep the heavier ink. */
+  --remix-card-line: rgb(29 42 92 / 0.16);
+  --remix-card-lift: 0 1px 3px rgb(29 42 92 / 0.08);
 
   @variant dark {
-    --remix-page: #18214a;
-    --remix-cloud: #24306a;
-    --remix-cloud-far: #1e295b;
+    --remix-page: #252d3f;
+    --remix-cloud: rgb(255 255 255 / 0.08);
+    --remix-cloud-far: rgb(255 255 255 / 0.04);
     --remix-ink: #080c24;
     --remix-text: #eef1ff;
     --remix-text-muted: #a5afd8;
     --remix-surface: #222c5c;
     --remix-gray: #6b76a3;
+    --remix-card-line: rgb(255 255 255 / 0.12);
+    --remix-card-lift: 0 1px 3px rgb(0 0 0 / 0.3);
   }
 }
 
