@@ -36,8 +36,8 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -535,7 +535,7 @@ const failWith =
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
 
   // The board owns its tables instead of taking an id in the shared migration sequence. The
   // migrator skips every id below the highest one recorded, so a fork-owned id would either
@@ -786,10 +786,7 @@ const make = Effect.gen(function* () {
   }
 
   const newId: BoardStore["Service"]["newId"] = (prefix) =>
-    crypto.randomUUIDv4().pipe(
-      Effect.map((uuid) => `${prefix}:${uuid}`),
-      Effect.orDie,
-    );
+    random.uuidV4().pipe(Effect.map((uuid) => `${prefix}:${uuid}`));
   const now = DateTime.now.pipe(Effect.map((value) => DateTime.formatIso(value)));
 
   // Companies made before departments get the default set, with the CEO in Executive and
