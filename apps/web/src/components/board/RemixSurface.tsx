@@ -1,9 +1,19 @@
 import "./remix.css";
 
 import type { BoardTaskStatus } from "@t3tools/contracts";
+import {
+  AlertTriangleIcon,
+  CircleCheckIcon,
+  EyeIcon,
+  LightbulbIcon,
+  ListTodoIcon,
+  PlayIcon,
+  type LucideIcon,
+} from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { RemixClouds } from "./RemixArt";
 
 // T3 Remix's cartoon look: outlined stickers on a sky-blue page. Colors come from remix.css.
@@ -27,6 +37,15 @@ export const REMIX_COLUMN_TONES: Record<BoardTaskStatus, RemixTone> = {
   review: "yellow",
   blocked: "pink",
   done: "green",
+};
+
+export const REMIX_COLUMN_ICONS: Record<BoardTaskStatus, LucideIcon> = {
+  backlog: LightbulbIcon,
+  todo: ListTodoIcon,
+  in_progress: PlayIcon,
+  review: EyeIcon,
+  blocked: AlertTriangleIcon,
+  done: CircleCheckIcon,
 };
 
 /** The pale page with clouds rolling along its bottom edge. */
@@ -150,7 +169,7 @@ export function RemixButton({
             ? "size-8 [&_svg]:size-3.5"
             : "h-8 px-3 text-sm [&_svg]:size-3.5",
         variant === "go"
-          ? "bg-(--remix-green) text-(--remix-ink) focus-visible:ring-white/90"
+          ? "bg-(--remix-spray) text-(--remix-ink) hover:bg-(--remix-spray-hover) focus-visible:ring-(--remix-ink)"
           : variant === "active"
             ? "bg-(--remix-blue) text-white focus-visible:ring-white/90"
             : "bg-(--remix-surface) text-(--remix-text) hover:bg-(--remix-paper-hover) focus-visible:ring-(--remix-blue)",
@@ -163,24 +182,36 @@ export function RemixButton({
 /**
  * A page tab: a paper button, or the blue one when it is the page you're on. Inside a narrow
  * `@container` the label drops to icon-only so the tabs never run under the header's actions.
+ * `iconOnly` tabs always hide the label and name themselves in a tooltip instead.
  */
 export function RemixTab(props: {
   readonly active: boolean;
   readonly icon: ReactNode;
   readonly label: string;
   readonly badge?: ReactNode;
+  readonly iconOnly?: boolean;
   readonly onClick: () => void;
 }) {
-  return (
-    <RemixButton
-      variant={props.active ? "active" : "paper"}
-      aria-current={props.active ? "page" : undefined}
-      onClick={props.onClick}
-    >
+  const tabProps = {
+    variant: props.active ? ("active" as const) : ("paper" as const),
+    "aria-current": props.active ? ("page" as const) : undefined,
+    onClick: props.onClick,
+  };
+  const content = (
+    <>
       {props.icon}
-      <span className="@max-3xl:sr-only">{props.label}</span>
+      <span className={props.iconOnly === true ? "sr-only" : "@max-3xl:sr-only"}>
+        {props.label}
+      </span>
       {props.badge}
-    </RemixButton>
+    </>
+  );
+  if (props.iconOnly !== true) return <RemixButton {...tabProps}>{content}</RemixButton>;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<RemixButton {...tabProps} />}>{content}</TooltipTrigger>
+      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
+    </Tooltip>
   );
 }
 

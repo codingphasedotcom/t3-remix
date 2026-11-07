@@ -18,6 +18,7 @@ import {
   FolderIcon,
   GaugeIcon,
   GitBranchIcon,
+  HistoryIcon,
   InboxIcon,
   KanbanSquareIcon,
   LayoutDashboardIcon,
@@ -30,6 +31,7 @@ import {
   SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
+  UploadIcon,
   UsersIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -64,6 +66,7 @@ import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useRunBoardCommand } from "./useRunBoardCommand";
 import { CloneCompanyDialog } from "./CloneCompanyDialog";
+import { ExportCompanyDialog, ImportCompanyDialog } from "./CompanyFileDialogs";
 import {
   CompanyWorkspaceField,
   useCompanyProjects,
@@ -81,6 +84,7 @@ import { InboxView } from "./InboxView";
 import { useBoardInbox } from "./boardInbox";
 import { OrgChartView } from "./OrgChartView";
 import { RoutinesView } from "./RoutinesView";
+import { TimelineView } from "./TimelineView";
 import { SkillsView } from "./SkillsView";
 import { TokenLimitField } from "./TokenLimitField";
 import { agentById, limitProgress } from "./board.logic";
@@ -96,7 +100,7 @@ import {
   type RemixTone,
 } from "./RemixSurface";
 
-export type BoardTab = "board" | "inbox" | "dashboard" | "org" | "skills" | "routines";
+export type BoardTab = "board" | "inbox" | "dashboard" | "timeline" | "org" | "skills" | "routines";
 
 export interface BoardPageProps {
   readonly environmentId?: EnvironmentId | undefined;
@@ -176,6 +180,8 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
   const [newCardOpen, setNewCardOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState(false);
   const [cloningCompany, setCloningCompany] = useState(false);
+  const [exportingCompany, setExportingCompany] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
   const projects = useCompanyProjects(environmentId);
   const snapshot = boardQuery.data;
@@ -202,6 +208,18 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
       environmentId={environmentId}
       runCommand={runCommand}
       onCreated={(companyId) => go({ company: companyId, tab: "org" })}
+    />
+  );
+  const importDialog = (
+    <ImportCompanyDialog
+      open={importOpen}
+      onOpenChange={setImportOpen}
+      environmentId={environmentId}
+      runCommand={runCommand}
+      onImported={(companyId) => {
+        setImportOpen(false);
+        go({ company: companyId, tab: "org" });
+      }}
     />
   );
 
@@ -269,12 +287,19 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               employees, who each have a role and skills.
             </EmptyDescription>
           </EmptyHeader>
-          <Button disabled={!canOperate} onClick={() => setCompanyDialogOpen(true)}>
-            <PlusIcon />
-            New company
-          </Button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button disabled={!canOperate} onClick={() => setCompanyDialogOpen(true)}>
+              <PlusIcon />
+              New company
+            </Button>
+            <Button variant="outline" disabled={!canOperate} onClick={() => setImportOpen(true)}>
+              <UploadIcon />
+              Import from a file
+            </Button>
+          </div>
         </Empty>
         {companyDialog}
+        {importDialog}
       </>
     );
   }
@@ -352,6 +377,12 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
                 <MenuItem disabled={!canOperate} onClick={() => setCloningCompany(true)}>
                   Clone company
                 </MenuItem>
+                <MenuItem disabled={!canOperate} onClick={() => setExportingCompany(true)}>
+                  Export company
+                </MenuItem>
+                <MenuItem disabled={!canOperate} onClick={() => setImportOpen(true)}>
+                  Import a company
+                </MenuItem>
                 <MenuItem
                   variant="destructive"
                   disabled={!canOperate}
@@ -367,6 +398,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               active={tab === "inbox"}
               icon={<InboxIcon />}
               label="Inbox"
+              iconOnly
               badge={inbox.length > 0 ? <RemixChip tone="yellow">{inbox.length}</RemixChip> : null}
               onClick={() => go({ company: company.id, tab: "inbox" })}
             />
@@ -381,6 +413,12 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               icon={<KanbanSquareIcon />}
               label="Board"
               onClick={() => go({ company: company.id, tab: "board" })}
+            />
+            <RemixTab
+              active={tab === "timeline"}
+              icon={<HistoryIcon />}
+              label="Timeline"
+              onClick={() => go({ company: company.id, tab: "timeline" })}
             />
             <RemixTab
               active={tab === "org"}
@@ -403,9 +441,15 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             />
           </nav>
         </div>
-        {tab === "board" ? (
+        {tab === "board" || tab === "timeline" ? (
           <div className="flex shrink-0 items-center gap-2">
-            <BoardSettingsMenu snapshot={snapshot} disabled={!canOperate} runCommand={runCommand} />
+            {tab === "board" ? (
+              <BoardSettingsMenu
+                snapshot={snapshot}
+                disabled={!canOperate}
+                runCommand={runCommand}
+              />
+            ) : null}
             <RemixButton variant="go" disabled={!canOperate} onClick={() => setNewCardOpen(true)}>
               <PlusIcon />
               New task
@@ -431,6 +475,8 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           snapshot={snapshot}
           onOpenTask={(companyId, taskId) => go({ company: companyId, card: taskId, tab })}
           onOpenHires={(companyId) => go({ company: companyId, tab: "org" })}
+          canOperate={canOperate}
+          onDecideSkill={(id, approve) => runCommand({ type: "skill.decide", id, approve })}
         />
       ) : tab === "dashboard" ? (
         <DashboardView
@@ -441,6 +487,12 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           onOpenBoard={() => go({ company: company.id, tab: "board" })}
           onOpenOrgChart={() => go({ company: company.id, tab: "org" })}
           onNewTask={() => setNewCardOpen(true)}
+        />
+      ) : tab === "timeline" ? (
+        <TimelineView
+          environmentId={environmentId}
+          snapshot={snapshot}
+          onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
         />
       ) : tab === "org" ? (
         <OrgChartView
@@ -467,6 +519,12 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
       )}
 
       {companyDialog}
+      {importDialog}
+      <ExportCompanyDialog
+        company={exportingCompany ? company : null}
+        onClose={() => setExportingCompany(false)}
+        runCommand={runCommand}
+      />
       <AgentDialog
         draft={agentDraft}
         onClose={() => setAgentDraft(null)}

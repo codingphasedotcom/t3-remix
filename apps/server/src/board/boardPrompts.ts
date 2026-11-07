@@ -600,6 +600,57 @@ export function buildReplyPrompt(
   return sections.join("\n\n");
 }
 
+/** What a merge run has to land, read from the task's branch and linked work. */
+export interface MergeWork {
+  /** The task's own branch, or null when it has none or it already merged. */
+  readonly branch: string | null;
+  readonly worktreePath: string | null;
+  readonly baseRef: string | null;
+  readonly openPullRequests: ReadonlyArray<{ readonly title: string; readonly url: string }>;
+}
+
+function mergeRules(work: MergeWork): string {
+  const lines = [
+    "## Merge the approved work",
+    "The board (a human) approved this task and asked you to merge it. You start in the project's own folder, on the branch it has checked out. Land this task's work there, then stop: do no other work.",
+  ];
+  for (const pullRequest of work.openPullRequests) {
+    lines.push(
+      `- Pull request: ${pullRequest.title} (${pullRequest.url}). Merge it the way the repository usually merges, for example with gh pr merge. If required checks fail, fix them on its branch first. Then mark it "merged" with board_link_work and update the checked-out branch with git pull --ff-only.`,
+    );
+  }
+  if (work.branch !== null && work.openPullRequests.length === 0) {
+    const where =
+      work.worktreePath === null
+        ? "Its worktree is gone, but the branch is still in the repository."
+        : `Commit anything the task left uncommitted in its worktree, ${work.worktreePath}, first.`;
+    lines.push(
+      `- Branch: ${work.branch}. ${where} Merge it into ${baseLabel(work.baseRef)} with git merge. Don't push.`,
+    );
+  }
+  if (work.branch === null && work.openPullRequests.length === 0) {
+    lines.push(
+      "- No open pull request or unmerged branch is recorded. Check with git status and git log whether this task's changes are already in the checked-out branch; commit the ones that belong to this task if they are uncommitted.",
+    );
+  }
+  lines.push(
+    `Resolve conflicts yourself, keeping what both sides meant, and run the checks the change touches. The folder is shared: ${SHARED_FOLDER_RULE}`,
+    'When the work is in, comment what you merged with board_add_comment; the board then moves the task to "done". If you cannot merge it, comment why and move the task to "blocked" with board_update_task.',
+  );
+  return lines.join("\n");
+}
+
+/** Starts the task's agent in a fresh thread in the project folder to land its approved work. */
+export function buildMergePrompt(context: BoardPromptContext, work: MergeWork): string {
+  const sections = [identityBlock(context), taskBlock(context)];
+  const board = boardCommentsBlock(context);
+  if (board !== null) sections.push(board);
+  const comments = commentLines(context);
+  if (comments.length > 0) sections.push(["## Comments so far", ...comments].join("\n"));
+  sections.push(mergeRules(work), BOARD_TOOLS);
+  return sections.join("\n\n");
+}
+
 export function buildUserCommentMessage(
   task: BoardTask,
   body: string,

@@ -35,6 +35,9 @@ export type BoardRunId = typeof BoardRunId.Type;
 export const BoardHireId = TrimmedNonEmptyString.pipe(Schema.brand("BoardHireId"));
 export type BoardHireId = typeof BoardHireId.Type;
 
+export const BoardSkillRequestId = TrimmedNonEmptyString.pipe(Schema.brand("BoardSkillRequestId"));
+export type BoardSkillRequestId = typeof BoardSkillRequestId.Type;
+
 export const BoardDepartmentId = TrimmedNonEmptyString.pipe(Schema.brand("BoardDepartmentId"));
 export type BoardDepartmentId = typeof BoardDepartmentId.Type;
 
@@ -170,8 +173,30 @@ export const BoardHire = Schema.Struct({
 });
 export type BoardHire = typeof BoardHire.Type;
 
-/** "reply" answers a person's comment on a task without working the task itself. */
-export const BoardRunKind = Schema.Literals(["work", "review", "reply"]);
+/**
+ * An agent's request to give an employee a skill: one from the library, or one installed on this
+ * computer that joins the library once a person approves.
+ */
+export const BoardSkillRequest = Schema.Struct({
+  id: BoardSkillRequestId,
+  companyId: BoardCompanyId,
+  requestedByAgentId: Schema.NullOr(BoardAgentId),
+  agentId: BoardAgentId.annotate({ description: "Who would get the skill." }),
+  skillId: Schema.NullOr(BoardSkillId).annotate({ description: "Set for a library skill." }),
+  name: TrimmedNonEmptyString,
+  description: Schema.String,
+  installedPath: InstalledSkillPath,
+  reason: Schema.String,
+  status: BoardHireStatus,
+  createdAt: IsoDateTime,
+});
+export type BoardSkillRequest = typeof BoardSkillRequest.Type;
+
+/**
+ * "reply" answers a person's comment on a task without working the task itself. "merge" lands a
+ * task's approved work after a person asks for it; the task moves to Done when it finishes.
+ */
+export const BoardRunKind = Schema.Literals(["work", "review", "reply", "merge"]);
 export type BoardRunKind = typeof BoardRunKind.Type;
 
 export const BoardRunStatus = Schema.Literals(["running", "completed", "failed", "cancelled"]);
@@ -397,9 +422,9 @@ export type BoardDashboard = typeof BoardDashboard.Type;
 
 /**
  * Something waiting on the person who owns the board: a task to review, a task an agent gave up
- * on, a hire to decide, or a task of their own to do.
+ * on, a hire or skill to decide, or a task of their own to do.
  */
-export const BoardInboxKind = Schema.Literals(["review", "blocked", "hire", "todo"]);
+export const BoardInboxKind = Schema.Literals(["review", "blocked", "hire", "skill", "todo"]);
 export type BoardInboxKind = typeof BoardInboxKind.Type;
 
 export const BoardInboxItem = Schema.Struct({
@@ -408,39 +433,21 @@ export const BoardInboxItem = Schema.Struct({
   companyName: TrimmedNonEmptyString,
   taskId: Schema.NullOr(BoardTaskId),
   hireId: Schema.NullOr(BoardHireId),
+  skillRequestId: Schema.NullOr(BoardSkillRequestId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   title: TrimmedNonEmptyString,
   detail: Schema.NullOr(Schema.String).annotate({
-    description: "The last thing an agent said on the task, or why a hire is needed.",
+    description: "The last thing an agent said on the task, or why a hire or skill is needed.",
   }),
   agentId: Schema.NullOr(BoardAgentId).annotate({
-    description: "Who it comes from: the task's assignee or the agent asking to hire.",
+    description: "Who it comes from: the task's assignee or the agent asking.",
   }),
   since: IsoDateTime.annotate({
     description: "When it started waiting; a task that comes back again gets a new time.",
   }),
 });
 export type BoardInboxItem = typeof BoardInboxItem.Type;
-
-/** Every company's summary, plus the full board of the one being viewed. */
-export const BoardSnapshot = Schema.Struct({
-  companies: Schema.Array(BoardCompanySummary),
-  company: Schema.NullOr(BoardCompany),
-  settings: Schema.NullOr(BoardSettings),
-  agents: Schema.Array(BoardAgent),
-  skills: Schema.Array(BoardSkill),
-  hires: Schema.Array(BoardHire),
-  tasks: Schema.Array(BoardTask),
-  threads: Schema.Array(BoardAgentThread),
-  routines: Schema.Array(BoardRoutine),
-  usage: Schema.NullOr(BoardUsage),
-  dashboard: Schema.optional(BoardDashboard).annotate({
-    description: "Present only for a subscription that asked for it.",
-  }),
-  inbox: Schema.optional(Schema.Array(BoardInboxItem)).annotate({
-    description: "What waits on the person in every company, oldest first. Only when asked for.",
-  }),
-});
-export type BoardSnapshot = typeof BoardSnapshot.Type;
 
 export const BoardWorkLinkKind = Schema.Literals([
   "pull_request",
@@ -471,6 +478,116 @@ export const BoardWorkLink = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type BoardWorkLink = typeof BoardWorkLink.Type;
+
+export const BoardTimelineView = Schema.Literals(["tasks", "updates", "git"]);
+export type BoardTimelineView = typeof BoardTimelineView.Type;
+
+/** Something that happened to a task: it was created, the board noted an update, or work landed. */
+export const BoardTimelineEvent = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  kind: Schema.Literals(["created", "update", "link"]),
+  taskId: BoardTaskId,
+  agentId: Schema.NullOr(BoardAgentId),
+  text: Schema.String.annotate({
+    description: "The update's words, the link's title, or empty for a created task.",
+  }),
+  link: Schema.NullOr(
+    Schema.Struct({
+      kind: BoardWorkLinkKind,
+      url: TrimmedNonEmptyString,
+      status: Schema.NullOr(BoardWorkLinkStatus),
+    }),
+  ),
+  at: IsoDateTime,
+});
+export type BoardTimelineEvent = typeof BoardTimelineEvent.Type;
+
+/** A commit on the project's checked-out branch, following first parents. */
+export const BoardTimelineCommit = Schema.Struct({
+  sha: TrimmedNonEmptyString,
+  subject: Schema.String,
+  author: Schema.String,
+  at: IsoDateTime,
+  merge: Schema.Boolean,
+  taskId: Schema.NullOr(BoardTaskId).annotate({
+    description: "The task whose branch or pull request this commit landed, when known.",
+  }),
+  pullRequest: Schema.NullOr(PositiveInt),
+});
+export type BoardTimelineCommit = typeof BoardTimelineCommit.Type;
+
+/** A task's branch with commits the checked-out branch doesn't have yet. */
+export const BoardTimelineBranch = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  taskId: BoardTaskId,
+  subject: Schema.String,
+  at: IsoDateTime,
+});
+export type BoardTimelineBranch = typeof BoardTimelineBranch.Type;
+
+export const BoardTimelineGit = Schema.Struct({
+  projectId: ProjectId,
+  branch: Schema.NullOr(Schema.String),
+  commits: Schema.Array(BoardTimelineCommit).annotate({ description: "Newest first." }),
+  unmerged: Schema.Array(BoardTimelineBranch),
+  pullRequests: Schema.Array(BoardWorkLink).annotate({
+    description: "Pull requests linked on the project's tasks, newest first.",
+  }),
+  problem: Schema.NullOr(Schema.String).annotate({
+    description:
+      "Why the history could not be read, such as a folder that is not a git repository.",
+  }),
+});
+export type BoardTimelineGit = typeof BoardTimelineGit.Type;
+
+/** A top-level task's bar on the timeline: from when it was created until it was done. */
+export const BoardTimelineSpan = Schema.Struct({
+  taskId: BoardTaskId,
+  start: IsoDateTime,
+  end: Schema.NullOr(IsoDateTime).annotate({ description: "Null while the task is open." }),
+  agentIds: Schema.Array(BoardAgentId).annotate({
+    description: "Everyone who ran on the task or its subtasks, in the order they first did.",
+  }),
+  subtasks: Schema.Int,
+});
+export type BoardTimelineSpan = typeof BoardTimelineSpan.Type;
+
+export const BoardTimeline = Schema.Struct({
+  view: BoardTimelineView,
+  since: IsoDateTime,
+  spans: Schema.Array(BoardTimelineSpan).annotate({
+    description: "Newest first. Only in the tasks view.",
+  }),
+  events: Schema.Array(BoardTimelineEvent).annotate({
+    description: "Newest first, since `since`. Only in the updates view.",
+  }),
+  git: Schema.NullOr(BoardTimelineGit).annotate({ description: "Only in the git view." }),
+});
+export type BoardTimeline = typeof BoardTimeline.Type;
+
+/** Every company's summary, plus the full board of the one being viewed. */
+export const BoardSnapshot = Schema.Struct({
+  companies: Schema.Array(BoardCompanySummary),
+  company: Schema.NullOr(BoardCompany),
+  settings: Schema.NullOr(BoardSettings),
+  agents: Schema.Array(BoardAgent),
+  skills: Schema.Array(BoardSkill),
+  hires: Schema.Array(BoardHire),
+  tasks: Schema.Array(BoardTask),
+  threads: Schema.Array(BoardAgentThread),
+  routines: Schema.Array(BoardRoutine),
+  usage: Schema.NullOr(BoardUsage),
+  dashboard: Schema.optional(BoardDashboard).annotate({
+    description: "Present only for a subscription that asked for it.",
+  }),
+  inbox: Schema.optional(Schema.Array(BoardInboxItem)).annotate({
+    description: "What waits on the person in every company, oldest first. Only when asked for.",
+  }),
+  timeline: Schema.optional(BoardTimeline).annotate({
+    description: "Present only for a subscription that asked for it.",
+  }),
+});
+export type BoardSnapshot = typeof BoardSnapshot.Type;
 
 /**
  * How a person ships a finished task's branch: a pull request on the repository's host, or a
@@ -525,6 +642,12 @@ export const BoardSubscribeInput = Schema.Struct({
   inbox: Schema.optional(Schema.Boolean).annotate({
     description:
       "Also send every company's inbox, and refresh when any company changes. Snapshots that change nothing are not sent.",
+  }),
+  timeline: Schema.optional(
+    Schema.Struct({ view: BoardTimelineView, projectId: Schema.optional(ProjectId) }),
+  ).annotate({
+    description:
+      "Also send the company's timeline: each task's span, recent task events, or the git history of one of its projects (its home project by default).",
   }),
 });
 export type BoardSubscribeInput = typeof BoardSubscribeInput.Type;
@@ -592,6 +715,77 @@ export const BoardCompanyCloneInput = Schema.Struct({
   }),
 });
 export type BoardCompanyCloneInput = typeof BoardCompanyCloneInput.Type;
+
+/**
+ * A company as a file, to move it to another computer or share it. Ids are only references
+ * within the file; importing gives everything fresh ones.
+ */
+export const BoardCompanyFile = Schema.Struct({
+  format: Schema.Literal("t3-remix-company"),
+  version: Schema.Literal(1),
+  name: TrimmedNonEmptyString,
+  mission: Schema.String,
+  memory: Schema.String,
+  departments: Schema.Array(BoardDepartment),
+  skills: Schema.Array(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      name: TrimmedNonEmptyString,
+      description: Schema.String,
+      instructions: Schema.String,
+      installed: Schema.Boolean.annotate({
+        description:
+          "Installed where it was exported. Importing uses the installed skill of the same name, or these instructions when there is none.",
+      }),
+    }),
+  ),
+  agents: Schema.Array(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      name: TrimmedNonEmptyString,
+      title: TrimmedString,
+      avatar: BoardAvatar,
+      departmentId: TrimmedNonEmptyString,
+      reportsToAgentId: Schema.NullOr(TrimmedNonEmptyString),
+      ceo: Schema.Boolean,
+      skillIds: Schema.Array(TrimmedNonEmptyString),
+      instructions: Schema.String,
+      memory: Schema.String,
+      modelSelection: ModelSelection,
+      runtimeMode: RuntimeMode,
+      monthlyTokenLimit: BoardMonthlyTokenLimit,
+    }),
+  ),
+  routines: Schema.Array(
+    Schema.Struct({
+      title: TrimmedNonEmptyString,
+      description: Schema.String,
+      assigneeAgentId: Schema.NullOr(TrimmedNonEmptyString),
+      assignedToUser: Schema.Boolean,
+      everyDays: BoardRoutineEveryDays,
+      enabled: Schema.Boolean,
+    }),
+  ),
+  settings: Schema.Struct({
+    autoDispatch: Schema.Boolean,
+    maxConcurrentRuns: BoardConcurrentRuns,
+    useWorktrees: Schema.Boolean,
+    baseRef: TrimmedNonEmptyString,
+    monthlyTokenLimit: BoardMonthlyTokenLimit,
+  }),
+});
+export type BoardCompanyFile = typeof BoardCompanyFile.Type;
+
+export const BoardCompanyImportInput = Schema.Struct({
+  file: BoardCompanyFile,
+  name: TrimmedNonEmptyString,
+  mission: Schema.String,
+  workspace: BoardCompanyWorkspace,
+  fallbackModelSelection: Schema.optional(ModelSelection).annotate({
+    description: "For employees whose model isn't set up on this server.",
+  }),
+});
+export type BoardCompanyImportInput = typeof BoardCompanyImportInput.Type;
 
 export const BoardSkillUpsertInput = Schema.Struct({
   id: Schema.optional(BoardSkillId),
@@ -710,11 +904,22 @@ export const BoardCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("company.update"), company: BoardCompanyUpdateInput }),
   Schema.Struct({ type: Schema.Literal("company.delete"), id: BoardCompanyId }),
   Schema.Struct({ type: Schema.Literal("company.clone"), company: BoardCompanyCloneInput }),
+  Schema.Struct({
+    type: Schema.Literal("company.export"),
+    id: BoardCompanyId,
+    includeMemory: Schema.Boolean,
+  }).annotate({ description: "Changes nothing; returns the company as a file." }),
+  Schema.Struct({ type: Schema.Literal("company.import"), company: BoardCompanyImportInput }),
   Schema.Struct({ type: Schema.Literal("skill.upsert"), skill: BoardSkillUpsertInput }),
   Schema.Struct({ type: Schema.Literal("skill.delete"), id: BoardSkillId }),
   Schema.Struct({ type: Schema.Literal("agent.upsert"), agent: BoardAgentUpsertInput }),
   Schema.Struct({ type: Schema.Literal("agent.delete"), id: BoardAgentId }),
   Schema.Struct({ type: Schema.Literal("hire.decide"), hire: BoardHireDecisionInput }),
+  Schema.Struct({
+    type: Schema.Literal("skill.decide"),
+    id: BoardSkillRequestId,
+    approve: Schema.Boolean,
+  }),
   Schema.Struct({ type: Schema.Literal("task.create"), task: BoardTaskCreateInput }),
   Schema.Struct({ type: Schema.Literal("task.update"), task: BoardTaskUpdateInput }),
   Schema.Struct({ type: Schema.Literal("task.delete"), id: BoardTaskId }),
@@ -725,6 +930,10 @@ export const BoardCommand = Schema.Union([
     archived: Schema.Boolean.annotate({ description: "False restores an archived task." }),
   }),
   Schema.Struct({ type: Schema.Literal("task.ship"), id: BoardTaskId, method: BoardShipMethod }),
+  Schema.Struct({ type: Schema.Literal("task.merge"), id: BoardTaskId }).annotate({
+    description:
+      "Has a Review task's agent merge its pull request or branch; the task moves to Done when it finishes.",
+  }),
   Schema.Struct({ type: Schema.Literal("comment.add"), comment: BoardCommentAddInput }),
   Schema.Struct({
     type: Schema.Literal("link.add"),
@@ -745,6 +954,10 @@ export type BoardCommand = typeof BoardCommand.Type;
 
 export const BoardCommandResult = Schema.Struct({
   company: Schema.optional(BoardCompany),
+  companyFile: Schema.optional(BoardCompanyFile),
+  missingSkills: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "Installed skills an import could not find here, added from the file instead.",
+  }),
   skill: Schema.optional(BoardSkill),
   agent: Schema.optional(BoardAgent),
   task: Schema.optional(BoardTask),

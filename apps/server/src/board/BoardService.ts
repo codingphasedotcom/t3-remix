@@ -21,9 +21,13 @@ import {
   type BoardCompany,
   type BoardCompanyCloneInput,
   type BoardCompanyCreateInput,
+  type BoardCompanyFile,
+  type BoardCompanyImportInput,
   type BoardCompanyUpdateInput,
   type BoardCompanyWorkspace,
   type BoardDashboard,
+  type BoardTimeline,
+  type BoardTimelineGit,
   type BoardDepartment,
   type BoardHire,
   type BoardHireDecisionInput,
@@ -34,6 +38,8 @@ import {
   type BoardSettingsUpdateInput,
   type BoardShipMethod,
   type BoardSkill,
+  type BoardSkillRequest,
+  type BoardSkillRequestId,
   type BoardSkillUpsertInput,
   type BoardSnapshot,
   type BoardSubscribeInput,
@@ -74,16 +80,30 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { forkParked } from "../serverActivation.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import * as BoardAttachments from "./BoardAttachments.ts";
 import * as BoardStore from "./BoardStore.ts";
+import {
+  companyFile,
+  companyFileProblem,
+  installedSkills,
+  type InstalledSkill,
+} from "./boardCompanyFile.ts";
 import { buildDashboard } from "./boardDashboard.ts";
 import { companyInbox, inboxCandidates, type InboxTaskFacts } from "./boardInbox.ts";
 import { DEFAULT_DEPARTMENT_NAMES, assignableBy, createsReportingCycle } from "./boardOrg.ts";
 import { makeMergeTaskBranch } from "./boardShip.ts";
 import {
+  makeReadGitTimeline,
+  TIMELINE_DAYS,
+  timelineEvents,
+  timelineSpans,
+} from "./boardTimeline.ts";
+import {
   boardStatusLabel,
+  buildMergePrompt,
   buildReReviewPrompt,
   buildReplyPrompt,
   buildReviewPrompt,
@@ -96,6 +116,7 @@ import {
   type BoardPromptContext,
   type BoardWorkspace,
   type CommentFile,
+  type MergeWork,
 } from "./boardPrompts.ts";
 
 /** Who is changing the board. An agent is identified by the thread its MCP credential belongs to. */
@@ -121,6 +142,21 @@ export interface BoardHireRequestInput {
   readonly skillIds: ReadonlyArray<BoardSkillId>;
   readonly instructions: string;
   readonly reason: string;
+}
+
+export interface BoardSkillRequestInput {
+  readonly companyId: BoardCompanyId;
+  /** Who gets the skill; defaults to the agent asking. */
+  readonly agentId: BoardAgentId | null;
+  /** A library skill's id or name, or an installed skill's name. */
+  readonly skill: string;
+  readonly reason: string;
+}
+
+/** What an agent can ask for: installed skills not yet in the library, and requests in flight. */
+export interface BoardSkillCatalog {
+  readonly installed: ReadonlyArray<InstalledSkill>;
+  readonly pending: ReadonlyArray<BoardSkillRequest>;
 }
 
 export type BoardMemoryScope = "self" | "company";
@@ -180,6 +216,14 @@ export class BoardService extends Context.Service<
       input: BoardHireRequestInput,
       actor: BoardActor,
     ) => Effect.Effect<BoardHire, BoardError>;
+    /** An agent asks for a skill for itself or someone it manages; a person approves it. */
+    readonly requestSkill: (
+      input: BoardSkillRequestInput,
+      actor: BoardActor,
+    ) => Effect.Effect<BoardSkillRequest, BoardError>;
+    readonly skillCatalog: (
+      companyId: BoardCompanyId,
+    ) => Effect.Effect<BoardSkillCatalog, BoardError>;
     /** Appends a dated note to the calling agent's memory or, for managers, the company's. */
     readonly remember: (
       input: { readonly scope: BoardMemoryScope; readonly note: string },
@@ -249,12 +293,14 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const files = yield* BoardAttachments.BoardAttachments;
   const providers = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+  const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const threads = yield* ThreadManagementService.ThreadManagementService;
   const projectFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
   const projects = yield* ProjectService.ProjectService;
   const git = yield* GitWorkflowService.GitWorkflowService;
   const mergeTaskBranch = yield* makeMergeTaskBranch;
+  const readGitTimeline = yield* makeReadGitTimeline;
 
   // `null` means the company list changed, which every subscriber shows.
   const changes = yield* PubSub.unbounded<BoardCompanyId | null>();
@@ -520,12 +566,87 @@ const make = Effect.gen(function* () {
           company,
           candidates,
           facts,
-          agentIds: new Set(agents.map((agent) => agent.id)),
+          agentNames: new Map(agents.map((agent) => [agent.id, agent.name])),
           hires: yield* store.listHires(companyId),
+          skillRequests: yield* store.listPendingSkillRequests(companyId),
         }),
       );
     }
     return items.toSorted((left, right) => left.since.localeCompare(right.since));
+  });
+
+  /** Each task's span, recent task events, or one project's git history matched to its tasks. */
+  const timeline = Effect.fn("BoardService.timeline")(function* (
+    company: BoardCompany,
+    request: NonNullable<BoardSubscribeInput["timeline"]>,
+  ) {
+    const since = DateTime.formatIso(
+      DateTime.subtract(DateTime.makeUnsafe(yield* store.now), { days: TIMELINE_DAYS }),
+    );
+    const stored = yield* store.listTasks(company.id);
+    const tasks = stored.map((entry) => entry.task);
+    if (request.view === "tasks") {
+      const runs = (yield* store.listRunFacts(company.id)).map((fact) => fact.run);
+      return {
+        view: "tasks",
+        since,
+        spans: timelineSpans({ tasks: stored, runs }),
+        events: [],
+        git: null,
+      } satisfies BoardTimeline;
+    }
+    const links = yield* store.listCompanyWorkLinks(company.id);
+    if (request.view === "updates") {
+      const updates = yield* store.listCompanyUpdates(company.id, since);
+      return {
+        view: "updates",
+        since,
+        spans: [],
+        events: timelineEvents({ tasks, updates, links, since }),
+        git: null,
+      } satisfies BoardTimeline;
+    }
+    const projectIds = new Set([company.projectId, ...tasks.map((task) => task.projectId)]);
+    const projectId =
+      request.projectId !== undefined && projectIds.has(request.projectId)
+        ? request.projectId
+        : company.projectId;
+    const inProject = new Set(
+      tasks.filter((task) => task.projectId === projectId).map((task) => task.id),
+    );
+    const unreadable = (problem: string): BoardTimelineGit => ({
+      projectId,
+      branch: null,
+      commits: [],
+      unmerged: [],
+      pullRequests: links
+        .filter((link) => link.kind === "pull_request" && inProject.has(link.taskId))
+        .toReversed(),
+      problem,
+    });
+    const project = yield* projects
+      .getById(projectId)
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    const git = Option.isNone(project)
+      ? unreadable("The project no longer exists.")
+      : yield* readGitTimeline({
+          projectId,
+          workspaceRoot: project.value.workspaceRoot,
+          // Another project can be a checkout of the same repository, so every task's branch counts.
+          branches: stored.flatMap((entry) =>
+            entry.branch === null
+              ? []
+              : [{ taskId: entry.task.id, branch: entry.branch, createdAt: entry.task.createdAt }],
+          ),
+          links,
+          inProject,
+        }).pipe(
+          Effect.catchTags({
+            GitCommandError: () =>
+              Effect.succeed(unreadable("Git could not read the project's history.")),
+          }),
+        );
+    return { view: "git", since, spans: [], events: [], git } satisfies BoardTimeline;
   });
 
   // A running agent's tokens land on the dashboard with the board change that ends its run.
@@ -542,6 +663,9 @@ const make = Effect.gen(function* () {
             }),
           }),
       ...(input.inbox === true ? { inbox: yield* inbox() } : {}),
+      ...(input.timeline === undefined || board.company === null
+        ? {}
+        : { timeline: yield* timeline(board.company, input.timeline) }),
     } satisfies BoardSnapshot;
   });
 
@@ -1092,6 +1216,287 @@ const make = Effect.gen(function* () {
     },
   );
 
+  /** Skills installed for the coding agents, as seen from a project's folder. */
+  const installedSkillsIn = Effect.fn("BoardService.installedSkillsIn")(function* (
+    projectId: ProjectId,
+  ) {
+    const project = yield* projects
+      .getById(projectId)
+      .pipe(Effect.orElseSucceed(() => Option.none()));
+    return installedSkills(
+      yield* providerRegistry.getProviders,
+      Option.isSome(project) ? project.value.workspaceRoot : null,
+    );
+  });
+
+  const skillCatalog: BoardService["Service"]["skillCatalog"] = Effect.fn(
+    "BoardService.skillCatalog",
+  )(function* (companyId) {
+    const company = yield* requireCompany(companyId);
+    const library = yield* store.listSkills(company.id);
+    const installed = (yield* installedSkillsIn(company.projectId)).filter(
+      (skill) =>
+        !library.some(
+          (known) =>
+            known.installedPath === skill.path ||
+            known.name.toLowerCase() === skill.name.toLowerCase(),
+        ),
+    );
+    return { installed, pending: yield* store.listPendingSkillRequests(company.id) };
+  });
+
+  const requestSkill: BoardService["Service"]["requestSkill"] = Effect.fn(
+    "BoardService.requestSkill",
+  )(function* (input, actor) {
+    const company = yield* requireCompany(input.companyId);
+    const agents = yield* store.listAgents(company.id);
+    const actingAs = yield* actingAgent(actor, company.id);
+    const agentId = input.agentId ?? actingAs?.id ?? null;
+    if (agentId === null) return yield* boardError("Pass agentId: who should get the skill.");
+    yield* assertAgentsInCompany(agents, [agentId]);
+    yield* assertMayAssign(company, agents, actingAs, [agentId]);
+    const agent = agents.find((candidate) => candidate.id === agentId)!;
+    const wanted = input.skill.trim().toLowerCase();
+    const library = yield* store.listSkills(company.id);
+    const installed = (yield* installedSkillsIn(company.projectId)).find(
+      (skill) => skill.name.toLowerCase() === wanted,
+    );
+    const known = library.find(
+      (skill) =>
+        skill.id === input.skill ||
+        skill.name.toLowerCase() === wanted ||
+        (installed !== undefined && skill.installedPath === installed.path),
+    );
+    if (known === undefined && installed === undefined) {
+      return yield* boardError(
+        `No skill named "${input.skill}" in the library or installed on this computer. board_list_agents lists both.`,
+      );
+    }
+    if (known !== undefined && agent.skillIds.includes(known.id)) {
+      return yield* boardError(`${agent.name} already has the ${known.name} skill.`);
+    }
+    const name = known?.name ?? installed!.name;
+    const pending = (yield* store.listPendingSkillRequests(company.id)).find(
+      (request) =>
+        request.agentId === agent.id && request.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (pending !== undefined) return pending;
+    const request = yield* store.insertSkillRequest({
+      companyId: company.id,
+      requestedByAgentId: actingAs?.id ?? null,
+      agentId: agent.id,
+      skillId: known?.id ?? null,
+      name,
+      description: known?.description ?? installed?.description ?? "",
+      installedPath: known === undefined ? (installed?.path ?? null) : null,
+      reason: input.reason,
+    });
+    yield* notify(company.id);
+    return request;
+  });
+
+  const decideSkill = Effect.fn("BoardService.decideSkill")(function* (
+    id: BoardSkillRequestId,
+    approve: boolean,
+  ) {
+    const request = yield* store.getSkillRequest(id);
+    if (request === null || request.status !== "pending") {
+      return yield* boardError("That skill request was already decided.");
+    }
+    const refuse = (message: string) =>
+      store
+        .decideSkillRequest(request.id, "rejected")
+        .pipe(
+          Effect.andThen(notify(request.companyId)),
+          Effect.andThen(Effect.fail(boardError(message))),
+        );
+    if (!approve) {
+      yield* store.decideSkillRequest(request.id, "rejected");
+      yield* notify(request.companyId);
+      return null;
+    }
+    const agent = yield* store.getAgent(request.agentId);
+    if (agent === null) return yield* refuse("That employee is no longer on the team.");
+    const library = yield* store.listSkills(request.companyId);
+    const known = library.find((skill) =>
+      request.skillId !== null
+        ? skill.id === request.skillId
+        : skill.installedPath === request.installedPath ||
+          skill.name.toLowerCase() === request.name.toLowerCase(),
+    );
+    if (known === undefined && request.installedPath === null) {
+      return yield* refuse(`The ${request.name} skill was removed from the library.`);
+    }
+    const skill =
+      known ??
+      (yield* upsertSkill({
+        companyId: request.companyId,
+        name: request.name,
+        description: request.description,
+        instructions: "",
+        installedPath: request.installedPath,
+      }));
+    if (!agent.skillIds.includes(skill.id)) {
+      yield* store.upsertAgent({
+        ...agent,
+        skillIds: [...agent.skillIds, skill.id],
+        updatedAt: yield* store.now,
+      });
+    }
+    yield* store.decideSkillRequest(request.id, "approved");
+    yield* notify(request.companyId);
+    return agent;
+  });
+
+  const exportCompany = Effect.fn("BoardService.exportCompany")(function* (
+    id: BoardCompanyId,
+    includeMemory: boolean,
+  ) {
+    const company = yield* requireCompany(id);
+    const skills = yield* store.listSkills(company.id);
+    // An installed skill travels as its SKILL.md, for computers that don't have it installed.
+    const skillInstructions = new Map<string, string>();
+    for (const skill of skills) {
+      if (skill.installedPath === null) continue;
+      skillInstructions.set(
+        skill.id,
+        yield* fileSystem.readFileString(skill.installedPath).pipe(Effect.orElseSucceed(() => "")),
+      );
+    }
+    return companyFile({
+      company,
+      agents: yield* store.listAgents(company.id),
+      skills,
+      skillInstructions,
+      routines: yield* store.listRoutines(company.id),
+      settings: yield* store.getSettings(company.id),
+      includeMemory,
+    });
+  });
+
+  const importCompany = Effect.fn("BoardService.importCompany")(function* (
+    input: BoardCompanyImportInput,
+  ) {
+    const file: BoardCompanyFile = input.file;
+    const problem = companyFileProblem(file);
+    if (problem !== null) return yield* boardError(problem);
+    const unavailable: Array<string> = [];
+    for (const agent of file.agents) {
+      if ((yield* providers.getInstance(agent.modelSelection.instanceId)) === undefined) {
+        unavailable.push(agent.name);
+      }
+    }
+    if (unavailable.length > 0 && input.fallbackModelSelection === undefined) {
+      return yield* boardError(
+        `Pick a model for ${unavailable.join(", ")}: theirs isn't set up here.`,
+      );
+    }
+    const projectId = yield* resolveWorkspace(input.workspace);
+    const installed = yield* installedSkillsIn(projectId);
+    const at = yield* store.now;
+    const fresh = <Id extends string>(prefix: string, make: (id: string) => Id) =>
+      store.newId(prefix).pipe(Effect.map(make));
+    const departmentIds = new Map<string, BoardDepartmentId>();
+    for (const department of file.departments) {
+      departmentIds.set(department.id, yield* fresh("board-department", BoardDepartmentId.make));
+    }
+    const agentIds = new Map<string, BoardAgentId>();
+    for (const agent of file.agents) {
+      agentIds.set(agent.id, yield* fresh("board-agent", BoardAgentId.make));
+    }
+    const departments = file.departments.map((department): BoardDepartment => ({
+      id: departmentIds.get(department.id)!,
+      name: department.name,
+    }));
+    const ceo = file.agents.find((agent) => agent.ceo)!;
+    const company: BoardCompany = {
+      id: BoardCompanyId.make(yield* store.newId("board-company")),
+      name: input.name,
+      mission: input.mission,
+      departments,
+      memory: file.memory,
+      projectId,
+      ceoAgentId: agentIds.get(ceo.id)!,
+      createdAt: at,
+      updatedAt: at,
+    };
+    yield* store.insertCompany(company);
+    const skillIds = new Map<string, BoardSkillId>();
+    const missingSkills: Array<string> = [];
+    for (const skill of file.skills) {
+      const match = skill.installed
+        ? installed.find((candidate) => candidate.name.toLowerCase() === skill.name.toLowerCase())
+        : undefined;
+      if (skill.installed && match === undefined) missingSkills.push(skill.name);
+      const id = yield* fresh("board-skill", BoardSkillId.make);
+      skillIds.set(skill.id, id);
+      yield* store.upsertSkill({
+        id,
+        companyId: company.id,
+        name: skill.name,
+        description: skill.description,
+        instructions: match === undefined ? skill.instructions : "",
+        installedPath: match?.path ?? null,
+        createdAt: at,
+        updatedAt: at,
+      });
+    }
+    for (const agent of file.agents) {
+      const missingModel = unavailable.includes(agent.name);
+      yield* store.upsertAgent({
+        id: agentIds.get(agent.id)!,
+        companyId: company.id,
+        name: agent.name,
+        title: agent.ceo ? "CEO" : agent.title,
+        avatar: agent.avatar,
+        departmentId: departmentIds.get(agent.departmentId) ?? departments[0]!.id,
+        reportsToAgentId: agent.ceo
+          ? null
+          : agent.reportsToAgentId === null
+            ? company.ceoAgentId
+            : (agentIds.get(agent.reportsToAgentId) ?? company.ceoAgentId),
+        skillIds: agent.skillIds.flatMap((id) => {
+          const mapped = skillIds.get(id);
+          return mapped === undefined ? [] : [mapped];
+        }),
+        instructions: agent.instructions,
+        memory: agent.memory,
+        modelSelection:
+          missingModel && input.fallbackModelSelection !== undefined
+            ? input.fallbackModelSelection
+            : agent.modelSelection,
+        runtimeMode: agent.runtimeMode,
+        paused: false,
+        monthlyTokenLimit: agent.monthlyTokenLimit,
+        createdAt: at,
+        updatedAt: at,
+      });
+    }
+    for (const routine of file.routines) {
+      yield* store.upsertRoutine({
+        id: yield* fresh("board-routine", BoardRoutineId.make),
+        companyId: company.id,
+        title: routine.title,
+        description: routine.description,
+        assigneeAgentId:
+          routine.assigneeAgentId === null ? null : (agentIds.get(routine.assigneeAgentId) ?? null),
+        assignedToUser: routine.assignedToUser,
+        everyDays: routine.everyDays,
+        // The first one waits a full turn, so importing never starts work right away.
+        nextRunAt: DateTime.formatIso(
+          DateTime.add(DateTime.makeUnsafe(at), { days: routine.everyDays }),
+        ),
+        enabled: routine.enabled,
+        lastTaskId: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+    }
+    yield* store.upsertSettings({ ...file.settings, companyId: company.id });
+    yield* notify(null);
+    return { company, missingSkills };
+  });
+
   const createTask: BoardService["Service"]["createTask"] = Effect.fn("BoardService.createTask")(
     function* (input, actor) {
       const company = yield* requireCompany(input.companyId);
@@ -1333,20 +1738,20 @@ const make = Effect.gen(function* () {
     yield* notify(current.task.companyId);
   });
 
-  /** Archives a finished task with its subtasks and settles their threads, or restores it. */
+  /**
+   * Archives a finished task with its subtasks and settles their threads, or restores it. A
+   * finished subtask can leave the board before its parent does.
+   */
   const archiveTask = Effect.fn("BoardService.archiveTask")(function* (
     id: BoardTaskId,
     archived: boolean,
   ) {
     const { task } = yield* requireTask(id);
-    if (task.parentTaskId !== null) {
-      return yield* boardError(
-        archived
-          ? "Subtasks are archived with their parent task."
-          : "Restore its parent task to restore this subtask.",
-      );
-    }
     const all = (yield* store.listTasks(task.companyId)).map((stored) => stored.task);
+    const parent = all.find((candidate) => candidate.id === task.parentTaskId);
+    if (!archived && parent !== undefined && parent.archivedAt !== null) {
+      return yield* boardError("Restore its parent task to restore this subtask.");
+    }
     const tree = [task];
     for (let index = 0; index < tree.length; index++) {
       const parentId = tree[index]!.id;
@@ -1970,6 +2375,26 @@ const make = Effect.gen(function* () {
     };
   });
 
+  const mergeWorkFor = Effect.fn("BoardService.mergeWorkFor")(function* (
+    stored: BoardStore.StoredTask,
+  ) {
+    const links = yield* store.listWorkLinks(stored.task.id);
+    const branchMerged = links.some(
+      (link) => link.kind === "branch" && link.url === stored.branch && link.status === "merged",
+    );
+    return {
+      branch: branchMerged ? null : stored.branch,
+      worktreePath: stored.task.worktreePath,
+      baseRef: stored.baseRef,
+      openPullRequests: links
+        .filter(
+          (link) =>
+            link.kind === "pull_request" && (link.status === "open" || link.status === "draft"),
+        )
+        .map(({ title, url }) => ({ title, url })),
+    } satisfies MergeWork;
+  });
+
   const startRun = Effect.fn("BoardService.startRun")(function* (input: {
     readonly company: BoardCompany;
     readonly stored: BoardStore.StoredTask;
@@ -1995,7 +2420,8 @@ const make = Effect.gen(function* () {
     // Work and the assignee's replies share the task's thread in the task's workspace. A
     // subtask's review continues in the reviewer's thread on the parent, so a manager doesn't
     // open a thread for every subtask it checks.
-    const ownsTaskThread = kind === "work" || agent.id === task.assigneeAgentId;
+    const ownsTaskThread =
+      kind === "work" || (kind !== "merge" && agent.id === task.assigneeAgentId);
     const agentThread = yield* store.latestAgentThread(
       task.id,
       agent.id,
@@ -2003,11 +2429,16 @@ const make = Effect.gen(function* () {
     );
     // A reassigned task's thread holds someone else's conversation; the new assignee starts
     // its own thread in the same workspace.
-    const previousThread = ownsTaskThread
-      ? task.threadId !== null && agentThread === task.threadId
-        ? task.threadId
-        : null
-      : (input.reviewThread ?? agentThread);
+    // A merge starts fresh in the project folder, where the work lands; the task's worktree and
+    // thread may be gone by the time a person approves it.
+    const previousThread =
+      kind === "merge"
+        ? null
+        : ownsTaskThread
+          ? task.threadId !== null && agentThread === task.threadId
+            ? task.threadId
+            : null
+          : (input.reviewThread ?? agentThread);
     const reuseThread =
       previousThread !== null &&
       (yield* threads.getThreadShell(previousThread).pipe(
@@ -2036,6 +2467,7 @@ const make = Effect.gen(function* () {
     const reworkSince = yield* store.lastRunEndedAt(task.id, "work");
     const reviewSince = yield* store.lastRunEndedAt(task.id, "review");
     const workedBefore = (yield* store.lastRunStartedAt(task.id, "work")) !== null;
+    const mergeWork = kind === "merge" ? yield* mergeWorkFor(stored) : null;
     const runId = yield* store.insertRun({ taskId: task.id, agentId: agent.id, threadId, kind });
     if (kind === "work") yield* store.updateTask(task.id, { status: "in_progress" });
     // A reply announces itself with the reply; a system line would only add noise.
@@ -2050,7 +2482,9 @@ const make = Effect.gen(function* () {
         task.id,
         kind === "work"
           ? `${agent.name} started working${continuing}.`
-          : `${agent.name} started reviewing${continuing}.`,
+          : kind === "merge"
+            ? `${agent.name} started merging the approved work.`
+            : `${agent.name} started reviewing${continuing}.`,
       );
     }
     yield* notify(company.id);
@@ -2109,7 +2543,7 @@ const make = Effect.gen(function* () {
         }
         const workspaceStrategy: ThreadLaunchService.ThreadLaunchWorkspaceStrategy =
           plan?.strategy ??
-          (task.worktreePath !== null
+          (task.worktreePath !== null && kind !== "merge"
             ? { type: "existing_worktree", worktreePath: task.worktreePath }
             : { type: "root" });
         const prompt =
@@ -2117,12 +2551,20 @@ const make = Effect.gen(function* () {
             ? buildReplyPrompt(context, replySince, { freshThread: true, blocked })
             : kind === "review"
               ? buildReviewPrompt(context, reviewWorkspace, { freshThread: true })
-              : buildWorkPrompt(context, plan!.prompt);
+              : kind === "merge"
+                ? buildMergePrompt(context, mergeWork!)
+                : buildWorkPrompt(context, plan!.prompt);
+        const role =
+          kind === "review"
+            ? `Review (${agent.name})`
+            : kind === "merge"
+              ? `Merge (${agent.name})`
+              : agent.name;
         const result = yield* threadLaunch.launch({
           commandId,
           threadId,
           projectId: task.projectId,
-          title: `${kind === "review" ? `Review (${agent.name})` : agent.name}: ${task.title}`,
+          title: `${role}: ${task.title}`,
           generateTitle: false,
           modelSelection: agent.modelSelection,
           runtimeMode: agent.runtimeMode,
@@ -2147,10 +2589,10 @@ const make = Effect.gen(function* () {
       });
       yield* files.remove(copies);
       yield* store.endRun(runId, "failed");
-      if (kind === "reply") {
+      if (kind === "reply" || kind === "merge") {
         yield* systemComment(
           task.id,
-          `${agent.name} could not be started to reply. Check the agent's provider and model.`,
+          `${agent.name} could not be started to ${kind}. Check the agent's provider and model.`,
         );
         return;
       }
@@ -2344,6 +2786,31 @@ const make = Effect.gen(function* () {
     return (yield* requireTask(id)).task;
   });
 
+  /** Has a Review task's agent merge its approved work; settleRun moves it to Done after. */
+  const mergeTask = Effect.fn("BoardService.mergeTask")(function* (id: BoardTaskId) {
+    const stored = yield* requireTask(id);
+    const { task } = stored;
+    if (task.status !== "review") {
+      return yield* boardError("Only a task in Review can be merged and finished.");
+    }
+    if (task.activeRunKind !== null) {
+      return yield* boardError("An agent is already working on this task.");
+    }
+    const company = yield* requireCompany(task.companyId);
+    const agents = yield* store.listAgents(company.id);
+    const agent = agents.find((candidate) => candidate.id === task.assigneeAgentId);
+    if (task.assignedToUser || agent === undefined) {
+      return yield* boardError("Assign the task to an agent to have it merge the work.");
+    }
+    const settings = yield* store.getSettings(company.id);
+    const reason = limitReached(yield* monthlyUsage(company.id, settings, agents), settings, agent);
+    if (reason !== null)
+      return yield* boardError(`${reason} Raise it to have ${agent.name} merge.`);
+    const allTasks = (yield* store.listTasks(company.id)).map((entry) => entry.task);
+    yield* startRun({ company, stored, kind: "merge", agent, agents, allTasks, settings });
+    return (yield* requireTask(id)).task;
+  });
+
   /** Settles a card when the agent's thread has gone idle without moving it. */
   const settleRun = Effect.fn("BoardService.settleRun")(function* (
     running: BoardStore.RunningRun,
@@ -2372,6 +2839,16 @@ const make = Effect.gen(function* () {
         stored.task.id,
         `${name} finished reviewing without a decision; waiting for a human.`,
       );
+    } else if (run.kind === "merge" && stored.task.status === "review") {
+      // An agent that cannot merge moves the task to Blocked itself, so one still in Review landed.
+      if (succeeded) {
+        yield* markLanded(stored.task, `${name} merged the approved work`);
+      } else {
+        yield* systemComment(
+          stored.task.id,
+          `${name}'s merge ended (${runStatus}); the task stays in Review.`,
+        );
+      }
     }
     // The published change starts the next pass; dispatching here would re-enter the lock.
     yield* notify(running.companyId);
@@ -2488,6 +2965,12 @@ const make = Effect.gen(function* () {
         return deleteCompany(command.id).pipe(Effect.as({}));
       case "company.clone":
         return cloneCompany(command.company).pipe(Effect.map((company) => ({ company })));
+      case "company.export":
+        return exportCompany(command.id, command.includeMemory).pipe(
+          Effect.map((companyFile) => ({ companyFile })),
+        );
+      case "company.import":
+        return importCompany(command.company);
       case "skill.upsert":
         return upsertSkill(command.skill).pipe(Effect.map((skill) => ({ skill })));
       case "skill.delete":
@@ -2498,6 +2981,10 @@ const make = Effect.gen(function* () {
         return deleteAgent(command.id).pipe(Effect.as({}));
       case "hire.decide":
         return decideHire(command.hire).pipe(
+          Effect.map((agent) => (agent === null ? {} : { agent })),
+        );
+      case "skill.decide":
+        return decideSkill(command.id, command.approve).pipe(
           Effect.map((agent) => (agent === null ? {} : { agent })),
         );
       case "task.create":
@@ -2512,6 +2999,11 @@ const make = Effect.gen(function* () {
         return archiveTask(command.id, command.archived).pipe(Effect.map((task) => ({ task })));
       case "task.ship":
         return shipTask(command.id, command.method);
+      case "task.merge":
+        // Under the dispatch lock, so a pass can't start a review on the task at the same time.
+        return dispatchLock
+          .withPermits(1)(mergeTask(command.id))
+          .pipe(Effect.map((task) => ({ task })));
       case "comment.add":
         return addComment(command.comment, actor).pipe(Effect.map((comment) => ({ comment })));
       case "link.add":
@@ -2541,6 +3033,8 @@ const make = Effect.gen(function* () {
     addComment,
     linkWork,
     requestHire,
+    requestSkill,
+    skillCatalog,
     remember,
     rewriteMemory,
     searchCards,

@@ -30,7 +30,7 @@ Users can run AI companies: each has a CEO, employees in an org chart, a skill l
 - \`board_list_tasks\` and \`board_read_task\` read tasks, comments, parents, and subtasks. \`board_read_task\` without \`taskId\` reads your own task.
 - \`board_create_task\` adds a task; set \`parentTaskId\` to split your task. You may assign only yourself and people beneath you in the org chart (a CEO may assign anyone), and you review what you delegate. Use "backlog" (the Ideas column) for work a human should approve before it starts.
 - \`board_update_task\` moves tasks; \`board_add_comment\` records progress, decisions, and review findings.
-- \`board_request_hire\` asks the humans to add an agent; it exists only after they approve.
+- \`board_request_hire\` asks the humans to add an agent; it exists only after they approve. \`board_request_skill\` asks them for a skill the same way.
 - \`board_link_work\` records the pull requests, branches, and previews a task produced, and their status; \`board_read_skill\` reads a skill's full instructions.
 - A user can mention an employee by job, as \`[Employee: @CTO; ref=…]\` with that employee's \`agentId\` and \`companyId\` in the context. To give them work, create a task assigned to them with \`board_create_task\`, passing that \`companyId\`.
 - \`board_remember\` saves a lasting lesson to your memory (or, for managers, the company's), and \`board_rewrite_memory\` condenses a full one; memory is included in every later task's prompt. \`board_search_cards\` finds how earlier tasks were done.

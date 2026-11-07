@@ -66,8 +66,9 @@ const inboxOf = (tasks: ReadonlyArray<StoredTask>, lastReviewStartedAt: string |
         { lastReviewStartedAt, lastAgentComment: null },
       ]),
     ),
-    agentIds: new Set([reviewer]),
+    agentNames: new Map([[reviewer, "Reviewer"]]),
     hires: [],
+    skillRequests: [],
   }).map((item) => `${item.kind}:${item.taskId}`);
 };
 

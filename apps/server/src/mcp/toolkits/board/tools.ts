@@ -9,6 +9,7 @@ import {
   BoardRunKind,
   BoardSkill,
   BoardSkillId,
+  BoardSkillRequest,
   BoardTask,
   BoardTaskId,
   BoardTaskStatus,
@@ -64,6 +65,16 @@ const SkillSummary = Schema.Struct({
   description: Schema.String,
 });
 
+const InstalledSkillSummary = Schema.Struct({
+  name: Schema.String,
+  description: Schema.String,
+});
+
+const PendingSkillRequest = Schema.Struct({
+  agentId: BoardAgentId,
+  skill: Schema.String,
+});
+
 const PendingHire = Schema.Struct({
   id: BoardHireId,
   name: Schema.String,
@@ -75,7 +86,7 @@ const PendingHire = Schema.Struct({
 const BoardListAgentsTool = Tool.make("board_list_agents", {
   ...shared,
   description:
-    "Show the company's org chart: every agent with title, department, manager, and skills, the departments, the skills library, hire requests waiting for approval, who you are, and who you may assign work to.",
+    "Show the company's org chart: every agent with title, department, manager, and skills, the departments, the skills library, skills installed on this computer, hire and skill requests waiting for approval, who you are, and who you may assign work to.",
   parameters: Schema.Struct({ companyId: CompanyIdParam }),
   success: Schema.Struct({
     company: Schema.Struct({ id: BoardCompanyId, name: Schema.String, mission: Schema.String }),
@@ -83,7 +94,12 @@ const BoardListAgentsTool = Tool.make("board_list_agents", {
     ceoAgentId: Schema.NullOr(BoardAgentId),
     agents: Schema.Array(OrgMember),
     skills: Schema.Array(SkillSummary),
+    installedSkills: Schema.Array(InstalledSkillSummary).annotate({
+      description:
+        "Installed for the coding agents on this computer but not in the library yet. Ask for one with board_request_skill.",
+    }),
     pendingHires: Schema.Array(PendingHire),
+    pendingSkillRequests: Schema.Array(PendingSkillRequest),
     you: BoardCaller,
     canAssignTo: Schema.Array(BoardAgentId),
   }),
@@ -203,6 +219,23 @@ const BoardRequestHireTool = Tool.make("board_request_hire", {
   success: Schema.Struct({ hire: BoardHire }),
 }).annotate(Tool.Destructive, false);
 
+const BoardRequestSkillTool = Tool.make("board_request_skill", {
+  ...shared,
+  description:
+    "Ask the board to give a skill to you or someone you manage: one from the company library, or one installed on this computer (board_list_agents lists both). A human approves or declines it in the app; an installed skill joins the library once approved.",
+  parameters: Schema.Struct({
+    companyId: CompanyIdParam,
+    agentId: Schema.optional(BoardAgentId).annotate({
+      description: "Who gets the skill: you or someone you manage. Defaults to you.",
+    }),
+    skill: TrimmedNonEmptyString.annotate({
+      description: "The skill's name, or a library skill's id.",
+    }),
+    reason: TrimmedNonEmptyString.annotate({ description: "What the work needs it for." }),
+  }),
+  success: Schema.Struct({ request: BoardSkillRequest }),
+}).annotate(Tool.Destructive, false);
+
 const MemoryScope = Schema.Literals(["self", "company"]).annotate({
   description: '"self" for your own memory; "company" (managers only) for team-wide decisions.',
 });
@@ -296,6 +329,7 @@ export const BoardToolkit = Toolkit.make(
   BoardUpdateTaskTool,
   BoardAddCommentTool,
   BoardRequestHireTool,
+  BoardRequestSkillTool,
   BoardRememberTool,
   BoardRewriteMemoryTool,
   BoardSearchTasksTool,

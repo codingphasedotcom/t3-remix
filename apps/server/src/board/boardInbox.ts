@@ -1,7 +1,9 @@
 import type {
+  BoardAgentId,
   BoardCompany,
   BoardHire,
   BoardInboxItem,
+  BoardSkillRequest,
   BoardTask,
   BoardTaskId,
 } from "@t3tools/contracts";
@@ -32,7 +34,7 @@ export interface InboxTaskFacts {
 
 export interface InboxCandidate {
   readonly stored: StoredTask;
-  readonly kind: Exclude<BoardInboxItem["kind"], "hire">;
+  readonly kind: Exclude<BoardInboxItem["kind"], "hire" | "skill">;
 }
 
 /** Tasks that could need the person; the caller reads the facts for just these. */
@@ -66,8 +68,10 @@ export function companyInbox(input: {
   readonly company: BoardCompany;
   readonly candidates: ReadonlyArray<InboxCandidate>;
   readonly facts: ReadonlyMap<BoardTaskId, InboxTaskFacts>;
-  readonly agentIds: ReadonlySet<string>;
+  /** Every employee's name, by id. */
+  readonly agentNames: ReadonlyMap<BoardAgentId, string>;
   readonly hires: ReadonlyArray<BoardHire>;
+  readonly skillRequests: ReadonlyArray<BoardSkillRequest>;
 }): ReadonlyArray<BoardInboxItem> {
   const base = { companyId: input.company.id, companyName: input.company.name };
   const tasks = input.candidates.flatMap(({ stored, kind }): ReadonlyArray<BoardInboxItem> => {
@@ -76,7 +80,7 @@ export function companyInbox(input: {
     if (
       kind === "review" &&
       task.reviewerAgentId !== null &&
-      input.agentIds.has(task.reviewerAgentId)
+      input.agentNames.has(task.reviewerAgentId)
     ) {
       const reviewed = facts?.lastReviewStartedAt ?? null;
       if (reviewed === null || reviewed < stored.statusChangedAt) return [];
@@ -87,6 +91,7 @@ export function companyInbox(input: {
         kind,
         taskId: task.id,
         hireId: null,
+        skillRequestId: null,
         title: task.title,
         detail: truncate(facts?.lastAgentComment ?? null),
         agentId: task.assigneeAgentId,
@@ -101,10 +106,27 @@ export function companyInbox(input: {
       kind: "hire",
       taskId: null,
       hireId: hire.id,
+      skillRequestId: null,
       title: hire.title.length > 0 ? `${hire.name}, ${hire.title}` : hire.name,
       detail: truncate(hire.reason),
       agentId: hire.requestedByAgentId,
       since: hire.createdAt,
     }));
-  return [...tasks, ...hires];
+  const skills = input.skillRequests
+    .filter((request) => request.status === "pending")
+    .map((request): BoardInboxItem => {
+      const agentName = input.agentNames.get(request.agentId) ?? "a former employee";
+      return {
+        ...base,
+        kind: "skill",
+        taskId: null,
+        hireId: null,
+        skillRequestId: request.id,
+        title: `${request.name} skill for ${agentName}`,
+        detail: truncate(request.reason),
+        agentId: request.requestedByAgentId,
+        since: request.createdAt,
+      };
+    });
+  return [...tasks, ...hires, ...skills];
 }

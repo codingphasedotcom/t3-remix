@@ -35,9 +35,11 @@ export function startBoardNotifications(
       search:
         item === null
           ? { ...environment, tab: "inbox" }
-          : item.taskId === null
-            ? { ...environment, company: item.companyId, tab: "org" }
-            : { ...environment, company: item.companyId, card: item.taskId, tab: "inbox" },
+          : item.kind === "skill"
+            ? { ...environment, tab: "inbox" }
+            : item.taskId === null
+              ? { ...environment, company: item.companyId, tab: "org" }
+              : { ...environment, company: item.companyId, card: item.taskId, tab: "inbox" },
     });
   };
 

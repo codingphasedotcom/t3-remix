@@ -12,6 +12,8 @@ import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller } from "../../threadAccess.ts";
 import { BoardToolkit } from "./tools.ts";
 
+const MAX_INSTALLED_SKILL_DESCRIPTION = 160;
+
 const boardFailure = (error: BoardError) =>
   new OrchestratorMcpFailure({ code: "invalid_request", message: error.message });
 
@@ -99,6 +101,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const { companyId, assignment } = yield* callerContext(input.companyId);
         const snapshot = yield* companyBoard(companyId);
+        const catalog = yield* board.skillCatalog(companyId).pipe(Effect.mapError(boardFailure));
         const me =
           assignment === null || assignment.companyId !== companyId
             ? undefined
@@ -125,6 +128,17 @@ const make = Effect.gen(function* () {
             id: skill.id,
             name: skill.name,
             description: skill.description,
+          })),
+          installedSkills: catalog.installed.map((skill) => ({
+            name: skill.name,
+            description:
+              skill.description.length > MAX_INSTALLED_SKILL_DESCRIPTION
+                ? `${skill.description.slice(0, MAX_INSTALLED_SKILL_DESCRIPTION)}…`
+                : skill.description,
+          })),
+          pendingSkillRequests: catalog.pending.map((request) => ({
+            agentId: request.agentId,
+            skill: request.name,
           })),
           pendingHires: snapshot.hires
             .filter((hire) => hire.status === "pending")
@@ -271,6 +285,24 @@ const make = Effect.gen(function* () {
           )
           .pipe(Effect.mapError(boardFailure));
         return { hire };
+      }),
+    ),
+
+    board_request_skill: McpToolAccess.writes((input) =>
+      Effect.gen(function* () {
+        const { companyId } = yield* callerContext(input.companyId);
+        const request = yield* board
+          .requestSkill(
+            {
+              companyId,
+              agentId: input.agentId ?? null,
+              skill: input.skill,
+              reason: input.reason,
+            },
+            yield* actor(),
+          )
+          .pipe(Effect.mapError(boardFailure));
+        return { request };
       }),
     ),
 

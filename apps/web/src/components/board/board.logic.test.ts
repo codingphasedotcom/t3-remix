@@ -10,6 +10,7 @@ import type {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  archiveAllTargets,
   dropPosition,
   employeeThreadTitle,
   groupTasksByStatus,
@@ -69,6 +70,25 @@ describe("groupTasksByStatus", () => {
     );
     expect(grouped.todo.map((task) => task.id)).toEqual(["b"]);
     expect(grouped.review.map((task) => task.id)).toEqual(["a"]);
+  });
+});
+
+describe("archiveAllTargets", () => {
+  it("archives finished subtasks of open tasks, and leaves the rest to their archived parent", () => {
+    const sub = (id: string, parent: string, status: BoardTask["status"]) => ({
+      ...card(id, status, 1),
+      parentTaskId: parent as BoardTaskId,
+    });
+    const tasks = [
+      card("open", "in_progress", 1),
+      sub("open-done", "open", "done"),
+      card("finished", "done", 2),
+      sub("finished-done", "finished", "done"),
+      sub("finished-done-child", "finished-done", "done"),
+      { ...card("busy", "done", 3), activeRunKind: "reply" as const },
+      { ...card("archived", "done", 4), archivedAt: "2026-10-21T00:00:00.000Z" },
+    ];
+    expect(archiveAllTargets(tasks).map((task) => task.id)).toEqual(["open-done", "finished"]);
   });
 });
 

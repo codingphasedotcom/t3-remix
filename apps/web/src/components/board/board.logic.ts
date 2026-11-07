@@ -94,14 +94,22 @@ export function agentInitials(name: string): string {
   return letters.toUpperCase();
 }
 
-/** A finished top-level task nobody is working on; its subtasks are archived with it. */
+/** A finished task nobody is working on; its subtasks are archived with it. */
 export function canArchiveTask(task: BoardTask): boolean {
-  return (
-    task.status === "done" &&
-    task.parentTaskId === null &&
-    task.archivedAt === null &&
-    task.activeRunKind === null
-  );
+  return task.status === "done" && task.archivedAt === null && task.activeRunKind === null;
+}
+
+/** What Archive all archives: every archivable task an archivable ancestor doesn't take along. */
+export function archiveAllTargets(tasks: ReadonlyArray<BoardTask>): ReadonlyArray<BoardTask> {
+  const archivable = new Set(tasks.filter(canArchiveTask).map((task) => task.id));
+  const parentOf = new Map(tasks.map((task) => [task.id, task.parentTaskId]));
+  return tasks.filter((task) => {
+    if (!archivable.has(task.id)) return false;
+    for (let id = task.parentTaskId; id !== null; id = parentOf.get(id) ?? null) {
+      if (archivable.has(id)) return false;
+    }
+    return true;
+  });
 }
 
 export function subtaskProgress(

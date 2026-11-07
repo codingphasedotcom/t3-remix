@@ -33,6 +33,15 @@ skills, every employee and who they report to, and the board settings. Tasks, ro
 history stay with the original. Turn on **Copy what they remember** to bring the company's and
 employees' memory along too.
 
+**Export company** in the same menu saves the team as a file: departments, every employee with
+their instructions, skills, and model, who reports to whom, routines, and the board settings. Tasks
+and history stay behind, and memory comes along only if you turn on **Include what they remember**.
+To use the file, choose **Import a company** from the menu (or **Import from a file** before you
+have a company) on any computer running T3 Code. Installed skills are matched by name; one that
+isn't installed there comes along as the instructions from its SKILL.md. If an employee's model
+isn't set up on that computer, you pick one for them while importing. Imported routines first run
+one full interval after the import.
+
 ## Build the org chart
 
 **Org chart** draws the company top-down, from the CEO through each manager to their reports,
@@ -84,6 +93,11 @@ computer the company runs on, such as Claude Code skills and plugins or Codex sk
 those in the company's project. **Add** one to put it in the library, then tick it on employees
 like any other skill. An agent reads an installed skill from its own folder each time it uses it,
 so it always follows the skill as installed now. Edit or update it where it is installed.
+
+Agents can ask for skills too. An agent sees the library and the installed skills, and can ask for
+one for itself or someone it manages; the request lands in your **Inbox** with why they need it.
+**Add skill** puts an installed skill in the library and gives it to that employee; **Decline**
+leaves everything as it was.
 
 ## How work flows
 
@@ -167,10 +181,17 @@ is working in its worktree. Subtasks share their parent's branch, so they ship w
 When the work lands, by a merge here or once its pull request is merged, a task waiting in
 **Review** moves to **Done**.
 
+A task in **Review** also offers **Merge and finish**, which works even when the task has no branch
+of its own: the task's agent merges its pull request or branch into the branch your project
+folder has checked out and fixes any conflicts itself. The task moves to **Done** when the agent
+finishes; if it can't merge, it moves the task to **Blocked** and says why. **Mark done** moves
+the task to **Done** without merging anything.
+
 ## Archive finished tasks
 
 Open a task in **Done** and choose **Archive**, or use **Archive all** at the top of **Done**.
-Subtasks are archived with their task, and its agents' threads settle. To bring one back, show the
+Subtasks are archived with their task, and its agents' threads settle. A finished subtask can also
+be archived on its own while its task is still open. To bring one back, show the
 archived tasks from the top of **Done**, open the task, and choose **Restore**. A task that moves
 out of **Done** comes back on its own. The dashboard still counts archived tasks.
 
@@ -198,6 +219,7 @@ until you raise it or the month ends. An agent already running finishes its run.
 - tasks in **Review** that you review, or whose reviewer finished without deciding
 - top-level tasks stuck in **Blocked** with nothing below them still moving
 - hire requests
+- skill requests, which you decide right in the Inbox
 - your own to-dos in **To do**
 
 Select an item to open its task, or the org chart for a hire. The sidebar's **Companies** button
@@ -217,6 +239,20 @@ board or from the thread itself, or once it settles.
 
 Tokens are counted from each employee's board threads and credited to the model that thread ran.
 A running agent's tokens appear when its run ends. Days start at midnight in your time zone.
+
+## Timeline
+
+**Timeline**, beside the board, tells the company's story. **Tasks** charts two weeks at a time:
+each task is a bar from when it was created until it was done, colored by its column, with the
+faces of everyone who worked on it or its subtasks. Open tasks run up to today's line. Step back a
+week at a time, or use the arrow on a bar that runs off the edge to jump to its start or end.
+Tasks in **Ideas** stay off the chart.
+
+**Updates** lists the last 30 days by day: tasks created, the board's updates such as who started
+or finished, and the pull requests, branches, and previews agents linked. **Git** shows the branch
+your project folder has checked out: its commits, newest first, with each merge tied to the task
+that made it, and the pull requests and task branches still waiting to merge. A company working in
+several projects can switch between them. Open any task from any view.
 
 ## Board settings
 

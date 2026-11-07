@@ -17,6 +17,7 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadShell,
   type Project,
+  type ServerProvider,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -38,6 +39,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as BoardAttachments from "./BoardAttachments.ts";
 import * as BoardService from "./BoardService.ts";
@@ -70,6 +72,9 @@ const pullRequestOpened = {
 } as unknown as GitRunStackedActionResult;
 
 const INSTALLED_SKILL = "/home/me/.claude/skills/design-review/SKILL.md";
+const PLAYWRIGHT_SKILL = "/home/me/.codex/skills/playwright/SKILL.md";
+// Installed where a company was exported, but not on this computer.
+const UNINSTALLED_SKILL = "/elsewhere/.claude/skills/old-tool/SKILL.md";
 
 const makeHarness = Effect.gen(function* () {
   const launches = yield* Ref.make<ReadonlyArray<ThreadLaunchService.ThreadLaunchInput>>([]);
@@ -152,7 +157,11 @@ const makeHarness = Effect.gen(function* () {
   const fileSystem = FileSystem.layerNoop({
     realPath: (path) => Effect.succeed(path),
     readFileString: (path) =>
-      path === INSTALLED_SKILL ? Effect.succeed("Check every page at phone width.") : Effect.never,
+      path === INSTALLED_SKILL
+        ? Effect.succeed("Check every page at phone width.")
+        : path === UNINSTALLED_SKILL
+          ? Effect.succeed("Run old-tool --help first.")
+          : Effect.never,
   });
   // The board keeps "board-" copies of uploads; each thread gets copies named after it.
   const removedFiles = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -175,13 +184,34 @@ const makeHarness = Effect.gen(function* () {
       Ref.update(removedFiles, (all) => [...all, ...attachments.map((file) => file.id)]),
     pathOf: (attachment) => `/attachments/${attachment.id}`,
   });
-  // "claude" takes pictures as images; any other instance gets their paths only.
+  // "claude" takes pictures as images; any other instance gets their paths only. "gone" was
+  // removed from this server.
   const providerInstances = Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
     getInstance: (instanceId) =>
-      Effect.succeed({
-        instanceId,
-        driverKind: instanceId === "claude" ? "claudeAgent" : "grok",
-      } as never),
+      Effect.succeed(
+        instanceId === "gone"
+          ? undefined
+          : ({
+              instanceId,
+              driverKind: instanceId === "claude" ? "claudeAgent" : "grok",
+            } as never),
+      ),
+  });
+  const providerRegistry = Layer.mock(ProviderRegistry.ProviderRegistry)({
+    getProviders: Effect.succeed([
+      {
+        enabled: true,
+        skills: [
+          { name: "design-review", path: INSTALLED_SKILL, enabled: true },
+          {
+            name: "playwright",
+            description: "Drive a browser.",
+            path: PLAYWRIGHT_SKILL,
+            enabled: true,
+          },
+        ],
+      } as unknown as ServerProvider,
+    ]),
   });
   const layer = BoardService.layer.pipe(
     Layer.provide(
@@ -196,6 +226,7 @@ const makeHarness = Effect.gen(function* () {
         fileSystem,
         boardFiles,
         providerInstances,
+        providerRegistry,
       ),
     ),
   );
@@ -974,6 +1005,223 @@ it.effect("adds an agent only once a person approves its hire request", () =>
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("a manager asks for an installed skill for a report, which joins on approval", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, ceoId, lead, engineer } = yield* createCompany(board);
+      const { task } = yield* board.runCommand(
+        {
+          type: "task.create",
+          task: { companyId: company.id, title: "Polish", assigneeAgentId: lead.id },
+        },
+        user,
+      );
+      const started = yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => threadOf(snapshot, task?.id) !== null,
+      );
+      const asLead = { kind: "agent", threadId: threadOf(started, task?.id)! } as const;
+      const ask = (agentId: BoardAgentId | null, skill: string) =>
+        board.requestSkill(
+          { companyId: company.id, agentId, skill, reason: "Layouts keep breaking." },
+          asLead,
+        );
+
+      const request = yield* ask(engineer.id, "Design-Review");
+      assert.deepInclude(request, {
+        status: "pending",
+        name: "design-review",
+        installedPath: INSTALLED_SKILL,
+        requestedByAgentId: lead.id,
+      });
+      assert.equal((yield* ask(engineer.id, "design-review")).id, request.id);
+      const outsideLine = yield* Effect.flip(ask(ceoId, "design-review"));
+      assert.include(outsideLine.message, "reporting line");
+      const unknown = yield* Effect.flip(ask(engineer.id, "juggling"));
+      assert.include(unknown.message, 'No skill named "juggling"');
+      assert.deepEqual(
+        (yield* board.skillCatalog(company.id)).installed.map((skill) => skill.name),
+        ["design-review", "playwright"],
+      );
+
+      const inbox = yield* board.subscribe({ companyId: null, inbox: true }).pipe(
+        Stream.filter((snapshot) => (snapshot.inbox ?? []).some((item) => item.kind === "skill")),
+        Stream.runHead,
+        Effect.map(Option.getOrThrow),
+      );
+      assert.deepInclude(
+        inbox.inbox?.find((item) => item.kind === "skill"),
+        {
+          skillRequestId: request.id,
+          title: "design-review skill for Engineer",
+          detail: "Layouts keep breaking.",
+          agentId: lead.id,
+        },
+      );
+
+      yield* board.runCommand({ type: "skill.decide", id: request.id, approve: true }, user);
+      const approved = yield* board.snapshot(company.id);
+      const added = approved.skills.find((skill) => skill.name === "design-review");
+      assert.equal(added?.installedPath, INSTALLED_SKILL);
+      assert.isTrue(
+        approved.agents
+          .find((agent) => agent.id === engineer.id)
+          ?.skillIds.some((id) => id === added?.id),
+      );
+      const catalog = yield* board.skillCatalog(company.id);
+      assert.deepEqual(
+        catalog.installed.map((skill) => skill.name),
+        ["playwright"],
+      );
+      assert.deepEqual(catalog.pending, []);
+
+      // Declining leaves the library alone; an agent asking for itself needs no agentId.
+      const declined = yield* ask(null, "playwright");
+      assert.equal(declined.agentId, lead.id);
+      yield* board.runCommand({ type: "skill.decide", id: declined.id, approve: false }, user);
+      const after = yield* board.snapshot(company.id);
+      assert.isFalse(after.skills.some((skill) => skill.name === "playwright"));
+      const again = yield* Effect.flip(
+        board.runCommand({ type: "skill.decide", id: declined.id, approve: true }, user),
+      );
+      assert.include(again.message, "already decided");
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("a company file imports as a fresh copy, matching installed skills by name", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead, engineer } = yield* createCompany(board);
+      const addSkill = (name: string, instructions: string, installedPath?: string) =>
+        board
+          .runCommand(
+            {
+              type: "skill.upsert",
+              skill: {
+                companyId: company.id,
+                name,
+                description: "",
+                instructions,
+                ...(installedPath === undefined ? {} : { installedPath }),
+              },
+            },
+            user,
+          )
+          .pipe(Effect.map(({ skill }) => skill!));
+      const frontend = yield* addSkill("Frontend", "Use the design system.");
+      const review = yield* addSkill("design-review", "", INSTALLED_SKILL);
+      const oldTool = yield* addSkill("Old tool", "", UNINSTALLED_SKILL);
+      yield* board.runCommand(
+        {
+          type: "agent.upsert",
+          agent: {
+            id: engineer.id,
+            companyId: company.id,
+            name: engineer.name,
+            title: engineer.title,
+            reportsToAgentId: lead.id,
+            skillIds: [frontend.id, review.id, oldTool.id],
+            instructions: "Ship small changes.",
+            memory: "The tests run with vp test.",
+            modelSelection: { instanceId: ProviderInstanceId.make("gone"), model: "old" },
+            runtimeMode: "full-access",
+          },
+        },
+        user,
+      );
+      yield* board.runCommand(
+        {
+          type: "routine.upsert",
+          routine: {
+            companyId: company.id,
+            title: "Weekly review",
+            description: "Look over the week.",
+            assigneeAgentId: lead.id,
+            everyDays: 7,
+            nextRunAt: "2026-11-01T00:00:00.000Z",
+            enabled: true,
+          },
+        },
+        user,
+      );
+
+      const { companyFile } = yield* board.runCommand(
+        { type: "company.export", id: company.id, includeMemory: false },
+        user,
+      );
+      assert.isDefined(companyFile);
+      const file = companyFile!;
+      assert.deepEqual(
+        file.agents.map((agent) => [agent.name, agent.ceo, agent.memory]),
+        [
+          ["Ada", true, ""],
+          ["Lead", false, ""],
+          ["Engineer", false, ""],
+        ],
+      );
+      assert.deepInclude(
+        file.skills.find((skill) => skill.name === "design-review"),
+        {
+          installed: true,
+          instructions: "Check every page at phone width.",
+        },
+      );
+
+      const importAs = (fallback?: typeof model) =>
+        board.runCommand(
+          {
+            type: "company.import",
+            company: {
+              file,
+              name: "Acme two",
+              mission: file.mission,
+              workspace: { type: "existing", projectId },
+              ...(fallback === undefined ? {} : { fallbackModelSelection: fallback }),
+            },
+          },
+          user,
+        );
+      const noModel = yield* Effect.flip(importAs());
+      assert.include(noModel.message, "Pick a model for Engineer");
+      const imported = yield* importAs(model);
+      assert.deepEqual(imported.missingSkills, ["Old tool"]);
+
+      const copy = yield* board.snapshot(imported.company!.id);
+      const byName = (name: string) => copy.agents.find((agent) => agent.name === name)!;
+      assert.equal(copy.company?.ceoAgentId, byName("Ada").id);
+      assert.equal(byName("Lead").reportsToAgentId, byName("Ada").id);
+      assert.equal(byName("Engineer").reportsToAgentId, byName("Lead").id);
+      assert.notEqual(byName("Engineer").id, engineer.id);
+      assert.deepEqual(byName("Engineer").modelSelection, model);
+      assert.equal(byName("Engineer").memory, "");
+      const skill = (name: string) => copy.skills.find((candidate) => candidate.name === name)!;
+      assert.deepInclude(skill("design-review"), {
+        installedPath: INSTALLED_SKILL,
+        instructions: "",
+      });
+      assert.deepInclude(skill("Old tool"), {
+        installedPath: null,
+        instructions: "Run old-tool --help first.",
+      });
+      assert.deepEqual(
+        [...byName("Engineer").skillIds].toSorted(),
+        [skill("Frontend").id, skill("design-review").id, skill("Old tool").id].toSorted(),
+      );
+      assert.deepEqual(
+        copy.routines.map((routine) => [routine.title, routine.assigneeAgentId]),
+        [["Weekly review", byName("Lead").id]],
+      );
+      assert.isAbove(copy.routines[0]!.nextRunAt.localeCompare(copy.company!.createdAt), 0);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect("a proposed team keeps its reporting lines as each hire is decided", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
@@ -1342,9 +1590,14 @@ it.effect("archiving a finished task hides it with its subtasks and settles its 
 
       const unfinished = yield* archive(task!.id, true).pipe(Effect.flip);
       assert.include(unfinished.message, "Only finished tasks");
+      // A finished subtask leaves the board on its own while its parent is still open.
+      yield* board.updateTask({ id: subtask.id, status: "done" }, user);
+      yield* archive(subtask.id, true);
+      assert.isNotNull(yield* archivedAt(subtask.id));
+      assert.isNull(yield* archivedAt(task!.id));
+      yield* archive(subtask.id, false);
+      assert.isNull(yield* archivedAt(subtask.id));
       yield* board.updateTask({ id: task!.id, status: "done" }, user);
-      const nested = yield* archive(subtask.id, true).pipe(Effect.flip);
-      assert.include(nested.message, "archived with their parent");
 
       yield* archive(task!.id, true);
       assert.isNotNull(yield* archivedAt(task!.id));
@@ -1375,6 +1628,8 @@ it.effect("archiving a finished task hides it with its subtasks and settles its 
         (snapshot) => !snapshot.threads.some((thread) => thread.threadId === threadId),
       );
 
+      const nested = yield* archive(subtask.id, false).pipe(Effect.flip);
+      assert.include(nested.message, "Restore its parent task");
       yield* archive(task!.id, false);
       assert.isNull(yield* archivedAt(task!.id));
       assert.isNull(yield* archivedAt(subtask.id));
@@ -2283,6 +2538,67 @@ it.effect("merges a finished task's branch only into a clean checkout without co
         `Merge ${branch}: Fix checkout`,
         branch,
       ]);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("has a task's agent merge its approved work, and finishes it once that lands", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const { company, lead } = yield* createCompany(board);
+      const { task, threadId } = yield* startTaskFor(board, company.id, "Fix checkout", lead.id);
+      const merge = board.runCommand({ type: "task.merge", id: task.id }, user);
+      const early = yield* Effect.flip(merge);
+      assert.equal(early.message, "Only a task in Review can be merged and finished.");
+
+      yield* finishRun(harness)(threadId, "run-work-1");
+      yield* boardWhere(
+        board,
+        company.id,
+        (snapshot) => taskStatus(snapshot, task.id) === "review",
+      );
+      const branch = (yield* board.taskDetail(task.id)).links.find(
+        (entry) => entry.kind === "branch",
+      )!.title;
+      const comments = Effect.map(board.taskDetail(task.id), (detail) =>
+        detail.comments.map((comment) => comment.body),
+      );
+      const endMerge = (status: "completed" | "failed") =>
+        Effect.gen(function* () {
+          const launch = (yield* Ref.get(harness.launches)).at(-1)!;
+          yield* Queue.offer(harness.events, {
+            type: "run.updated",
+            threadId: launch.threadId,
+            payload: { id: `run-merge-${status}`, status },
+          } as unknown as OrchestrationV2DomainEvent);
+          return yield* boardWhere(board, company.id, (snapshot) =>
+            snapshot.tasks.some((entry) => entry.id === task.id && entry.activeRunKind === null),
+          );
+        });
+
+      // The merge starts fresh in the project folder, where the work lands.
+      yield* merge;
+      const launch = (yield* Ref.get(harness.launches)).at(-1)!;
+      assert.notEqual(launch.threadId, threadId);
+      assert.deepEqual(launch.workspaceStrategy, { type: "root" });
+      assert.include(launch.title, `Merge (${lead.name})`);
+      assert.include(launch.initialMessage?.text ?? "", `- Branch: ${branch}.`);
+      const failed = yield* endMerge("failed");
+      assert.equal(taskStatus(failed, task.id), "review");
+      assert.include(
+        yield* comments,
+        `${lead.name}'s merge ended (failed); the task stays in Review.`,
+      );
+
+      yield* merge;
+      const merged = yield* endMerge("completed");
+      assert.equal(taskStatus(merged, task.id), "done");
+      assert.include(
+        yield* comments,
+        `${lead.name} merged the approved work; moved the task from Review to Done.`,
+      );
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

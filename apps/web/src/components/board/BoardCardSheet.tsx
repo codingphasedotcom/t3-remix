@@ -17,6 +17,10 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
+  ArrowDownIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   ClipboardListIcon,
   ExternalLinkIcon,
   FileIcon,
@@ -25,6 +29,7 @@ import {
   GitCommitHorizontalIcon,
   GlobeIcon,
   LinkIcon,
+  MessagesSquareIcon,
   PaperclipIcon,
   PencilIcon,
   PlayIcon,
@@ -33,7 +38,7 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
 import { cn } from "../../lib/utils";
@@ -62,6 +67,7 @@ import { BOARD_COLUMNS, agentById, boardStatusLabel, canArchiveTask } from "./bo
 import {
   REMIX_CARD,
   REMIX_INSET,
+  RemixButton,
   RemixHeading,
   RemixIconTile,
   RemixChip,
@@ -69,6 +75,8 @@ import {
   type RemixTone,
 } from "./RemixSurface";
 import "./office.css";
+
+type PanelTab = "activity" | "details";
 
 export function BoardCardSheet(props: {
   readonly environmentId: EnvironmentId;
@@ -78,6 +86,8 @@ export function BoardCardSheet(props: {
   readonly runCommand: RunBoardCommand;
   readonly onOpenCard: (cardId: BoardTaskId | null) => void;
 }) {
+  // Null until someone picks a tab; the choice then holds for every task opened after.
+  const [tab, setTab] = useState<PanelTab | null>(null);
   return (
     <Sheet
       open={props.task !== null}
@@ -87,7 +97,13 @@ export function BoardCardSheet(props: {
     >
       <SheetPopup side="right" className="max-w-xl">
         {props.task !== null ? (
-          <BoardCardDetail key={props.task.id} {...props} task={props.task} />
+          <BoardCardDetail
+            key={props.task.id}
+            {...props}
+            task={props.task}
+            tab={tab}
+            onTabChange={setTab}
+          />
         ) : null}
       </SheetPopup>
     </Sheet>
@@ -101,6 +117,8 @@ function BoardCardDetail(props: {
   readonly canOperate: boolean;
   readonly runCommand: RunBoardCommand;
   readonly onOpenCard: (cardId: BoardTaskId | null) => void;
+  readonly tab: PanelTab | null;
+  readonly onTabChange: (tab: PanelTab) => void;
 }) {
   const { task, snapshot } = props;
   const navigate = useNavigate();
@@ -114,10 +132,6 @@ function BoardCardDetail(props: {
   const files = (detail.data?.links ?? []).filter((link) => link.kind === "file");
   const workLinks = (detail.data?.links ?? []).filter((link) => link.kind !== "file");
   const branchLink = workLinks.find((link) => link.kind === "branch") ?? null;
-  const [comment, setComment] = useState("");
-  const [posting, setPosting] = useState(false);
-  const draftFiles = useCommentDraftFiles(props.environmentId);
-  const filePicker = useRef<HTMLInputElement>(null);
   const descriptionDirty = description !== task.description;
   const parent = snapshot.tasks.find((candidate) => candidate.id === task.parentTaskId) ?? null;
   const subtasks = snapshot.tasks.filter((candidate) => candidate.parentTaskId === task.id);
@@ -146,25 +160,6 @@ function BoardCardDetail(props: {
       ),
     });
 
-  const postComment = async () => {
-    const body = comment.trim();
-    if (body.length === 0 && draftFiles.files.length === 0) return;
-    setPosting(true);
-    const attachments = await draftFiles.collect();
-    const posted =
-      attachments === null
-        ? null
-        : await props.runCommand({
-            type: "comment.add",
-            comment: { taskId: task.id, body, ...(attachments.length > 0 ? { attachments } : {}) },
-          });
-    setPosting(false);
-    if (posted !== null) {
-      setComment("");
-      draftFiles.clear();
-    }
-  };
-
   const deleteCard = async () => {
     const message = `Delete "${task.title}"?\nIts comments go with it; agent threads stay.`;
     const confirmed =
@@ -181,6 +176,20 @@ function BoardCardDetail(props: {
     (task.status === "review"
       ? task.reviewerAgentId !== null
       : task.status !== "done" && task.assigneeAgentId !== null && waiting.length === 0);
+  const inReview = task.status === "review" && task.activeRunKind === null;
+  const merger = task.assignedToUser ? null : agentById(snapshot.agents, task.assigneeAgentId);
+  const shown: PanelTab =
+    props.tab ?? (task.threadId !== null || task.commentCount > 0 ? "activity" : "details");
+
+  const mergeAndFinish = async () => {
+    if (merger === null) return;
+    const message = `Have ${merger.name} merge "${task.title}"?\n${merger.name} merges its pull request or branch, and the task moves to Done once that lands.`;
+    const confirmed = (await requestConfirmDialog(message)) ?? window.confirm(message);
+    if (!confirmed) return;
+    if ((await props.runCommand({ type: "task.merge", id: task.id })) !== null) {
+      props.onTabChange("activity");
+    }
+  };
 
   return (
     <>
@@ -216,22 +225,34 @@ function BoardCardDetail(props: {
                   </RemixChip>
                 ) : null}
                 {task.activeRunKind !== null ? (
-                  <RemixChip tone="blue">
-                    {task.activeRunKind === "review"
-                      ? "Reviewer working"
-                      : task.activeRunKind === "reply"
-                        ? "Agent replying"
-                        : "Agent working"}
-                  </RemixChip>
+                  <RemixChip tone="blue">{ACTIVE_RUN_LABELS[task.activeRunKind]}</RemixChip>
                 ) : null}
               </div>
             }
           />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          {inReview && merger !== null ? (
+            <Button size="sm" disabled={disabled} onClick={() => void mergeAndFinish()}>
+              <PullRequestGlyph.merged />
+              Merge and finish
+            </Button>
+          ) : null}
+          {inReview ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => void update({ status: "done" })}
+            >
+              <CheckIcon />
+              Mark done
+            </Button>
+          ) : null}
           {canStart ? (
             <Button
               size="sm"
+              variant={task.status === "review" ? "outline" : "default"}
               disabled={disabled}
               onClick={() => void props.runCommand({ type: "task.start", id: task.id })}
             >
@@ -257,7 +278,7 @@ function BoardCardDetail(props: {
               <ArchiveIcon />
               Archive
             </Button>
-          ) : task.archivedAt !== null && task.parentTaskId === null ? (
+          ) : task.archivedAt !== null && (parent === null || parent.archivedAt === null) ? (
             <Button
               size="sm"
               variant="outline"
@@ -280,188 +301,179 @@ function BoardCardDetail(props: {
             Delete
           </Button>
         </div>
-      </SheetHeader>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-4 px-6 pb-6">
-          <div
-            className={cn(
-              REMIX_INSET,
-              "grid gap-3",
-              task.assignedToUser ? "grid-cols-2" : "grid-cols-3",
-            )}
+        <div role="tablist" aria-label="Task panel" className="mt-2 flex gap-2">
+          <RemixButton
+            role="tab"
+            aria-selected={shown === "activity"}
+            variant={shown === "activity" ? "active" : "paper"}
+            onClick={() => props.onTabChange("activity")}
           >
-            <div className="flex flex-col gap-2">
-              <Label>Column</Label>
-              <Select
-                value={task.status}
-                disabled={disabled}
-                onValueChange={(value) => void update({ status: value as BoardTaskStatus })}
-              >
-                <SelectTrigger size="sm">
-                  <SelectValue>{boardStatusLabel(task.status)}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {BOARD_COLUMNS.map((column) => (
-                    <SelectItem key={column.status} value={column.status} label={column.label}>
-                      {column.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Assignee</Label>
-              <AgentSelect
-                agents={snapshot.agents}
-                value={task.assigneeAgentId}
-                disabled={disabled}
-                you={{
-                  selected: task.assignedToUser,
-                  onSelect: () => void update({ assignedToUser: true }),
-                }}
-                onChange={(assigneeAgentId) =>
-                  void update({ assigneeAgentId, assignedToUser: false })
-                }
-              />
-            </div>
-            {/* No agent touches a card you keep, so nobody reviews it but you. */}
-            {task.assignedToUser ? null : (
+            <MessagesSquareIcon />
+            Activity
+            {task.commentCount > 0 ? (
+              <span className="tabular-nums opacity-75">{task.commentCount}</span>
+            ) : null}
+          </RemixButton>
+          <RemixButton
+            role="tab"
+            aria-selected={shown === "details"}
+            variant={shown === "details" ? "active" : "paper"}
+            onClick={() => props.onTabChange("details")}
+          >
+            <FileTextIcon />
+            Details
+          </RemixButton>
+        </div>
+      </SheetHeader>
+      {/* Both stay mounted, so a half-written comment survives a look at the details. */}
+      <ActivityPanel
+        hidden={shown !== "activity"}
+        environmentId={props.environmentId}
+        task={task}
+        snapshot={snapshot}
+        comments={detail.data?.comments ?? null}
+        disabled={disabled}
+        runCommand={props.runCommand}
+      />
+      <div
+        role="tabpanel"
+        aria-label="Details"
+        className={cn("min-h-0 flex-1 flex-col", shown === "details" ? "flex" : "hidden")}
+      >
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-col gap-4 px-6 pb-6">
+            <div
+              className={cn(
+                REMIX_INSET,
+                "grid gap-3",
+                task.assignedToUser ? "grid-cols-2" : "grid-cols-3",
+              )}
+            >
               <div className="flex flex-col gap-2">
-                <Label>Reviewer</Label>
+                <Label>Column</Label>
+                <Select
+                  value={task.status}
+                  disabled={disabled}
+                  onValueChange={(value) => void update({ status: value as BoardTaskStatus })}
+                >
+                  <SelectTrigger size="sm">
+                    <SelectValue>{boardStatusLabel(task.status)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {BOARD_COLUMNS.map((column) => (
+                      <SelectItem key={column.status} value={column.status} label={column.label}>
+                        {column.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>Assignee</Label>
                 <AgentSelect
                   agents={snapshot.agents}
-                  noneLabel="The board (you)"
-                  value={task.reviewerAgentId}
+                  value={task.assigneeAgentId}
                   disabled={disabled}
-                  onChange={(reviewerAgentId) => void update({ reviewerAgentId })}
+                  you={{
+                    selected: task.assignedToUser,
+                    onSelect: () => void update({ assignedToUser: true }),
+                  }}
+                  onChange={(assigneeAgentId) =>
+                    void update({ assigneeAgentId, assignedToUser: false })
+                  }
                 />
               </div>
-            )}
-          </div>
-
-          <section className={REMIX_INSET}>
-            <div className="flex min-h-7 items-center justify-between gap-3">
-              <SectionTitle label="Description" htmlFor="board-card-detail-description" />
-              {editingDescription ? null : (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() => {
-                    setDescription(task.description);
-                    setEditingDescription(true);
-                  }}
-                >
-                  <PencilIcon />
-                  Edit
-                </Button>
+              {/* No agent touches a card you keep, so nobody reviews it but you. */}
+              {task.assignedToUser ? null : (
+                <div className="flex flex-col gap-2">
+                  <Label>Reviewer</Label>
+                  <AgentSelect
+                    agents={snapshot.agents}
+                    noneLabel="The board (you)"
+                    value={task.reviewerAgentId}
+                    disabled={disabled}
+                    onChange={(reviewerAgentId) => void update({ reviewerAgentId })}
+                  />
+                </div>
               )}
             </div>
-            {editingDescription ? (
-              <>
-                <Textarea
-                  id="board-card-detail-description"
-                  value={description}
-                  rows={12}
-                  autoFocus
-                  disabled={disabled}
-                  placeholder="What done looks like. Markdown works."
-                  onChange={(event) => setDescription(event.target.value)}
-                />
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setEditingDescription(false)}>
-                    Cancel
-                  </Button>
+
+            <section className={REMIX_INSET}>
+              <div className="flex min-h-7 items-center justify-between gap-3">
+                <SectionTitle label="Description" htmlFor="board-card-detail-description" />
+                {editingDescription ? null : (
                   <Button
-                    size="sm"
-                    disabled={disabled || !descriptionDirty}
-                    onClick={async () => {
-                      if ((await update({ description })) !== null) setEditingDescription(false);
+                    size="xs"
+                    variant="ghost"
+                    disabled={disabled}
+                    onClick={() => {
+                      setDescription(task.description);
+                      setEditingDescription(true);
                     }}
                   >
-                    Save description
+                    <PencilIcon />
+                    Edit
                   </Button>
-                </div>
-              </>
-            ) : task.description.trim().length > 0 ? (
-              <div className={REMIX_CARD} data-office-markdown>
-                <ChatMarkdown
-                  text={task.description}
-                  cwd={task.worktreePath ?? undefined}
-                  environmentId={props.environmentId}
-                />
+                )}
               </div>
-            ) : (
-              <span className="text-sm text-muted-foreground">No description</span>
-            )}
-          </section>
-
-          <section className={REMIX_INSET}>
-            <SectionTitle label="Files" count={files.length} />
-            <FilePicker
-              disabled={disabled}
-              onAdd={(paths) => {
-                for (const path of paths) {
-                  void props.runCommand({
-                    type: "link.add",
-                    link: {
-                      taskId: task.id,
-                      kind: "file",
-                      title: path.split(/[\\/]/).findLast((part) => part.length > 0) ?? path,
-                      url: path,
-                    },
-                  });
-                }
-              }}
-            >
-              {files.map((link) => (
-                <WorkLinkRow
-                  key={link.id}
-                  link={link}
-                  snapshot={snapshot}
-                  disabled={disabled}
-                  onRemove={() => void props.runCommand({ type: "link.delete", id: link.id })}
-                />
-              ))}
-            </FilePicker>
-          </section>
-
-          {task.status !== "done" || task.waitsOnTaskIds.length > 0 ? (
-            <section className={REMIX_INSET}>
-              <SectionTitle label="Waits on" tone="yellow" count={task.waitsOnTaskIds.length} />
-              <WaitsOnField
-                tasks={snapshot.tasks}
-                value={task.waitsOnTaskIds}
-                self={task.id}
-                disabled={disabled}
-                onOpen={(id) => props.onOpenCard(id)}
-                onChange={(waitsOnTaskIds) => void update({ waitsOnTaskIds: [...waitsOnTaskIds] })}
-              />
-              {waiting.length > 0 && task.status === "todo" ? (
-                <span className="text-xs text-muted-foreground">
-                  Starts once {waiting.length === 1 ? "this task is" : "these tasks are"} done.
-                </span>
-              ) : null}
+              {editingDescription ? (
+                <>
+                  <Textarea
+                    id="board-card-detail-description"
+                    value={description}
+                    rows={12}
+                    autoFocus
+                    disabled={disabled}
+                    placeholder="What done looks like. Markdown works."
+                    onChange={(event) => setDescription(event.target.value)}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setEditingDescription(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={disabled || !descriptionDirty}
+                      onClick={async () => {
+                        if ((await update({ description })) !== null) setEditingDescription(false);
+                      }}
+                    >
+                      Save description
+                    </Button>
+                  </div>
+                </>
+              ) : task.description.trim().length > 0 ? (
+                <div className={REMIX_CARD} data-office-markdown>
+                  <ChatMarkdown
+                    text={task.description}
+                    cwd={task.worktreePath ?? undefined}
+                    environmentId={props.environmentId}
+                  />
+                </div>
+              ) : (
+                <span className="text-sm text-muted-foreground">No description</span>
+              )}
             </section>
-          ) : null}
 
-          {ownsBranch ? (
-            <ShipSection
-              environmentId={props.environmentId}
-              task={task}
-              branch={branchLink.title}
-              merged={branchLink.status === "merged"}
-              blocker={boardShipBlocker(task, snapshot.tasks)}
-              disabled={disabled}
-              runCommand={props.runCommand}
-            />
-          ) : null}
-
-          {workLinks.length > 0 ? (
             <section className={REMIX_INSET}>
-              <SectionTitle label="Linked work" tone="purple" count={workLinks.length} />
-              <div className="flex flex-col gap-2">
-                {workLinks.map((link) => (
+              <SectionTitle label="Files" count={files.length} />
+              <FilePicker
+                disabled={disabled}
+                onAdd={(paths) => {
+                  for (const path of paths) {
+                    void props.runCommand({
+                      type: "link.add",
+                      link: {
+                        taskId: task.id,
+                        kind: "file",
+                        title: path.split(/[\\/]/).findLast((part) => part.length > 0) ?? path,
+                        url: path,
+                      },
+                    });
+                  }
+                }}
+              >
+                {files.map((link) => (
                   <WorkLinkRow
                     key={link.id}
                     link={link}
@@ -470,164 +482,407 @@ function BoardCardDetail(props: {
                     onRemove={() => void props.runCommand({ type: "link.delete", id: link.id })}
                   />
                 ))}
-              </div>
+              </FilePicker>
             </section>
-          ) : null}
 
-          {parent !== null || subtasks.length > 0 || neededBy.length > 0 ? (
-            <section className={REMIX_INSET}>
-              <SectionTitle
-                label="Related tasks"
-                tone="purple"
-                count={(parent === null ? 0 : 1) + subtasks.length + neededBy.length}
-              />
-              <div className="flex flex-col gap-2">
-                {parent !== null ? (
-                  <RelatedCard
-                    prefix="Parent"
-                    task={parent}
-                    onOpen={() => props.onOpenCard(parent.id)}
-                  />
+            {task.status !== "done" || task.waitsOnTaskIds.length > 0 ? (
+              <section className={REMIX_INSET}>
+                <SectionTitle label="Waits on" tone="yellow" count={task.waitsOnTaskIds.length} />
+                <WaitsOnField
+                  tasks={snapshot.tasks}
+                  value={task.waitsOnTaskIds}
+                  self={task.id}
+                  disabled={disabled}
+                  onOpen={(id) => props.onOpenCard(id)}
+                  onChange={(waitsOnTaskIds) =>
+                    void update({ waitsOnTaskIds: [...waitsOnTaskIds] })
+                  }
+                />
+                {waiting.length > 0 && task.status === "todo" ? (
+                  <span className="text-xs text-muted-foreground">
+                    Starts once {waiting.length === 1 ? "this task is" : "these tasks are"} done.
+                  </span>
                 ) : null}
-                {subtasks.map((subtask) => (
-                  <RelatedCard
-                    key={subtask.id}
-                    prefix="Subtask"
-                    task={subtask}
-                    onOpen={() => props.onOpenCard(subtask.id)}
-                  />
-                ))}
-                {neededBy.map((dependent) => (
-                  <RelatedCard
-                    key={dependent.id}
-                    prefix="Needed by"
-                    task={dependent}
-                    onOpen={() => props.onOpenCard(dependent.id)}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
+              </section>
+            ) : null}
 
-          <section className={REMIX_INSET}>
-            <div className="flex">
-              <SectionTitle
-                label="Activity"
-                tone="blue"
-                count={detail.data?.comments.length}
-                htmlFor="board-card-comment"
+            {ownsBranch ? (
+              <ShipSection
+                environmentId={props.environmentId}
+                task={task}
+                branch={branchLink.title}
+                merged={branchLink.status === "merged"}
+                blocker={boardShipBlocker(task, snapshot.tasks)}
+                disabled={disabled}
+                runCommand={props.runCommand}
               />
-            </div>
-            <div className="flex flex-col gap-2">
-              {(detail.data?.comments ?? []).map((entry) => (
+            ) : null}
+
+            {workLinks.length > 0 ? (
+              <section className={REMIX_INSET}>
+                <SectionTitle label="Linked work" tone="purple" count={workLinks.length} />
+                <div className="flex flex-col gap-2">
+                  {workLinks.map((link) => (
+                    <WorkLinkRow
+                      key={link.id}
+                      link={link}
+                      snapshot={snapshot}
+                      disabled={disabled}
+                      onRemove={() => void props.runCommand({ type: "link.delete", id: link.id })}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {parent !== null || subtasks.length > 0 || neededBy.length > 0 ? (
+              <section className={REMIX_INSET}>
+                <SectionTitle
+                  label="Related tasks"
+                  tone="purple"
+                  count={(parent === null ? 0 : 1) + subtasks.length + neededBy.length}
+                />
+                <div className="flex flex-col gap-2">
+                  {parent !== null ? (
+                    <RelatedCard
+                      prefix="Parent"
+                      task={parent}
+                      onOpen={() => props.onOpenCard(parent.id)}
+                    />
+                  ) : null}
+                  {subtasks.map((subtask) => (
+                    <RelatedCard
+                      key={subtask.id}
+                      prefix="Subtask"
+                      task={subtask}
+                      onOpen={() => props.onOpenCard(subtask.id)}
+                    />
+                  ))}
+                  {neededBy.map((dependent) => (
+                    <RelatedCard
+                      key={dependent.id}
+                      prefix="Needed by"
+                      task={dependent}
+                      onOpen={() => props.onOpenCard(dependent.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {(detail.data?.runs.length ?? 0) > 0 ? (
+              <section className={REMIX_INSET}>
+                <SectionTitle label="Agent runs" tone="teal" count={detail.data?.runs.length} />
+                <div className="flex flex-col gap-2">
+                  {(detail.data?.runs ?? []).toReversed().map((run) => (
+                    <RunRow
+                      key={run.id}
+                      run={run}
+                      snapshot={snapshot}
+                      onOpenThread={() => openThread(run.threadId)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </div>
+        </ScrollArea>
+      </div>
+    </>
+  );
+}
+
+const ACTIVE_RUN_LABELS: Record<NonNullable<BoardTask["activeRunKind"]>, string> = {
+  work: "Agent working",
+  review: "Reviewer working",
+  reply: "Agent replying",
+  merge: "Agent merging",
+};
+
+/** Comments shown at first, and how many more each "Show earlier" adds. */
+const ACTIVITY_PAGE = 30;
+/** System lines in a row, such as "started working", fold into one line from this many. */
+const FOLD_SYSTEM_LINES = 3;
+
+type ActivityEntry =
+  | { readonly kind: "comment"; readonly comment: BoardComment }
+  | { readonly kind: "updates"; readonly id: string; readonly comments: Array<BoardComment> };
+
+function activityEntries(comments: ReadonlyArray<BoardComment>): ReadonlyArray<ActivityEntry> {
+  const entries: Array<ActivityEntry> = [];
+  let updates: Array<BoardComment> = [];
+  const flush = () => {
+    if (updates.length >= FOLD_SYSTEM_LINES) {
+      entries.push({ kind: "updates", id: updates[0]!.id, comments: updates });
+    } else {
+      entries.push(...updates.map((comment) => ({ kind: "comment" as const, comment })));
+    }
+    updates = [];
+  };
+  for (const comment of comments) {
+    if (comment.authorKind === "system") {
+      updates.push(comment);
+      continue;
+    }
+    flush();
+    entries.push({ kind: "comment", comment });
+  }
+  flush();
+  return entries;
+}
+
+/** The conversation, newest at the bottom beside a comment box that stays in view. */
+function ActivityPanel(props: {
+  readonly hidden: boolean;
+  readonly environmentId: EnvironmentId;
+  readonly task: BoardTask;
+  readonly snapshot: BoardSnapshot;
+  readonly comments: ReadonlyArray<BoardComment> | null;
+  readonly disabled: boolean;
+  readonly runCommand: RunBoardCommand;
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [limit, setLimit] = useState(ACTIVITY_PAGE);
+  const [awayFromLatest, setAwayFromLatest] = useState(false);
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
+  const comments = props.comments ?? [];
+  const hidden = Math.max(0, comments.length - limit);
+  const entries = activityEntries(comments.slice(hidden));
+  const cwd = props.task.worktreePath ?? undefined;
+
+  return (
+    <div
+      role="tabpanel"
+      aria-label="Activity"
+      className={cn("min-h-0 flex-1 flex-col", props.hidden ? "hidden" : "flex")}
+    >
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* Reversed, so it opens on the newest message and stays there as new ones arrive. */}
+        <div
+          ref={scroller}
+          role="log"
+          aria-label="Comments and updates"
+          className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto px-6"
+          onScroll={(event) => {
+            const away = event.currentTarget.scrollTop < -160;
+            if (away !== awayFromLatest) setAwayFromLatest(away);
+          }}
+        >
+          <div className="flex flex-col gap-2 pt-1 pb-4">
+            {hidden > 0 ? (
+              <div className="flex justify-center">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setLimit((current) => current + ACTIVITY_PAGE)}
+                >
+                  Show {Math.min(hidden, ACTIVITY_PAGE)} earlier
+                </Button>
+              </div>
+            ) : null}
+            {entries.map((entry) =>
+              entry.kind === "comment" ? (
                 <CommentRow
-                  key={entry.id}
-                  comment={entry}
-                  snapshot={snapshot}
-                  cwd={task.worktreePath ?? undefined}
+                  key={entry.comment.id}
+                  comment={entry.comment}
+                  snapshot={props.snapshot}
+                  cwd={cwd}
                   environmentId={props.environmentId}
                 />
-              ))}
-              {detail.data !== null && detail.data.comments.length === 0 ? (
-                <span className="text-sm text-muted-foreground">No activity yet</span>
-              ) : null}
-            </div>
-            <div
-              className="flex flex-col gap-2"
-              onDragOver={(event) => {
-                if (event.dataTransfer.types.includes("Files")) event.preventDefault();
-              }}
-              onDrop={(event) => {
-                if (disabled || event.dataTransfer.files.length === 0) return;
-                event.preventDefault();
-                draftFiles.add([...event.dataTransfer.files]);
-              }}
-            >
-              <Textarea
-                id="board-card-comment"
-                value={comment}
-                rows={3}
-                disabled={disabled}
-                onPaste={(event) => {
-                  const pasted = [...event.clipboardData.files];
-                  if (pasted.length === 0) return;
-                  event.preventDefault();
-                  draftFiles.add(pasted);
-                }}
-                placeholder={
-                  task.activeRunKind !== null
-                    ? "Comment, and the working agent receives it right away. Paste or drop pictures."
-                    : task.assignedToUser
-                      ? "Add a note for yourself"
-                      : "Comment, and the task's agent answers on the board. Paste or drop pictures."
-                }
-                onChange={(event) => setComment(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                    event.preventDefault();
-                    void postComment();
+              ) : (
+                <UpdatesRow
+                  key={entry.id}
+                  comments={entry.comments}
+                  snapshot={props.snapshot}
+                  open={unfolded.has(entry.id)}
+                  onToggle={() =>
+                    setUnfolded((current) => {
+                      const next = new Set(current);
+                      if (!next.delete(entry.id)) next.add(entry.id);
+                      return next;
+                    })
                   }
-                }}
-              />
-              <DraftFileChips
-                files={draftFiles.files}
-                disabled={disabled || posting}
-                onRemove={draftFiles.remove}
-                onRetry={draftFiles.retry}
-              />
-              <div className="flex items-center justify-between gap-2">
-                <input
-                  ref={filePicker}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={(event) => {
-                    draftFiles.add([...(event.target.files ?? [])]);
-                    event.target.value = "";
-                  }}
+                  cwd={cwd}
+                  environmentId={props.environmentId}
                 />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={disabled || posting}
-                  onClick={() => filePicker.current?.click()}
-                >
-                  <PaperclipIcon />
-                  Attach
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={
-                    disabled ||
-                    posting ||
-                    (comment.trim().length === 0 && draftFiles.files.length === 0)
-                  }
-                  onClick={() => void postComment()}
-                >
-                  Comment
-                </Button>
-              </div>
-            </div>
-          </section>
-
-          {(detail.data?.runs.length ?? 0) > 0 ? (
-            <section className={REMIX_INSET}>
-              <SectionTitle label="Agent runs" tone="teal" count={detail.data?.runs.length} />
-              <div className="flex flex-col gap-2">
-                {(detail.data?.runs ?? []).toReversed().map((run) => (
-                  <RunRow
-                    key={run.id}
-                    run={run}
-                    snapshot={snapshot}
-                    onOpenThread={() => openThread(run.threadId)}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
+              ),
+            )}
+            {props.comments !== null && comments.length === 0 ? (
+              <span className="px-1 text-sm text-muted-foreground">No activity yet</span>
+            ) : null}
+          </div>
         </div>
-      </ScrollArea>
-    </>
+        {awayFromLatest ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+            <div className="pointer-events-auto">
+              <RemixButton size="sm" onClick={() => scroller.current?.scrollTo({ top: 0 })}>
+                <ArrowDownIcon />
+                Latest
+              </RemixButton>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <CommentComposer
+        environmentId={props.environmentId}
+        task={props.task}
+        disabled={props.disabled}
+        runCommand={props.runCommand}
+        scroller={scroller}
+      />
+    </div>
+  );
+}
+
+function UpdatesRow(props: {
+  readonly comments: ReadonlyArray<BoardComment>;
+  readonly snapshot: BoardSnapshot;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly cwd: string | undefined;
+  readonly environmentId: EnvironmentId;
+}) {
+  const latest = props.comments.at(-1);
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={props.open}
+        onClick={props.onToggle}
+        className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1 text-start text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&_svg]:size-3.5 [&_svg]:shrink-0"
+      >
+        {props.open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+        <span className="shrink-0 font-medium">{props.comments.length} updates</span>
+        {props.open || latest === undefined ? null : (
+          <span className="min-w-0 truncate">· {latest.body}</span>
+        )}
+      </button>
+      {props.open
+        ? props.comments.map((comment) => (
+            <CommentRow
+              key={comment.id}
+              comment={comment}
+              snapshot={props.snapshot}
+              cwd={props.cwd}
+              environmentId={props.environmentId}
+            />
+          ))
+        : null}
+    </div>
+  );
+}
+
+function CommentComposer(props: {
+  readonly environmentId: EnvironmentId;
+  readonly task: BoardTask;
+  readonly disabled: boolean;
+  readonly runCommand: RunBoardCommand;
+  readonly scroller: RefObject<HTMLDivElement | null>;
+}) {
+  const { task, disabled } = props;
+  const [comment, setComment] = useState("");
+  const [posting, setPosting] = useState(false);
+  const draftFiles = useCommentDraftFiles(props.environmentId);
+  const filePicker = useRef<HTMLInputElement>(null);
+
+  const postComment = async () => {
+    const body = comment.trim();
+    if (body.length === 0 && draftFiles.files.length === 0) return;
+    setPosting(true);
+    const attachments = await draftFiles.collect();
+    const posted =
+      attachments === null
+        ? null
+        : await props.runCommand({
+            type: "comment.add",
+            comment: { taskId: task.id, body, ...(attachments.length > 0 ? { attachments } : {}) },
+          });
+    setPosting(false);
+    if (posted !== null) {
+      setComment("");
+      draftFiles.clear();
+      props.scroller.current?.scrollTo({ top: 0 });
+    }
+  };
+
+  return (
+    <div
+      className="flex flex-col gap-2 border-t px-6 pt-3 pb-5"
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (disabled || event.dataTransfer.files.length === 0) return;
+        event.preventDefault();
+        draftFiles.add([...event.dataTransfer.files]);
+      }}
+    >
+      <Label htmlFor="board-card-comment" className="sr-only">
+        Comment
+      </Label>
+      <Textarea
+        id="board-card-comment"
+        value={comment}
+        rows={2}
+        disabled={disabled}
+        onPaste={(event) => {
+          const pasted = [...event.clipboardData.files];
+          if (pasted.length === 0) return;
+          event.preventDefault();
+          draftFiles.add(pasted);
+        }}
+        placeholder={
+          task.activeRunKind !== null
+            ? "Comment, and the working agent receives it right away. Paste or drop pictures."
+            : task.assignedToUser
+              ? "Add a note for yourself"
+              : "Comment, and the task's agent answers on the board. Paste or drop pictures."
+        }
+        onChange={(event) => setComment(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            void postComment();
+          }
+        }}
+      />
+      <DraftFileChips
+        files={draftFiles.files}
+        disabled={disabled || posting}
+        onRemove={draftFiles.remove}
+        onRetry={draftFiles.retry}
+      />
+      <div className="flex items-center justify-between gap-2">
+        <input
+          ref={filePicker}
+          type="file"
+          multiple
+          hidden
+          onChange={(event) => {
+            draftFiles.add([...(event.target.files ?? [])]);
+            event.target.value = "";
+          }}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={disabled || posting}
+          onClick={() => filePicker.current?.click()}
+        >
+          <PaperclipIcon />
+          Attach
+        </Button>
+        <Button
+          size="sm"
+          disabled={
+            disabled || posting || (comment.trim().length === 0 && draftFiles.files.length === 0)
+          }
+          onClick={() => void postComment()}
+        >
+          Comment
+        </Button>
+      </div>
+    </div>
   );
 }
 

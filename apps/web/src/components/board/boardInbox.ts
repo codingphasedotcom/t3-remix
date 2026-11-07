@@ -21,12 +21,13 @@ export function useBoardInbox(environmentId: EnvironmentId | null): ReadonlyArra
 
 /** Changes when the item comes back after being handled, so it is announced again. */
 export function inboxKey(item: BoardInboxItem): string {
-  return `${item.kind}:${item.taskId ?? item.hireId}:${item.since}`;
+  return `${item.kind}:${item.taskId ?? item.hireId ?? item.skillRequestId}:${item.since}`;
 }
 
 export const INBOX_LABELS: Record<BoardInboxKind, string> = {
   review: "Ready for your review",
   blocked: "Stuck, needs you",
   hire: "Hire request",
+  skill: "Skill request",
   todo: "Your to-do",
 };

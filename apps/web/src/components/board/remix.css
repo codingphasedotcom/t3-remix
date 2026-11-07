@@ -21,6 +21,9 @@
   --remix-red: #ff5a5a;
   --remix-gray: #a3acc9;
   --remix-glass: #d8ecff;
+  /* The app icon's lime, the website's spray paint: the main action on every page. */
+  --remix-spray: #b8f72b;
+  --remix-spray-hover: #c9ff4f;
   --remix-shell-radius: 20px;
   --remix-well-radius: 14px;
   --remix-paper-hover: color-mix(in oklab, var(--remix-blue) 10%, var(--remix-surface));

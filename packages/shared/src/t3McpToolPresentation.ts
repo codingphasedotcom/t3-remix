@@ -363,6 +363,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
   board_list_agents: tool(["Read", "Reading", "Read", "the org chart"], "board-read"),
   board_request_hire: tool(["Request", "Requesting", "Requested", "a hire"], "board-create"),
+  board_request_skill: tool(["Request", "Requesting", "Requested", "a skill"], "board-create"),
   board_remember: tool(["Remember", "Remembering", "Remembered", "a lesson"], "board-remember"),
   board_rewrite_memory: tool(["Condense", "Condensing", "Condensed", "memory"], "board-remember"),
   board_search_tasks: tool(["Search", "Searching", "Searched", "past tasks"], "board-read"),

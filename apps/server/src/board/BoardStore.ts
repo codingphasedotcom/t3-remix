@@ -17,6 +17,8 @@ import {
   BoardSettings,
   BoardSkill,
   BoardSkillId,
+  BoardSkillRequest,
+  BoardSkillRequestId,
   BoardTask,
   BoardTaskId,
   BoardRoutine,
@@ -126,6 +128,17 @@ export interface NewHire {
   readonly reason: string;
 }
 
+export interface NewSkillRequest {
+  readonly companyId: BoardCompanyId;
+  readonly requestedByAgentId: BoardAgentId | null;
+  readonly agentId: BoardAgentId;
+  readonly skillId: BoardSkillId | null;
+  readonly name: string;
+  readonly description: string;
+  readonly installedPath: string | null;
+  readonly reason: string;
+}
+
 /** Who a hire request reports to: an agent, or another pending request. */
 export interface HireManager {
   readonly agentId: BoardAgentId | null;
@@ -169,6 +182,16 @@ export class BoardStore extends Context.Service<
       reportsTo: HireManager,
     ) => StoreEffect<void>;
 
+    readonly listPendingSkillRequests: (
+      companyId: BoardCompanyId,
+    ) => StoreEffect<ReadonlyArray<BoardSkillRequest>>;
+    readonly getSkillRequest: (id: BoardSkillRequestId) => StoreEffect<BoardSkillRequest | null>;
+    readonly insertSkillRequest: (request: NewSkillRequest) => StoreEffect<BoardSkillRequest>;
+    readonly decideSkillRequest: (
+      id: BoardSkillRequestId,
+      status: BoardHireStatus,
+    ) => StoreEffect<void>;
+
     readonly listTasks: (companyId: BoardCompanyId) => StoreEffect<ReadonlyArray<StoredTask>>;
     readonly getTask: (id: BoardTaskId) => StoreEffect<StoredTask | null>;
     readonly insertTask: (task: NewTask) => StoreEffect<BoardTaskId>;
@@ -204,6 +227,15 @@ export class BoardStore extends Context.Service<
     /** Enabled routines, in every company, whose next run is at or before `at`. */
     readonly listDueRoutines: (at: string) => StoreEffect<ReadonlyArray<BoardRoutine>>;
     readonly listWorkLinks: (taskId: BoardTaskId) => StoreEffect<ReadonlyArray<BoardWorkLink>>;
+    /** Every link on the company's tasks, oldest first. */
+    readonly listCompanyWorkLinks: (
+      companyId: BoardCompanyId,
+    ) => StoreEffect<ReadonlyArray<BoardWorkLink>>;
+    /** The board's own updates on the company's tasks since `since`, oldest first. */
+    readonly listCompanyUpdates: (
+      companyId: BoardCompanyId,
+      since: string,
+    ) => StoreEffect<ReadonlyArray<BoardComment>>;
     /** Adds the link, or updates the one the task already has for the same URL. */
     readonly upsertWorkLink: (link: WorkLinkInput) => StoreEffect<BoardWorkLink>;
     readonly getWorkLink: (id: BoardWorkLinkId) => StoreEffect<BoardWorkLink | null>;
@@ -354,6 +386,20 @@ interface HireRow {
   readonly created_at: string;
 }
 
+interface SkillRequestRow {
+  readonly request_id: string;
+  readonly company_id: string;
+  readonly requested_by_agent_id: string | null;
+  readonly agent_id: string;
+  readonly skill_id: string | null;
+  readonly name: string;
+  readonly description: string;
+  readonly installed_path: string | null;
+  readonly reason: string;
+  readonly status: string;
+  readonly created_at: string;
+}
+
 interface TaskRow {
   readonly task_id: string;
   readonly company_id: string;
@@ -431,6 +477,7 @@ const decodeCompanySummary = Schema.decodeUnknownEffect(BoardCompanySummary);
 const decodeSkill = Schema.decodeUnknownEffect(BoardSkill);
 const decodeAgent = Schema.decodeUnknownEffect(BoardAgent);
 const decodeHire = Schema.decodeUnknownEffect(BoardHire);
+const decodeSkillRequest = Schema.decodeUnknownEffect(BoardSkillRequest);
 const decodeTask = Schema.decodeUnknownEffect(BoardTask);
 const decodeComment = Schema.decodeUnknownEffect(BoardComment);
 const decodeWorkLink = Schema.decodeUnknownEffect(BoardWorkLink);
@@ -646,6 +693,24 @@ const make = Effect.gen(function* () {
   if (!hireColumns.has("reports_to_hire_id")) {
     yield* sql`ALTER TABLE board_hires ADD COLUMN reports_to_hire_id TEXT`;
   }
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS board_skill_requests (
+      request_id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      requested_by_agent_id TEXT,
+      agent_id TEXT NOT NULL,
+      skill_id TEXT,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      installed_path TEXT,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      decided_at TEXT
+    )
+  `;
+  yield* sql`CREATE INDEX IF NOT EXISTS idx_board_skill_requests_company
+    ON board_skill_requests(company_id, status)`;
   yield* sql`
     CREATE TABLE IF NOT EXISTS board_tasks (
       task_id TEXT PRIMARY KEY,
@@ -882,6 +947,21 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const toSkillRequest = (row: SkillRequestRow) =>
+    decodeSkillRequest({
+      id: row.request_id,
+      companyId: row.company_id,
+      requestedByAgentId: row.requested_by_agent_id,
+      agentId: row.agent_id,
+      skillId: row.skill_id,
+      name: row.name,
+      description: row.description,
+      installedPath: row.installed_path,
+      reason: row.reason,
+      status: row.status,
+      createdAt: row.created_at,
+    });
+
   const toStoredTask = Effect.fnUntraced(function* (row: TaskRow) {
     const task = yield* decodeTask({
       id: row.task_id,
@@ -1052,6 +1132,7 @@ const make = Effect.gen(function* () {
               (SELECT task_id FROM board_tasks WHERE company_id = ${id})`,
             sql`DELETE FROM board_tasks WHERE company_id = ${id}`,
             sql`DELETE FROM board_hires WHERE company_id = ${id}`,
+            sql`DELETE FROM board_skill_requests WHERE company_id = ${id}`,
             sql`DELETE FROM board_routines WHERE company_id = ${id}`,
             sql`DELETE FROM board_agents WHERE company_id = ${id}`,
             sql`DELETE FROM board_skills WHERE company_id = ${id}`,
@@ -1261,6 +1342,59 @@ const make = Effect.gen(function* () {
     },
     failWith("Could not record the hiring decision."),
   );
+
+  const listPendingSkillRequests: BoardStore["Service"]["listPendingSkillRequests"] = Effect.fn(
+    "BoardStore.listPendingSkillRequests",
+  )(function* (companyId) {
+    const rows = yield* sql<SkillRequestRow>`
+      SELECT * FROM board_skill_requests WHERE company_id = ${companyId} AND status = 'pending'
+      ORDER BY created_at, rowid
+    `;
+    return yield* Effect.forEach(rows, toSkillRequest);
+  }, failWith("Could not list skill requests."));
+
+  const getSkillRequest: BoardStore["Service"]["getSkillRequest"] = Effect.fn(
+    "BoardStore.getSkillRequest",
+  )(function* (id) {
+    const rows = yield* sql<SkillRequestRow>`
+      SELECT * FROM board_skill_requests WHERE request_id = ${id}
+    `;
+    const row = rows[0];
+    return row === undefined ? null : yield* toSkillRequest(row);
+  }, failWith("Could not read the skill request."));
+
+  const insertSkillRequest: BoardStore["Service"]["insertSkillRequest"] = Effect.fn(
+    "BoardStore.insertSkillRequest",
+  )(function* (request) {
+    const id = BoardSkillRequestId.make(yield* newId("board-skill-request"));
+    const at = yield* now;
+    yield* sql`
+      INSERT INTO board_skill_requests (
+        request_id, company_id, requested_by_agent_id, agent_id, skill_id, name, description,
+        installed_path, reason, status, created_at, decided_at
+      )
+      VALUES (
+        ${id}, ${request.companyId}, ${request.requestedByAgentId}, ${request.agentId},
+        ${request.skillId}, ${request.name}, ${request.description}, ${request.installedPath},
+        ${request.reason}, 'pending', ${at}, NULL
+      )
+    `;
+    const created = yield* getSkillRequest(id);
+    if (created === null) {
+      return yield* new BoardError({ message: "The skill request vanished." });
+    }
+    return created;
+  }, failWith("Could not save the skill request."));
+
+  const decideSkillRequest: BoardStore["Service"]["decideSkillRequest"] = Effect.fn(
+    "BoardStore.decideSkillRequest",
+  )(function* (id, status) {
+    const at = yield* now;
+    yield* sql`
+      UPDATE board_skill_requests SET status = ${status}, decided_at = ${at}
+      WHERE request_id = ${id} AND status = 'pending'
+    `;
+  }, failWith("Could not record the skill decision."));
 
   const listTasks: BoardStore["Service"]["listTasks"] = Effect.fn("BoardStore.listTasks")(
     function* (companyId) {
@@ -1503,6 +1637,27 @@ const make = Effect.gen(function* () {
     `;
     return yield* Effect.forEach(rows, toWorkLink);
   }, failWith("Could not read the task's links."));
+
+  const listCompanyWorkLinks: BoardStore["Service"]["listCompanyWorkLinks"] = Effect.fn(
+    "BoardStore.listCompanyWorkLinks",
+  )(function* (companyId) {
+    const rows = yield* sql<WorkLinkRow>`
+      SELECT l.* FROM board_work_links l JOIN board_tasks t ON t.task_id = l.task_id
+      WHERE t.company_id = ${companyId} ORDER BY l.created_at, l.rowid
+    `;
+    return yield* Effect.forEach(rows, toWorkLink);
+  }, failWith("Could not read the company's links."));
+
+  const listCompanyUpdates: BoardStore["Service"]["listCompanyUpdates"] = Effect.fn(
+    "BoardStore.listCompanyUpdates",
+  )(function* (companyId, since) {
+    const rows = yield* sql<CommentRow>`
+      SELECT c.* FROM board_comments c JOIN board_tasks t ON t.task_id = c.task_id
+      WHERE t.company_id = ${companyId} AND c.author_kind = 'system' AND c.created_at >= ${since}
+      ORDER BY c.created_at, c.rowid
+    `;
+    return yield* Effect.forEach(rows, toComment);
+  }, failWith("Could not read the company's updates."));
 
   const getWorkLink: BoardStore["Service"]["getWorkLink"] = Effect.fn("BoardStore.getWorkLink")(
     function* (id) {
@@ -1958,6 +2113,10 @@ const make = Effect.gen(function* () {
     getHire,
     insertHire,
     decideHire,
+    listPendingSkillRequests,
+    getSkillRequest,
+    insertSkillRequest,
+    decideSkillRequest,
     listTasks,
     getTask,
     insertTask,
@@ -1993,6 +2152,8 @@ const make = Effect.gen(function* () {
     deleteRoutine,
     listDueRoutines,
     listWorkLinks,
+    listCompanyWorkLinks,
+    listCompanyUpdates,
     upsertWorkLink,
     getWorkLink,
     deleteWorkLink,

@@ -9,7 +9,6 @@ import type {
   BoardSnapshot,
   BoardTask,
   BoardTaskId,
-  BoardTaskStatus,
   EnvironmentId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -26,14 +25,11 @@ import {
   ArrowUpRightIcon,
   BotIcon,
   CircleCheckIcon,
-  EyeIcon,
   GaugeIcon,
   InboxIcon,
   KanbanSquareIcon,
-  LightbulbIcon,
   ListTodoIcon,
   MessageSquareIcon,
-  PlayIcon,
   PlusIcon,
   UserPlusIcon,
   XCircleIcon,
@@ -54,6 +50,7 @@ import { AgentAvatar, AgentFace, AgentName, YouName } from "./AgentAvatar";
 import { agentById, boardStatusLabel, limitProgress } from "./board.logic";
 import {
   REMIX_CARD,
+  REMIX_COLUMN_ICONS,
   REMIX_COLUMN_TONES,
   REMIX_SHELL,
   RemixBubble,
@@ -593,19 +590,11 @@ function Sparkline(props: { readonly values: ReadonlyArray<number>; readonly lab
 
 const TASK_ROWS = 6;
 
-const COLUMN_ICONS: Record<BoardTaskStatus, LucideIcon> = {
-  backlog: LightbulbIcon,
-  todo: ListTodoIcon,
-  in_progress: PlayIcon,
-  review: EyeIcon,
-  blocked: AlertTriangleIcon,
-  done: CircleCheckIcon,
-};
-
 const TASK_RUN_LABELS: Record<BoardRunKind, string> = {
   work: "Working now",
   review: "Reviewing now",
   reply: "Replying now",
+  merge: "Merging now",
 };
 
 /** The open tasks that matter most right now, each one click from its card. */
@@ -620,7 +609,7 @@ function TaskTable(props: {
   return (
     <ul className="flex flex-col divide-y divide-(--remix-ink)/15">
       {tasks.map((task) => {
-        const Icon = COLUMN_ICONS[task.status];
+        const Icon = REMIX_COLUMN_ICONS[task.status];
         const tone = REMIX_COLUMN_TONES[task.status];
         const owner = agentById(props.snapshot.agents, task.assigneeAgentId);
         const parent = props.snapshot.tasks.find((candidate) => candidate.id === task.parentTaskId);
@@ -700,6 +689,12 @@ const RUN_PHRASES: Record<BoardRunKind, Record<BoardRunStatus, string>> = {
     completed: "replied on",
     failed: "failed replying on",
     cancelled: "stopped replying on",
+  },
+  merge: {
+    running: "is merging",
+    completed: "merged",
+    failed: "failed merging",
+    cancelled: "stopped merging",
   },
 };
 
@@ -938,6 +933,7 @@ const FAILED_RUN_LABELS: Record<BoardRunKind, string> = {
   work: "run",
   review: "review",
   reply: "reply",
+  merge: "merge",
 };
 
 function failedThreadLabel(

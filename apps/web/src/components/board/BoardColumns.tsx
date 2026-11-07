@@ -38,7 +38,7 @@ import type { RunBoardCommand } from "./BoardPage";
 import {
   BOARD_COLUMNS,
   agentById,
-  canArchiveTask,
+  archiveAllTargets,
   dropPosition,
   groupTasksByStatus,
   subtaskProgress,
@@ -69,6 +69,7 @@ const RUN_LABELS: Record<BoardRunKind, string> = {
   work: "Working now",
   review: "Reviewing now",
   reply: "Replying now",
+  merge: "Merging now",
 };
 
 /**
@@ -107,14 +108,11 @@ export function BoardColumns(props: {
       : props.snapshot.tasks.filter((task) => task.archivedAt === null),
     placements,
   );
-  const archivable = props.snapshot.tasks.filter(canArchiveTask);
+  const archivable = archiveAllTargets(props.snapshot.tasks);
+  // One task that can't go, such as a parent with a subtask still running, doesn't hold back the rest.
   const archiveAll = async () => {
     for (const task of archivable) {
-      if (
-        (await props.runCommand({ type: "task.archive", id: task.id, archived: true })) === null
-      ) {
-        return;
-      }
+      await props.runCommand({ type: "task.archive", id: task.id, archived: true });
     }
   };
   const dragging =
