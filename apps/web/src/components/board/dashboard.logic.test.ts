@@ -24,6 +24,7 @@ import {
   priorityTasks,
   recentThreads,
   successRate,
+  worktreeGroups,
 } from "./dashboard.logic";
 
 const companyId = "company" as BoardCompanyId;
@@ -246,5 +247,89 @@ describe("formatSpan", () => {
     expect(formatSpan(12 * 60_000)).toBe("12m");
     expect(formatSpan(200 * 60_000)).toBe("3h 20m");
     expect(formatSpan(52 * 3_600_000)).toBe("2d 4h");
+  });
+});
+
+describe("worktreeGroups", () => {
+  const subtaskOf = (parent: string, id: string, status: BoardTask["status"]): BoardTask => ({
+    ...card(id, status, null),
+    parentTaskId: parent as BoardTaskId,
+  });
+  const open = (path: string, ...taskIds: ReadonlyArray<string>) => ({
+    worktreePath: path,
+    taskIds: taskIds as ReadonlyArray<BoardTaskId>,
+  });
+  const summary = (groups: ReturnType<typeof worktreeGroups>) =>
+    groups.map((group) => ({
+      rows: group.rows.map((row) => [row.task.id, row.depth, row.worktrees]),
+      worktrees: group.worktrees,
+      toFinish: group.toFinish,
+    }));
+
+  it("groups a subtask's worktree under its main task and counts what is left to finish", () => {
+    expect(
+      summary(
+        worktreeGroups(
+          [
+            card("main", "in_progress", null),
+            subtaskOf("main", "done-child", "done"),
+            subtaskOf("main", "open-child", "backlog"),
+            subtaskOf("done-child", "grandchild", "review"),
+          ],
+          [open("/a", "done-child"), open("/b", "main", "grandchild")],
+        ),
+      ),
+    ).toEqual([
+      {
+        rows: [
+          ["main", 0, 1],
+          ["done-child", 1, 1],
+          ["grandchild", 2, 1],
+          ["open-child", 1, 0],
+        ],
+        worktrees: 2,
+        toFinish: 3,
+      },
+    ]);
+  });
+
+  it("counts a worktree once for a tree when several of its tasks used it", () => {
+    const [group] = worktreeGroups(
+      [card("main", "review", null), subtaskOf("main", "child", "done")],
+      [open("/a", "main", "child")],
+    );
+    expect(group?.worktrees).toBe(1);
+  });
+
+  it("treats an archived main task as finished even with open subtasks", () => {
+    const [group] = worktreeGroups(
+      [
+        { ...card("main", "done", null), archivedAt: "2026-11-01T00:00:00.000Z" },
+        subtaskOf("main", "child", "backlog"),
+      ],
+      [open("/a", "child")],
+    );
+    expect(group?.toFinish).toBe(0);
+  });
+
+  it("puts the groups closest to cleanup first and finished groups last", () => {
+    const groups = worktreeGroups(
+      [
+        card("finished", "done", null),
+        card("two-left", "review", null),
+        subtaskOf("two-left", "other", "todo"),
+        card("one-left", "review", null),
+      ],
+      [open("/a", "finished"), open("/b", "two-left"), open("/c", "one-left")],
+    );
+    expect(groups.map((group) => group.rows[0]?.task.id)).toEqual([
+      "one-left",
+      "two-left",
+      "finished",
+    ]);
+  });
+
+  it("ignores a worktree whose tasks are no longer on the board", () => {
+    expect(worktreeGroups([card("main", "done", null)], [open("/a", "deleted")])).toEqual([]);
   });
 });

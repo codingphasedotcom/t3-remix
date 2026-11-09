@@ -16,7 +16,7 @@ import type {
   StorageCleanupReportEntry,
   ThreadId,
 } from "@t3tools/contracts";
-import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
+import { resolveProjectSettings, resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -35,6 +35,7 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { parse as parseYaml } from "yaml";
 
+import * as BoardStore from "./board/BoardStore.ts";
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -294,6 +295,7 @@ export class StorageCleanup extends Context.Service<
 
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
+  const board = yield* BoardStore.BoardStore;
   const settingsService = yield* Settings.ServerSettingsService;
   const projectStore = yield* ProjectStore.ProjectStoreV2;
   const engine = yield* Orchestrator.OrchestratorV2;
@@ -798,7 +800,11 @@ const make = Effect.gen(function* () {
     now: number,
     entries: StorageCleanupReportEntry[],
   ) {
-    if (!anyWorktreePolicy(serverSettings, worktreeCleanupEnabled))
+    const finishedBoardThreads = yield* board.listFinishedTreeThreadIds();
+    if (
+      finishedBoardThreads.size === 0 &&
+      !anyWorktreePolicy(serverSettings, worktreeCleanupEnabled)
+    )
       return { waiting: false, kept: [] };
     let waiting = false;
     const kept: string[] = [];
@@ -856,11 +862,21 @@ const make = Effect.gen(function* () {
     ];
     for (const thread of candidates) {
       const settings = resolveWorktreeCleanup(serverSettings, thread.projectId);
-      if (!worktreeCleanupEnabled(settings)) continue;
       const worktreePath = path.resolve(thread.worktreePath!);
       const group = groups.get(worktreePath) ?? [];
-      const activityAt = Math.max(...group.map(storageCleanupActivityAt));
       const deleted = "workspaceRoot" in thread;
+      // Parent and subtask threads, and the subagents they spawned, jointly own a board worktree.
+      const boardTaskFinished =
+        !deleted &&
+        group.every(
+          (member) =>
+            finishedBoardThreads.has(member.id) ||
+            finishedBoardThreads.has(member.lineage.rootThreadId),
+        ) &&
+        resolveProjectSettings(serverSettings, thread.projectId).settings.worktreeCleanup?.mode !==
+          "off";
+      if (!boardTaskFinished && !worktreeCleanupEnabled(settings)) continue;
+      const activityAt = Math.max(...group.map(storageCleanupActivityAt));
       const settlementChain = deleted
         ? []
         : worktreeSettlementChain(thread, threadsById, now, serverSettings);
@@ -892,7 +908,7 @@ const make = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         if (!(yield* fs.exists(worktreePath))) return;
         if (deleted && !settings.worktreeOnDelete) return keep("no rules apply");
-        if (members.length > 1 && worktreeOwner(members) === undefined)
+        if (!boardTaskFinished && members.length > 1 && worktreeOwner(members) === undefined)
           return keep(`shared by ${members.length} threads`);
         if (project === undefined) return keep("project is unavailable");
         if (
@@ -941,12 +957,14 @@ const make = Effect.gen(function* () {
           settledFor !== null &&
           settings.worktreeSettledAfterDays !== null &&
           settledFor >= settings.worktreeSettledAfterDays * DAY_MS;
-        let eligible = deleted || old || settled;
+        let eligible = deleted || old || settled || boardTaskFinished;
         let removalReason = deleted
           ? "thread was deleted"
-          : old
-            ? `inactive for ${Math.floor((now - activityAt) / DAY_MS)} days`
-            : `settled for ${settledDays} days`;
+          : boardTaskFinished
+            ? "board task is finished"
+            : old
+              ? `inactive for ${Math.floor((now - activityAt) / DAY_MS)} days`
+              : `settled for ${settledDays} days`;
         if (!eligible && (settings.worktreeUnchanged || settings.worktreeOnMerge)) {
           const repositoryCwd = path.resolve(project.workspaceRoot);
           const remotes = yield* git.execute({
@@ -1083,7 +1101,9 @@ const make = Effect.gen(function* () {
             projections.getThreadShell(entry.threadId),
           );
           const latestGroup = latestShells.filter((shell) => shell !== null);
-          const latestOwner = worktreeOwner(deleted ? [thread, ...latestGroup] : latestGroup);
+          const latestOwner = boardTaskFinished
+            ? thread
+            : worktreeOwner(deleted ? [thread, ...latestGroup] : latestGroup);
           if (
             latestGroup.length !== group.length ||
             latestOwner?.id !== thread.id ||

@@ -87,6 +87,7 @@ import { RoutinesView } from "./RoutinesView";
 import { TimelineView } from "./TimelineView";
 import { SkillsView } from "./SkillsView";
 import { TokenLimitField } from "./TokenLimitField";
+import { WorktreesView } from "./WorktreesView";
 import { agentById, limitProgress } from "./board.logic";
 import {
   REMIX_CARD,
@@ -100,7 +101,15 @@ import {
   type RemixTone,
 } from "./RemixSurface";
 
-export type BoardTab = "board" | "inbox" | "dashboard" | "timeline" | "org" | "skills" | "routines";
+export type BoardTab =
+  | "board"
+  | "inbox"
+  | "dashboard"
+  | "timeline"
+  | "worktrees"
+  | "org"
+  | "skills"
+  | "routines";
 
 export interface BoardPageProps {
   readonly environmentId?: EnvironmentId | undefined;
@@ -403,7 +412,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
               onClick={() => go({ company: company.id, tab: "inbox" })}
             />
             <RemixTab
-              active={tab === "dashboard"}
+              active={tab === "dashboard" || tab === "worktrees"}
               icon={<LayoutDashboardIcon />}
               label="Dashboard"
               onClick={() => go({ company: company.id, tab: "dashboard" })}
@@ -487,12 +496,20 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
           onOpenBoard={() => go({ company: company.id, tab: "board" })}
           onOpenOrgChart={() => go({ company: company.id, tab: "org" })}
           onNewTask={() => setNewCardOpen(true)}
+          onOpenWorktrees={() => go({ company: company.id, tab: "worktrees" })}
         />
       ) : tab === "timeline" ? (
         <TimelineView
           environmentId={environmentId}
           snapshot={snapshot}
           onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
+        />
+      ) : tab === "worktrees" ? (
+        <WorktreesView
+          environmentId={environmentId}
+          snapshot={snapshot}
+          onOpenCard={(cardId) => go({ company: company.id, card: cardId, tab })}
+          onBack={() => go({ company: company.id, tab: "dashboard" })}
         />
       ) : tab === "org" ? (
         <OrgChartView

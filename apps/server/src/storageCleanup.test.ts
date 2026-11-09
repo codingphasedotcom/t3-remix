@@ -22,6 +22,7 @@ import {
   type TerminalSummary,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as BoardStore from "./board/BoardStore.ts";
 import * as ServerConfig from "./config.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -340,6 +341,7 @@ const cleanupFixture = (
       storageCleanup,
     };
     let threads = [shell({ branch: "feature", worktreePath: worktree })];
+    let finishedBoardThreads: ReadonlySet<ThreadId> = new Set();
     let deletedThreads: OrchestrationV2ThreadShell[] = [];
     let storedWorktreePaths: string[] = [worktree];
     let projectRoots = [repo];
@@ -355,6 +357,9 @@ const cleanupFixture = (
     let events: Stream.Stream<OrchestrationV2DomainEvent> = Stream.empty;
     const activated = yield* Deferred.make<void>();
     const context = yield* Layer.build(StorageCleanup.layer).pipe(
+      Effect.provideService(BoardStore.BoardStore, {
+        listFinishedTreeThreadIds: () => Effect.sync(() => finishedBoardThreads),
+      } as unknown as BoardStore.BoardStore["Service"]),
       Effect.provideService(GitVcsDriver.GitVcsDriver, {
         ...git,
         execute: (input) =>
@@ -516,6 +521,9 @@ const cleanupFixture = (
       },
       setThreads: (next: typeof threads) => {
         threads = next;
+      },
+      setFinishedBoardThreads: (next: ReadonlyArray<ThreadId>) => {
+        finishedBoardThreads = new Set(next);
       },
       setOnLiveCheck: (hook: Effect.Effect<void>) => {
         onLiveCheck = hook;
@@ -1136,6 +1144,115 @@ describe("subagent worktree ownership", () => {
         expect(yield* fixture.fs.exists(fixture.worktree)).toBe(true);
       }),
     ),
+  );
+});
+
+describe("finished board task worktrees", () => {
+  const mainThread = ThreadId.make("main-task");
+  const subtaskThread = ThreadId.make("subtask");
+  const unrelatedThread = ThreadId.make("unrelated");
+  const taskThread = (
+    id: ThreadId,
+    worktreePath: string,
+    overrides: Partial<OrchestrationV2ThreadShell> = {},
+  ) =>
+    shell({
+      id,
+      branch: "feature",
+      worktreePath,
+      status: "completed",
+      lineage: { rootThreadId: id, parentThreadId: null, relationshipToParent: null },
+      ...overrides,
+    });
+  const noRules = {
+    ...DEFAULT_SERVER_SETTINGS.storageCleanup,
+    worktreeAfterDays: null,
+    worktreeOnDelete: false,
+  };
+
+  it.effect.each(["its only thread", "main and subtask threads", "a native subagent"] as const)(
+    "removes the worktree with no cleanup rule on, used by %s",
+    (scenario) =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(NOW_MS);
+        const fixture = yield* cleanupFixture(noRules);
+        const main = taskThread(mainThread, fixture.worktree);
+        fixture.setFinishedBoardThreads([mainThread, subtaskThread]);
+        fixture.setThreads(
+          scenario === "its only thread"
+            ? [main]
+            : scenario === "main and subtask threads"
+              ? [main, taskThread(subtaskThread, fixture.worktree)]
+              : [
+                  main,
+                  taskThread(ThreadId.make("child"), fixture.worktree, {
+                    lineage: {
+                      rootThreadId: mainThread,
+                      parentThreadId: mainThread,
+                      relationshipToParent: "subagent",
+                    },
+                  }),
+                ],
+        );
+        const report = yield* fixture.service.runNow;
+        expect(report.entries[0]).toMatchObject({
+          outcome: "removed",
+          reason: "Board task is finished",
+        });
+        expect(yield* fixture.fs.exists(fixture.worktree)).toBe(false);
+        // Keeping the branch is what lets a reopened task's next turn recreate the checkout.
+        expect(
+          (yield* fixture.command(fixture.repo, ["branch", "--list", "feature"])).stdout,
+        ).toContain("feature");
+      }).pipe(Effect.provide(cleanupTestLayer), Effect.scoped),
+  );
+
+  it.effect.each(["unfinished", "shared with another thread", "in a project set to Off"] as const)(
+    "leaves the worktree alone when the task is %s",
+    (scenario) =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(NOW_MS);
+        const fixture = yield* cleanupFixture(noRules);
+        const main = taskThread(mainThread, fixture.worktree);
+        fixture.setThreads(
+          scenario === "shared with another thread"
+            ? [main, taskThread(unrelatedThread, fixture.worktree)]
+            : [main],
+        );
+        fixture.setFinishedBoardThreads(scenario === "unfinished" ? [] : [mainThread]);
+        if (scenario === "in a project set to Off") {
+          fixture.setSettings({
+            projectSettingsOverrides: {
+              [main.projectId]: { worktreeCleanup: { mode: "off" } },
+            },
+          });
+        }
+        const report = yield* fixture.service.runNow;
+        expect(report.counts.removed).toBe(0);
+        expect(yield* fixture.fs.exists(fixture.worktree)).toBe(true);
+      }).pipe(Effect.provide(cleanupTestLayer), Effect.scoped),
+  );
+
+  it.effect.each([
+    ["has uncommitted work", {}, "Has uncommitted changes (1 file)"],
+    [
+      "is still running",
+      { status: "running", activeRunId: RunId.make("run") },
+      "Thread is running or has pending work",
+    ],
+  ] as const)("keeps a finished task's worktree that %s", ([scenario, overrides, reason]) =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW_MS);
+      const fixture = yield* cleanupFixture(noRules);
+      fixture.setThreads([taskThread(mainThread, fixture.worktree, overrides)]);
+      fixture.setFinishedBoardThreads([mainThread]);
+      if (scenario === "has uncommitted work") {
+        yield* fixture.fs.writeFileString(`${fixture.worktree}/draft.txt`, "unsaved\n");
+      }
+      const report = yield* fixture.service.runNow;
+      expect(report.entries[0]).toMatchObject({ outcome: "kept", reason });
+      expect(yield* fixture.fs.exists(fixture.worktree)).toBe(true);
+    }).pipe(Effect.provide(cleanupTestLayer), Effect.scoped),
   );
 });
 

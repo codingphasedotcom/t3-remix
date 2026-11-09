@@ -649,6 +649,23 @@ const make = Effect.gen(function* () {
     return { view: "git", since, spans: [], events: [], git } satisfies BoardTimeline;
   });
 
+  const openWorktrees = Effect.fn("BoardService.openWorktrees")(function* (
+    companyId: BoardCompanyId,
+  ) {
+    const found = yield* Effect.forEach(
+      Map.groupBy(yield* store.listTaskWorktrees(companyId), (row) => row.worktreePath),
+      ([worktreePath, owners]) =>
+        fileSystem.exists(worktreePath).pipe(
+          Effect.orElseSucceed(() => true),
+          Effect.map((exists) =>
+            exists ? [{ worktreePath, taskIds: owners.map((owner) => owner.taskId) }] : [],
+          ),
+        ),
+      { concurrency: 16 },
+    );
+    return found.flat();
+  });
+
   // A running agent's tokens land on the dashboard with the board change that ends its run.
   const view = Effect.fn("BoardService.view")(function* (input: BoardSubscribeInput) {
     const board = yield* snapshot(input.companyId);
@@ -666,6 +683,9 @@ const make = Effect.gen(function* () {
       ...(input.timeline === undefined || board.company === null
         ? {}
         : { timeline: yield* timeline(board.company, input.timeline) }),
+      ...(input.worktrees === true && board.company !== null
+        ? { worktrees: yield* openWorktrees(board.company.id) }
+        : {}),
     } satisfies BoardSnapshot;
   });
 
@@ -674,17 +694,21 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         // Subscribe before the first snapshot so a change in between is not lost.
         const subscription = yield* PubSub.subscribe(changes);
-        const snapshots = Stream.concat(
-          Stream.fromEffect(view(input)),
-          Stream.fromSubscription(subscription).pipe(
-            Stream.filter(
-              (changed) => input.inbox === true || changed === null || changed === input.companyId,
-            ),
-            Stream.mapEffect(() => view(input)),
+        const boardChanges = Stream.fromSubscription(subscription).pipe(
+          Stream.filter(
+            (changed) => input.inbox === true || changed === null || changed === input.companyId,
           ),
         );
+        const snapshots = Stream.concat(
+          Stream.fromEffect(view(input)),
+          // Storage cleanup removes worktrees without a board change, so an open count re-checks.
+          (input.worktrees === true
+            ? Stream.merge(boardChanges, Stream.tick("1 minute"))
+            : boardChanges
+          ).pipe(Stream.mapEffect(() => view(input))),
+        );
         // The inbox follows every company, and most changes leave it as it was.
-        return input.inbox === true
+        return input.inbox === true || input.worktrees === true
           ? snapshots.pipe(
               Stream.changesWith((left, right) => JSON.stringify(left) === JSON.stringify(right)),
             )

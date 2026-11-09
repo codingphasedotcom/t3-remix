@@ -18,7 +18,7 @@ import {
   type OrchestrationV2ThreadShell,
   type Project,
   type ServerProvider,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -154,7 +154,9 @@ const makeHarness = Effect.gen(function* () {
         } as GitVcsDriver.ExecuteGitResult;
       }),
   });
+  const worktreeFolders = new Set<string>();
   const fileSystem = FileSystem.layerNoop({
+    exists: (path) => Effect.sync(() => worktreeFolders.has(path)),
     realPath: (path) => Effect.succeed(path),
     readFileString: (path) =>
       path === INSTALLED_SKILL
@@ -214,9 +216,9 @@ const makeHarness = Effect.gen(function* () {
     ]),
   });
   const layer = BoardService.layer.pipe(
+    Layer.provideMerge(BoardStore.layer.pipe(Layer.provide(NodeCrypto.layer))),
     Layer.provide(
       Layer.mergeAll(
-        BoardStore.layer.pipe(Layer.provide(NodeCrypto.layer)),
         threads,
         launcher,
         folders,
@@ -240,6 +242,7 @@ const makeHarness = Effect.gen(function* () {
     gitScript,
     headCommit,
     dispatched,
+    worktreeFolders,
     layer,
   };
 });
@@ -1581,12 +1584,32 @@ it.effect("archiving a finished task hides it with its subtasks and settles its 
         { companyId: company.id, title: "Add a test", parentTaskId: task!.id, status: "backlog" },
         user,
       );
+      const store = yield* BoardStore.BoardStore;
+      const subtaskThread = ThreadId.make("subtask-thread");
+      yield* store.endRun(
+        yield* store.insertRun({
+          taskId: subtask.id,
+          agentId: engineer.id,
+          threadId: subtaskThread,
+          kind: "work",
+        }),
+        "completed",
+      );
+      const finishedThreads = store
+        .listFinishedTreeThreadIds()
+        .pipe(Effect.map((ids) => [...ids].toSorted()));
+      const bothThreads = [threadId, subtaskThread].toSorted();
       const archive = (id: BoardTaskId, archived: boolean) =>
         board.runCommand({ type: "task.archive", id, archived }, user);
       const archivedAt = Effect.fn("test.archivedAt")(function* (id: BoardTaskId) {
         const { tasks } = yield* board.snapshot(company.id);
         return tasks.find((candidate) => candidate.id === id)?.archivedAt ?? null;
       });
+
+      // A finished subtask's worktree waits for its main task.
+      yield* board.updateTask({ id: subtask.id, status: "done" }, user);
+      assert.deepEqual(yield* finishedThreads, []);
+      yield* board.updateTask({ id: subtask.id, status: "backlog" }, user);
 
       const unfinished = yield* archive(task!.id, true).pipe(Effect.flip);
       assert.include(unfinished.message, "Only finished tasks");
@@ -1595,17 +1618,25 @@ it.effect("archiving a finished task hides it with its subtasks and settles its 
       yield* archive(subtask.id, true);
       assert.isNotNull(yield* archivedAt(subtask.id));
       assert.isNull(yield* archivedAt(task!.id));
+      // Archiving only the subtask leaves the worktree it shares with its open main task.
+      assert.deepEqual(yield* finishedThreads, []);
       yield* archive(subtask.id, false);
       assert.isNull(yield* archivedAt(subtask.id));
+      yield* board.updateTask({ id: subtask.id, status: "backlog" }, user);
       yield* board.updateTask({ id: task!.id, status: "done" }, user);
+      assert.deepEqual(yield* finishedThreads, []);
+      yield* board.updateTask({ id: subtask.id, status: "done" }, user);
+      assert.deepEqual(yield* finishedThreads, bothThreads);
 
       yield* archive(task!.id, true);
       assert.isNotNull(yield* archivedAt(task!.id));
       assert.isNotNull(yield* archivedAt(subtask.id));
+      assert.deepEqual(yield* finishedThreads, bothThreads);
       const settled = (yield* Ref.get(harness.dispatched)).flatMap((command) =>
         command.type === "thread.settle" ? [command.threadId] : [],
       );
-      assert.deepEqual(settled, [threadId]);
+      // The subtask settled once alone and again with its main task.
+      assert.sameMembers([...new Set(settled)], bothThreads);
 
       // Once the thread settles, it leaves the employee's list.
       yield* sql`
@@ -1633,11 +1664,82 @@ it.effect("archiving a finished task hides it with its subtasks and settles its 
       yield* archive(task!.id, false);
       assert.isNull(yield* archivedAt(task!.id));
       assert.isNull(yield* archivedAt(subtask.id));
+      yield* board.updateTask({ id: subtask.id, status: "backlog" }, user);
+      assert.deepEqual(yield* finishedThreads, []);
+      yield* board.updateTask({ id: subtask.id, status: "done" }, user);
+      assert.deepEqual(yield* finishedThreads, bothThreads);
 
       // Moving an archived task out of Done brings it back to the board.
       yield* archive(task!.id, true);
       yield* board.updateTask({ id: task!.id, status: "review" }, user);
       assert.isNull(yield* archivedAt(task!.id));
+      assert.deepEqual(yield* finishedThreads, []);
+    }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("lists only worktrees still on disk and notices when cleanup removes one", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const board = yield* BoardService.BoardService;
+      const store = yield* BoardStore.BoardStore;
+      const sql = yield* SqlClient.SqlClient;
+      const { company, engineer } = yield* createCompany(board);
+      const main = yield* board.createTask(
+        { companyId: company.id, title: "Ship login", status: "backlog" },
+        user,
+      );
+      const subtask = yield* board.createTask(
+        { companyId: company.id, title: "Add a test", parentTaskId: main.id, status: "backlog" },
+        user,
+      );
+      const recordRun = Effect.fn("test.recordRun")(function* (
+        taskId: BoardTaskId,
+        id: string,
+        worktreePath: string,
+      ) {
+        const threadId = ThreadId.make(id);
+        yield* store.endRun(
+          yield* store.insertRun({ taskId, agentId: engineer.id, threadId, kind: "work" }),
+          "completed",
+        );
+        yield* sql`
+          INSERT INTO orchestration_v2_projection_threads (
+            thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+            created_at, updated_at, payload_json
+          )
+          VALUES (
+            ${threadId}, ${projectId}, 'Work', 'claude', 'full-access', 'default',
+            ${main.createdAt}, ${main.createdAt}, ${JSON.stringify({ worktreePath })}
+          )
+        `;
+      });
+      yield* recordRun(main.id, "main-thread", "/worktrees/main");
+      // Two threads in one folder are one worktree that both tasks used.
+      yield* recordRun(subtask.id, "shared-thread", "/worktrees/main");
+      yield* recordRun(subtask.id, "own-thread", "/worktrees/subtask");
+      yield* recordRun(subtask.id, "cleaned-thread", "/worktrees/cleaned");
+      harness.worktreeFolders.add("/worktrees/main");
+      harness.worktreeFolders.add("/worktrees/subtask");
+
+      const snapshots = yield* Queue.unbounded<BoardSnapshot>();
+      yield* board.subscribe({ companyId: company.id, worktrees: true }).pipe(
+        Stream.runForEach((snapshot) => Queue.offer(snapshots, snapshot)),
+        Effect.forkChild,
+      );
+      const first = yield* Queue.take(snapshots);
+      assert.deepEqual(first.worktrees, [
+        { worktreePath: "/worktrees/main", taskIds: [main.id, subtask.id].toSorted() },
+        { worktreePath: "/worktrees/subtask", taskIds: [subtask.id] },
+      ]);
+
+      harness.worktreeFolders.delete("/worktrees/main");
+      yield* TestClock.adjust("1 minute");
+      const afterCleanup = yield* Queue.take(snapshots);
+      assert.deepEqual(afterCleanup.worktrees, [
+        { worktreePath: "/worktrees/subtask", taskIds: [subtask.id] },
+      ]);
     }).pipe(Effect.provide(harness.layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

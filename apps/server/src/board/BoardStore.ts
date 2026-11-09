@@ -212,6 +212,17 @@ export class BoardStore extends Context.Service<
     ) => StoreEffect<void>;
     readonly deleteTask: (task: BoardTask) => StoreEffect<void>;
     readonly countOpenSubtasks: (parentId: BoardTaskId) => StoreEffect<number>;
+    /**
+     * Every thread that ran a task in a finished tree: its top-level task is archived, or the
+     * whole tree is done. A finished subtask counts only once its top-level task does.
+     */
+    readonly listFinishedTreeThreadIds: () => StoreEffect<ReadonlySet<ThreadId>>;
+    /** Each worktree folder a task's threads recorded, which may no longer be on disk. */
+    readonly listTaskWorktrees: (
+      companyId: BoardCompanyId,
+    ) => StoreEffect<
+      ReadonlyArray<{ readonly worktreePath: string; readonly taskId: BoardTaskId }>
+    >;
     /** Cards whose title, description, or comments mention `query`, newest first. */
     readonly searchTasks: (
       companyId: BoardCompanyId,
@@ -1493,6 +1504,51 @@ const make = Effect.gen(function* () {
     return rows.map((row) => ThreadId.make(row.thread_id));
   }, failWith("Could not list the task's threads."));
 
+  const listFinishedTreeThreadIds: BoardStore["Service"]["listFinishedTreeThreadIds"] = () =>
+    sql<{ readonly thread_id: string }>`
+      WITH RECURSIVE tree(task_id, root_id) AS (
+        SELECT task_id, task_id FROM board_tasks WHERE parent_task_id IS NULL
+        UNION
+        SELECT child.task_id, tree.root_id
+        FROM board_tasks child JOIN tree ON child.parent_task_id = tree.task_id
+      )
+      SELECT DISTINCT run.thread_id
+      FROM board_runs run
+      JOIN tree ON tree.task_id = run.task_id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM tree member
+        JOIN board_tasks task ON task.task_id = member.task_id
+        JOIN board_tasks root ON root.task_id = member.root_id
+        WHERE member.root_id = tree.root_id
+          AND task.status != 'done'
+          AND root.archived_at IS NULL
+      )
+    `.pipe(
+      Effect.map((rows) => new Set(rows.map((row) => ThreadId.make(row.thread_id)))),
+      failWith("Could not list the threads of finished tasks."),
+    );
+
+  const listTaskWorktrees: BoardStore["Service"]["listTaskWorktrees"] = (companyId) =>
+    sql<{ readonly worktree_path: string; readonly task_id: string }>`
+      SELECT DISTINCT
+        json_extract(th.payload_json, '$.worktreePath') AS worktree_path, r.task_id
+      FROM board_runs r
+      JOIN board_tasks t ON t.task_id = r.task_id
+      JOIN orchestration_v2_projection_threads th ON th.thread_id = r.thread_id
+      WHERE t.company_id = ${companyId}
+        AND th.deleted_at IS NULL
+        AND json_extract(th.payload_json, '$.worktreePath') IS NOT NULL
+      ORDER BY worktree_path, r.task_id
+    `.pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          worktreePath: row.worktree_path,
+          taskId: BoardTaskId.make(row.task_id),
+        })),
+      ),
+      failWith("Could not list the company's worktrees."),
+    );
+
   const setTaskThread: BoardStore["Service"]["setTaskThread"] = Effect.fn(
     "BoardStore.setTaskThread",
   )(function* (id, threadId, workspace) {
@@ -2123,6 +2179,8 @@ const make = Effect.gen(function* () {
     updateTask,
     setTasksArchived,
     listTaskThreadIds,
+    listFinishedTreeThreadIds,
+    listTaskWorktrees,
     setTaskThread,
     deleteTask,
     countOpenSubtasks,

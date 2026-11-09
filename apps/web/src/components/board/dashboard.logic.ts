@@ -3,6 +3,7 @@ import type {
   BoardAgentThread,
   BoardDashboard,
   BoardDepartmentId,
+  BoardOpenWorktree,
   BoardRunStats,
   BoardSnapshot,
   BoardTask,
@@ -202,6 +203,69 @@ export function formatSpan(ms: number): string {
   if (hours < 24) return minutes % 60 === 0 ? `${hours}h` : `${hours}h ${minutes % 60}m`;
   const days = Math.floor(hours / 24);
   return hours % 24 === 0 ? `${days}d` : `${days}d ${hours % 24}h`;
+}
+
+export interface WorktreeTaskRow {
+  readonly task: BoardTask;
+  readonly depth: number;
+  readonly worktrees: number;
+}
+
+export interface WorktreeGroup {
+  /** The main task first, then its subtasks in board order. */
+  readonly rows: ReadonlyArray<WorktreeTaskRow>;
+  readonly worktrees: number;
+  /** How many tasks must reach Done before cleanup can take these worktrees. */
+  readonly toFinish: number;
+}
+
+/**
+ * Each main task holding a worktree, with its whole tree: a subtask with no worktree of its own
+ * still keeps the rest open. Closest to being cleaned up first, finished groups last.
+ */
+export function worktreeGroups(
+  tasks: ReadonlyArray<BoardTask>,
+  worktrees: ReadonlyArray<BoardOpenWorktree>,
+): ReadonlyArray<WorktreeGroup> {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const children = new Map<BoardTask["parentTaskId"], Array<BoardTask>>();
+  for (const task of tasks) {
+    children.set(task.parentTaskId, [...(children.get(task.parentTaskId) ?? []), task]);
+  }
+  const mainTaskOf = (task: BoardTask): BoardTask => {
+    const parent = task.parentTaskId === null ? undefined : byId.get(task.parentTaskId);
+    return parent === undefined ? task : mainTaskOf(parent);
+  };
+  const perTask = new Map<BoardTask["id"], number>();
+  const perMainTask = new Map<BoardTask["id"], number>();
+  const bump = (counts: Map<BoardTask["id"], number>, id: BoardTask["id"]) =>
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  for (const worktree of worktrees) {
+    const owners = worktree.taskIds.flatMap((id) => byId.get(id) ?? []);
+    for (const owner of owners) bump(perTask, owner.id);
+    for (const mainId of new Set(owners.map((owner) => mainTaskOf(owner).id))) {
+      bump(perMainTask, mainId);
+    }
+  }
+  const rowsUnder = (task: BoardTask, depth: number): ReadonlyArray<WorktreeTaskRow> => [
+    { task, depth, worktrees: perTask.get(task.id) ?? 0 },
+    ...(children.get(task.id) ?? []).flatMap((child) => rowsUnder(child, depth + 1)),
+  ];
+  return [...perMainTask]
+    .flatMap(([mainId, count]) => {
+      const main = byId.get(mainId);
+      if (main === undefined) return [];
+      const rows = rowsUnder(main, 0);
+      const toFinish =
+        main.archivedAt !== null ? 0 : rows.filter((row) => row.task.status !== "done").length;
+      return [{ rows, worktrees: count, toFinish }];
+    })
+    .toSorted(
+      (left, right) =>
+        Number(left.toFinish === 0) - Number(right.toFinish === 0) ||
+        left.toFinish - right.toFinish ||
+        right.worktrees - left.worktrees,
+    );
 }
 
 /** Minutes to add to UTC for this browser's current local time. */

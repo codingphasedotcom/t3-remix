@@ -17,6 +17,7 @@ const BOARD_TABS: ReadonlyArray<BoardTab> = [
   "inbox",
   "dashboard",
   "timeline",
+  "worktrees",
   "org",
   "skills",
   "routines",

@@ -204,7 +204,8 @@ are, and cleanup covers both the default folder and the custom one.
 
 Open **Settings → Worktrees → Cleanup** to enable automatic cleanup on one machine or all connected
 environments. Policies are off by default and run on the server at startup, when changed, and
-hourly. Offline machines keep their existing policies.
+hourly. Offline machines keep their existing policies. Worktrees of finished company tasks are
+removed by the same cleanup even with these policies off, unless the project is set to **Off**.
 
 Select a project to set **Automatic worktree cleanup** to **Inherit**, **Off**, or **Custom**.
 Inherit follows each machine's rules; Off keeps that project's worktrees until you remove them

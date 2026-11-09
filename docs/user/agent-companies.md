@@ -237,6 +237,9 @@ hire requests, failed runs), a breakdown by model and by department, and a row f
 employee. A failed run opens its thread, and leaves the list once that thread runs again, from the
 board or from the thread itself, or once it settles.
 
+**Open worktrees** counts the company's task worktrees still on disk. Select it to see each main
+task and its subtasks, and which ones have to reach Done before those worktrees can be removed.
+
 Tokens are counted from each employee's board threads and credited to the model that thread ran.
 A running agent's tokens appear when its run ends. Days start at midnight in your time zone.
 
@@ -261,4 +264,7 @@ The board's settings menu controls:
 - **Auto-run agents**: turn off to start tasks only with **Start agent** on a task.
 - **Worktree per task**: each top-level task gets its own worktree on a `board/<task>` branch
   from the project's current `HEAD`. Turn off to let agents share the project checkout.
+  Once a task and all its subtasks are done, or the task is archived, the next cleanup removes
+  their worktrees. Branches stay, worktrees with uncommitted work are kept, and reopening the task
+  recreates its checkout.
 - **Agents at once**: how many tasks can run at the same time. Ready tasks wait for a slot.

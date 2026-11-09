@@ -25,6 +25,7 @@ import {
   ArrowUpRightIcon,
   BotIcon,
   CircleCheckIcon,
+  FolderGit2Icon,
   GaugeIcon,
   InboxIcon,
   KanbanSquareIcon,
@@ -73,6 +74,7 @@ import {
   recentThreads,
   successRate,
   totalTokens,
+  worktreeGroups,
   type ActivityMetric,
   type AttentionItems,
   type EmployeeActivity,
@@ -112,6 +114,7 @@ export function DashboardView(props: {
   readonly onOpenBoard: () => void;
   readonly onOpenOrgChart: () => void;
   readonly onNewTask: () => void;
+  readonly onOpenWorktrees: () => void;
 }) {
   // Fixed for the page's life so the live query keeps one subscription.
   const [utcOffsetMinutes] = useState(browserUtcOffsetMinutes);
@@ -122,7 +125,7 @@ export function DashboardView(props: {
       ? null
       : boardLive({
           environmentId: props.environmentId,
-          input: { companyId, dashboard: { utcOffsetMinutes } },
+          input: { companyId, dashboard: { utcOffsetMinutes }, worktrees: true },
         }),
   );
   // Until the board with its dashboard arrives, the page's own board fills in.
@@ -151,6 +154,11 @@ export function DashboardView(props: {
     return index === -1 ? null : (DEPARTMENT_TONES[index % DEPARTMENT_TONES.length] ?? null);
   };
   const loading = (value: ReactNode) => (dashboard === null ? null : value);
+  const openWorktrees = query.data?.worktrees ?? [];
+  const tasksToFinish = worktreeGroups(snapshot.tasks, openWorktrees).reduce(
+    (total, group) => total + group.toFinish,
+    0,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-(--workspace-gutter-start) pt-1 pb-14">
@@ -209,6 +217,22 @@ export function DashboardView(props: {
               detail={
                 totals === null ? "" : `${totals.failed} failed of ${formatCount(totals.runs)}`
               }
+            />
+            <StatTile
+              className="col-span-2"
+              label="Open worktrees"
+              icon={FolderGit2Icon}
+              tone="purple"
+              value={loading(formatCount(openWorktrees.length))}
+              detail={
+                openWorktrees.length === 0
+                  ? "None on disk"
+                  : tasksToFinish === 0
+                    ? "Ready for the next cleanup"
+                    : `${formatCount(tasksToFinish)} ${tasksToFinish === 1 ? "task" : "tasks"} to finish`
+              }
+              linkLabel="See open worktrees"
+              onOpen={props.onOpenWorktrees}
             />
           </div>
           <TokenBudget snapshot={snapshot} dashboard={dashboard} />
@@ -435,12 +459,17 @@ function StatTile(props: {
   readonly detail: string;
   readonly linkLabel?: string;
   readonly onOpen?: () => void;
+  readonly className?: string;
 }) {
   const Icon = props.icon;
   return (
     <div
       data-remix-tone={props.tone}
-      className={cn(REMIX_CARD, "gap-2 rounded-2xl p-3 shadow-(--remix-card-lift)")}
+      className={cn(
+        REMIX_CARD,
+        "gap-2 rounded-2xl p-3 shadow-(--remix-card-lift)",
+        props.className,
+      )}
     >
       <span className="truncate text-xs font-semibold text-(--remix-text-muted)">
         {props.label}

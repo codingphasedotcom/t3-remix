@@ -565,6 +565,13 @@ export const BoardTimeline = Schema.Struct({
 });
 export type BoardTimeline = typeof BoardTimeline.Type;
 
+/** A worktree still on disk, with every task whose agents ran in it. */
+export const BoardOpenWorktree = Schema.Struct({
+  worktreePath: Schema.String,
+  taskIds: Schema.Array(BoardTaskId),
+});
+export type BoardOpenWorktree = typeof BoardOpenWorktree.Type;
+
 /** Every company's summary, plus the full board of the one being viewed. */
 export const BoardSnapshot = Schema.Struct({
   companies: Schema.Array(BoardCompanySummary),
@@ -585,6 +592,9 @@ export const BoardSnapshot = Schema.Struct({
   }),
   timeline: Schema.optional(BoardTimeline).annotate({
     description: "Present only for a subscription that asked for it.",
+  }),
+  worktrees: Schema.optional(Schema.Array(BoardOpenWorktree)).annotate({
+    description: "The company's worktrees still on disk. Only when asked for.",
   }),
 });
 export type BoardSnapshot = typeof BoardSnapshot.Type;
@@ -648,6 +658,10 @@ export const BoardSubscribeInput = Schema.Struct({
   ).annotate({
     description:
       "Also send the company's timeline: each task's span, recent task events, or the git history of one of its projects (its home project by default).",
+  }),
+  worktrees: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Also send the company's open worktrees, re-checking the disk while subscribed. Snapshots that change nothing are not sent.",
   }),
 });
 export type BoardSubscribeInput = typeof BoardSubscribeInput.Type;
