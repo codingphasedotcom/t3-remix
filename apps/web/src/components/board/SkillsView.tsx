@@ -4,7 +4,7 @@ import {
   PackageIcon,
   PencilIcon,
   PlusIcon,
-  SparklesIcon,
+  BookOpenIcon,
   Trash2Icon,
 } from "lucide-react";
 import { useState } from "react";
@@ -89,7 +89,7 @@ export function SkillsView(props: {
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pt-1 pb-14">
         <div className={cn(REMIX_CARD, "p-3 shadow-(--remix-card-lift)")}>
           <RemixHeading
-            icon={<SparklesIcon />}
+            icon={<BookOpenIcon />}
             tone="purple"
             title={<RemixTitle>Skill library</RemixTitle>}
             description="A skill is a reusable playbook. Agents get the instructions of every skill you give them on each task they work."
@@ -132,7 +132,7 @@ export function SkillsView(props: {
                 )}
               >
                 <RemixIconTile tone="purple">
-                  <SparklesIcon />
+                  <BookOpenIcon />
                 </RemixIconTile>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex min-w-0 items-center gap-2">
@@ -364,7 +364,7 @@ function SkillForm(props: {
     <>
       <DialogHeader>
         <RemixHeading
-          icon={<SparklesIcon />}
+          icon={<BookOpenIcon />}
           tone="purple"
           title={<DialogTitle>{draft.id === null ? "New skill" : "Edit skill"}</DialogTitle>}
           description={

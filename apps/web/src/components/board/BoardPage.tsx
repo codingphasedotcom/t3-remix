@@ -28,7 +28,7 @@ import {
   RepeatIcon,
   ServerOffIcon,
   SettingsIcon,
-  SparklesIcon,
+  BookOpenIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UploadIcon,
@@ -438,7 +438,7 @@ function CompanyWorkspace(props: BoardPageProps & { readonly environmentId: Envi
             />
             <RemixTab
               active={tab === "skills"}
-              icon={<SparklesIcon />}
+              icon={<BookOpenIcon />}
               label="Skills"
               onClick={() => go({ company: company.id, tab: "skills" })}
             />
